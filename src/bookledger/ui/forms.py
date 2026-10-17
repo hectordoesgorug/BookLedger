@@ -283,8 +283,11 @@ class BookForm(tk.Toplevel):
         for key in ("title", "author", "isbn", "genre", "publisher", "publication_year", "edition", "page_count", "book_details", "format", "condition", "location"):
             if key in self._widgets:
                 self._set(key, row.get(key))
-        price_minor = row.get("actual_sale_price_minor") if row.get("status") == "Sold" else row.get("price_minor")
+        price_minor = row.get("price_minor")
         self._set("price", f"{price_minor / 100:.2f}" if price_minor is not None else "")
+        if row.get("status") == "Sold":
+            self._widgets["price"].configure(state="disabled")
+            self._errors["price"].configure(text="Price is locked while Sold. Change the status before editing Price.", foreground="#596579")
         if "srp" in self._widgets:
             self._set("srp", f"{row['srp_minor'] / 100:.2f}" if row.get("srp_minor") is not None else "")
         if row.get("photo_path"):

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sqlite3
+from datetime import date as real_date
 
 import pytest
 from PIL import Image
@@ -8,6 +9,7 @@ from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_LOCATION
 from bookledger.db.database import Database
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService, ValidationError
+from bookledger.services import catalog as catalog_module
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.photos import PhotoService
 
@@ -72,6 +74,14 @@ def test_create_copy_assigns_copy_id_and_default_location(setup):
     assert row["display_price_minor"] == 50000
 
 
+def test_missing_optional_metadata_is_stored_as_null(setup):
+    _, _, db, service, payload, _ = setup
+    copy_id = service.create_copy({**payload, "book_details": "", "publisher": "", "publication_year": "", "edition": "", "page_count": "", "srp": ""})
+    with db.connect() as conn:
+        row = conn.execute("SELECT book_details,publisher,publication_year,edition,page_count,srp_minor FROM book_records").fetchone()
+    assert tuple(row) == (None, None, None, None, None, None)
+
+
 def test_copy_filters_and_dashboard_counts_use_physical_and_record_levels(setup):
     _, _, _, service, payload, _ = setup
     service.add_location("Shelf A")
@@ -84,13 +94,22 @@ def test_copy_filters_and_dashboard_counts_use_physical_and_record_levels(setup)
     filtered = service.list_copies(genre="Science", condition="Good", location="Shelf A", status="Available")
     assert [row["copy_id"] for row in filtered] == [first]
     assert service.list_copies(location="Shelf B")[0]["condition"] == "Like New"
-    service.change_status(first, "Sold", sale_price="425", sale_date="2026-10-17")
+    service.change_status(first, "Sold")
 
     counts = service.counts()
     assert counts["Total copies"] == 3
     assert counts["Distinct Titles"] == 2
     assert counts["Bibliographic records"] == 2
     assert counts["Sold"] == 1
+
+
+def test_filtered_copy_queries_always_return_sold_items_last(setup):
+    _, _, _, service, payload, _ = setup
+    sold_id = service.create_copy({**payload, "title": "A Book"})
+    available_id = service.create_copy({**payload, "title": "Z Book", "isbn": "9780140449136"})
+    service.change_status(sold_id, "Sold")
+    rows = service.list_copies(search="Book", genre="Science", condition="Good", location=DEFAULT_LOCATION)
+    assert [row["copy_id"] for row in rows] == [available_id, sold_id]
 
 
 def test_exact_isbn_duplicate_requires_reusing_record(setup):
@@ -118,35 +137,41 @@ def test_no_isbn_title_author_duplicate_search(setup):
     assert len(service.no_isbn_title_author_matches("test book", "TEST AUTHOR")) == 1
 
 
-def test_sale_record_persists_when_status_changes_away_from_sold(setup):
+def test_sale_record_persists_when_status_changes_away_from_sold(setup, monkeypatch):
     _, _, _, service, payload, _ = setup
+    class FrozenDate:
+        @classmethod
+        def today(cls):
+            return real_date(2026, 10, 18)
+    monkeypatch.setattr(catalog_module, "date", FrozenDate)
     copy_id = service.create_copy(payload)
-    service.change_status(copy_id, "Sold", sale_price="480", sale_date="2026-10-17")
+    service.change_status(copy_id, "Sold")
     row = service.get_copy(copy_id)
     assert row["status"] == "Sold"
-    assert row["actual_sale_price_minor"] == 48000
-    assert row["sale_date"] == "2026-10-17"
+    assert row["sale_date"] == "2026-10-18"
+    assert service.list_sales()[0]["price_minor"] == 50000
     service.change_status(copy_id, "Listed")
     row = service.get_copy(copy_id)
     assert row["status"] == "Listed"
-    assert row["actual_sale_price_minor"] == 48000  # retained as historical information
+    assert service.list_sales()[0]["price_minor"] == 50000  # retained as historical information
 
 
 def test_contextual_price_edits_sale_price_without_overwriting_asking_price(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
-    service.change_status(copy_id, "Sold", sale_price="480", sale_date="2026-10-17")
-    service.update_copy(copy_id, {**payload, "price": "510"})
+    service.change_status(copy_id, "Sold")
+    with pytest.raises(ValidationError) as exc:
+        service.update_copy(copy_id, {**payload, "price": "510"})
+    assert "price" in exc.value.errors
     row = service.get_copy(copy_id)
     assert row["price_minor"] == 50000
-    assert row["display_price_minor"] == 51000
-    assert row["actual_sale_price_minor"] == 51000
-    assert row["sale_date"] == "2026-10-17"
+    assert row["display_price_minor"] == 50000
+    assert service.list_sales()[0]["price_minor"] == 50000
     service.change_status(copy_id, "Available")
     service.update_copy(copy_id, {**payload, "price": "525"})
     row = service.get_copy(copy_id)
     assert row["price_minor"] == row["display_price_minor"] == 52500
-    assert row["actual_sale_price_minor"] == 51000
+    assert service.list_sales()[0]["price_minor"] == 50000
 
 
 def test_edit_payload_cannot_change_copy_status_implicitly(setup):
@@ -155,22 +180,14 @@ def test_edit_payload_cannot_change_copy_status_implicitly(setup):
     service.change_status(copy_id, "Listed")
     service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "999", "sale_date": "2026-10-17"})
     assert service.get_copy(copy_id)["status"] == "Listed"
-    assert service.get_copy(copy_id)["actual_sale_price_minor"] is None
+    assert service.list_sales() == []
 
 
-def test_invalid_sold_record_is_rejected(setup):
+def test_non_finite_price_is_rejected_before_sold_status_can_be_set(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
     with pytest.raises(ValidationError) as exc:
-        service.change_status(copy_id, "Sold", sale_price="", sale_date="")
-    assert "price" in exc.value.errors
-
-
-def test_non_finite_actual_sale_price_is_rejected(setup):
-    _, _, _, service, payload, _ = setup
-    copy_id = service.create_copy(payload)
-    with pytest.raises(ValidationError) as exc:
-        service.change_status(copy_id, "Sold", sale_price="inf", sale_date="2026-10-17")
+        service.update_copy(copy_id, {**payload, "price": "inf"})
     assert "price" in exc.value.errors
 
 
@@ -234,17 +251,43 @@ def test_all_four_statuses_are_supported(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
     for status in COPY_STATUSES:
-        if status == "Sold":
-            service.change_status(copy_id, status, sale_price="450", sale_date="2026-10-17")
-        else:
+        if status != "Available":
             service.change_status(copy_id, status)
         assert service.get_copy(copy_id)["status"] == status
+
+
+@pytest.mark.parametrize(
+    ("current", "target"),
+    [(current, target) for current in COPY_STATUSES for target in COPY_STATUSES if current != target],
+)
+def test_every_distinct_status_transition_is_supported(setup, current, target):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    if current != "Available":
+        service.change_status(copy_id, current)
+    service.change_status(copy_id, target)
+    assert service.get_copy(copy_id)["status"] == target
+
+
+@pytest.mark.parametrize("current", ("Not for Sale", "Sold"))
+@pytest.mark.parametrize("target", ("Available", "Listed", "Not for Sale", "Sold"))
+def test_status_confirmation_policy_requires_confirmation_when_leaving_protected_states(current, target):
+    should_confirm = current != target
+    assert CatalogService.status_change_requires_confirmation(current, target) is should_confirm
+
+
+@pytest.mark.parametrize("current", ("Available", "Listed"))
+@pytest.mark.parametrize("target", ("Available", "Listed", "Not for Sale", "Sold"))
+def test_status_confirmation_policy_does_not_prompt_for_available_or_listed(current, target):
+    assert not CatalogService.status_change_requires_confirmation(current, target)
 
 
 def test_location_registry_canonicalizes_and_protects_referenced_values(setup):
     _, _, _, service, payload, _ = setup
     service.add_location("Main Shelf")
     copy_id = service.create_copy({**payload, "location": "main shelf"})
+    shared_book = service.duplicate_by_isbn(payload["isbn"])
+    other_copy_id = service.create_copy({**payload, "location": "Main Shelf"}, existing_book_id=shared_book["id"])
     assert service.get_copy(copy_id)["location"] == "Main Shelf"
     with pytest.raises(ValidationError, match="invalid"):
         service.add_location(" main shelf ")
@@ -252,9 +295,11 @@ def test_location_registry_canonicalizes_and_protects_referenced_values(setup):
         service.delete_location("Main Shelf")
     service.rename_location("Main Shelf", "Front Room")
     assert service.get_copy(copy_id)["location"] == "Front Room"
+    assert service.get_copy(other_copy_id)["location"] == "Front Room"
     with pytest.raises(ValidationError):
         service.delete_location("Front Room")
     service.update_copy(copy_id, {**payload, "location": DEFAULT_LOCATION})
+    service.update_copy(other_copy_id, {**payload, "location": DEFAULT_LOCATION})
     service.delete_location("Front Room")
     assert "Front Room" not in service.list_locations()
 
@@ -279,6 +324,10 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert row["title"] == "Kept"
     assert row["location"] == "Shelf A"
     assert "Shelf A" in service.list_locations()
-    assert row["actual_sale_price_minor"] == 9900
+    assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
+    service.change_status(1, "Sold")
+    assert len(service.list_sales()) == 2
+    assert service.list_sales()[1]["price_minor"] == 9900

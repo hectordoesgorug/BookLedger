@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS book_records (
@@ -58,17 +58,17 @@ CREATE INDEX IF NOT EXISTS ix_copies_price ON copies(price_minor);
 CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     copy_id INTEGER NOT NULL REFERENCES copies(id) ON DELETE RESTRICT,
-    actual_sale_price_minor INTEGER NOT NULL CHECK(actual_sale_price_minor > 0),
+    price_minor INTEGER NOT NULL CHECK(price_minor > 0),
     sale_date TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    UNIQUE(copy_id)
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE INDEX IF NOT EXISTS ix_sales_copy_id ON sales(copy_id, id);
 
 CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 """
 
 
@@ -107,6 +107,22 @@ class Database:
                     if canonical:
                         conn.execute("UPDATE copies SET location=? WHERE trim(location)=? COLLATE NOCASE", (canonical[0], str(row[0]).strip()))
                 conn.execute("PRAGMA user_version = 2")
+                conn.commit()
+                version = 2
+            if version == 2:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("""CREATE TABLE sales_v3 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    copy_id INTEGER NOT NULL REFERENCES copies(id) ON DELETE RESTRICT,
+                    price_minor INTEGER NOT NULL CHECK(price_minor > 0),
+                    sale_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                )""")
+                conn.execute("INSERT INTO sales_v3(id,copy_id,price_minor,sale_date,created_at) SELECT id,copy_id,actual_sale_price_minor,sale_date,created_at FROM sales")
+                conn.execute("DROP TABLE sales")
+                conn.execute("ALTER TABLE sales_v3 RENAME TO sales")
+                conn.execute("CREATE INDEX ix_sales_copy_id ON sales(copy_id, id)")
+                conn.execute("PRAGMA user_version = 3")
                 conn.commit()
             conn.executescript(SCHEMA)
             conn.execute("INSERT INTO app_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))

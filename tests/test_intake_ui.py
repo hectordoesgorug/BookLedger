@@ -190,6 +190,23 @@ def test_edit_form_uses_one_contextual_price_and_keeps_status_out_of_form(form):
     edit_form._close()
 
 
+def test_sold_copy_price_is_locked_in_edit_form(form):
+    widget, root, photo = form
+    payload = {
+        "title": "Sold Book", "author": "Example Author", "isbn": "9780306406157",
+        "genre": "Science", "format": "Paperback", "condition": "Good",
+        "price": "500", "photo_path": str(photo),
+    }
+    copy_id = widget.service.create_copy(payload)
+    widget.service.change_status(copy_id, "Sold")
+    row = widget.service.get_copy(copy_id)
+    widget._close()
+    edit_form = BookForm(root, service=widget.service, photo_service=widget.photo_service, on_saved=lambda: None, existing=row)
+    edit_form.update_idletasks()
+    assert str(edit_form._widgets["price"].cget("state")) == "disabled"
+    edit_form._close()
+
+
 def test_clear_confirms_discard_and_cancel_closes_without_saving(form, monkeypatch):
     widget, _root, _photo = form
     widget._set("title", "Unsaved title")

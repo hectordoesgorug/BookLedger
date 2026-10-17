@@ -21,8 +21,8 @@ System-generated stable Copy ID; required Format, Condition, Photo, and Price; L
 - Available: default status; otherwise unlisted sale inventory.
 - Not for Sale: user intends to keep the copy.
 - Listed: the user has listed the copy on a marketplace.
-- Sold: specifically marked sold; requires actual sale price and sale date.
-New copies are Available. Add/Edit do not expose status controls; Inventory has an explicit Change Status action. Status transitions remain available from that action. Historical sale data is retained if status later changes.
+- Sold: specifically marked sold; marking it records the current Price and the local date.
+New copies are Available. Add/Edit do not expose status controls; Catalog and Inventory context menus provide explicit status actions. The action for the current status is disabled. Leaving Not for Sale or Sold asks for confirmation; leaving Available or Listed does not.
 
 ## Validation
 Required inputs: Title, Author, Genre, Format, Condition, Price > PHP 0, Photo.
@@ -43,14 +43,14 @@ The current intake UI tries Open Library first and Google Books second. Google B
 The Add Book form includes a photo preview and a BookLedger Mobile status area. Connection and ISBN scanning are simulated for UI testing; actual phone pairing, networking, scanning, and photo transfer are outside this build. Scan attempts time out after 10 seconds. The preview exposes a photo handoff point for a future companion integration.
 
 ## Sales
-When explicitly changing status to Sold, record actual sale price (> PHP 0) and sale date. Add/Edit presents one Price field: it edits current asking price for an unsold copy, or transaction price for a sold copy. The stored asking price remains intact when sold. No returns, reservations, or pending-sale status in v1.
+Add/Edit presents one Price field. It is editable for unsold copies and locked while Sold. Marking Sold validates the current Price and records that amount and today's local date without asking for separate sale details. The Sales table is an append-only history of price/date events; moving away from Sold leaves history and revenue intact, and a later transition to Sold appends another event. Status reversal does not void revenue or represent a refund. No returns, reservations, or pending-sale status in v1.
 
-The Sales view lists completed transactions with Copy ID, Title, Author, Date Sold, and the actual transaction Price. It omits current status. Revenue summaries sum retained actual sale prices, including historical sales when a copy's current status later changes.
+The Sales view lists recorded sale events with Copy ID, Title, Author, Date Sold, and Price. It omits current status. Revenue summaries sum all retained sale events, including historical events when a copy's current status later changes.
 
 ## Dashboard, Catalog, and Inventory
 Dashboard shows Total Copies (all physical copies, including Sold), Distinct Titles (bibliographic records counted once), and one counter for each copy status.
 
-Catalog is a searchable, sortable thumbnail grid with one card per physical copy. Each card shows its photo, unique Copy ID, title, author, and price; Sold copies have a clear SOLD overlay. Double-click opens a read-only More Details view for that exact copy. Inventory remains a detailed sortable copy table with Copy ID, Title, Author, Format, Condition, Location, Price, and Status; double-click opens Edit for the clicked copy. Both views use the same records and filters in this order: Genre, Condition, Location, Status. Sold copies remain in historical views and are not deleted or renumbered.
+Catalog is a searchable, sortable thumbnail grid with one card per physical copy. Each card shows its photo, unique Copy ID, title, author, and Price; Sold copies have a gray cover overlay and red SOLD text. Double-click opens a read-only More Details view for that exact copy. Catalog and Inventory right-click menus offer View Details, Create Poster, the four Mark as status actions, Edit Book, and Delete Book in that order. Create Poster is not implemented. Delete Book confirms the targeted copy but does not delete it pending a separately approved copy/photo/history deletion policy. Inventory remains a detailed sortable copy table with Copy ID, Title, Author, Format, Condition, Location, Price, and Status; double-click opens Edit for the clicked copy. Both views use the same records and filters in this order: Genre, Condition, Location, Status. Sold copies sort after all other statuses, with the selected ordinary sort applied within both groups. Sold copies remain in historical views and are not renumbered.
 
 ## Storage and safety
-Database, photos, and backups live in the portable data folder. Backups include a consistent SQLite snapshot and photos. Core desktop functions work offline and without a paired phone. Assume one active database writer. Restoration must be validated and tested before release.
+Database, photos, and backups live in the portable data folder. Backups include a consistent SQLite snapshot and photos. Database schema v3 migrates v1 location strings and v2 one-sale-per-copy records while preserving copy IDs, sale IDs, historical amounts, and dates; it renames the historical sale amount to `sales.price_minor` and permits additional sale events. Keep a backup before automatic migration. Core desktop functions work offline and without a paired phone. Assume one active database writer. Restoration must be validated and tested before release.

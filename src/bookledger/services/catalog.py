@@ -200,10 +200,11 @@ class CatalogService:
         location: str = "All",
     ) -> list[dict]:
         sql = """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,
-                        CASE WHEN c.status='Sold' THEN COALESCE(s.actual_sale_price_minor,c.price_minor) ELSE c.price_minor END AS display_price_minor,c.status,
+                        c.price_minor AS display_price_minor,c.status,
                         b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
-                        s.actual_sale_price_minor,s.sale_date,b.metadata_source,b.metadata_status
-                 FROM copies c JOIN book_records b ON b.id=c.book_id LEFT JOIN sales s ON s.copy_id=c.id WHERE 1=1"""
+                        s.sale_date,b.metadata_source,b.metadata_status
+                 FROM copies c JOIN book_records b ON b.id=c.book_id
+                 LEFT JOIN sales s ON s.id=(SELECT MAX(s2.id) FROM sales s2 WHERE s2.copy_id=c.id) WHERE 1=1"""
         args: list = []
         if search.strip():
             q = f"%{search.strip()}%"
@@ -221,9 +222,18 @@ class CatalogService:
         if location != "All":
             sql += " AND c.location=?"
             args.append(location)
-        sql += " ORDER BY b.title COLLATE NOCASE, c.copy_number"
+        sql += " ORDER BY (c.status='Sold'), b.title COLLATE NOCASE, c.copy_number"
         with self.db.connect() as conn:
             return [dict(row) for row in conn.execute(sql, args).fetchall()]
+
+    def list_sales(self) -> list[dict]:
+        sql = """SELECT s.id AS sale_id,s.copy_id,c.copy_code,b.title,b.author,
+                        s.sale_date,s.price_minor
+                 FROM sales s JOIN copies c ON c.id=s.copy_id
+                 JOIN book_records b ON b.id=c.book_id
+                 ORDER BY s.sale_date DESC,s.id DESC"""
+        with self.db.connect() as conn:
+            return [dict(row) for row in conn.execute(sql).fetchall()]
 
     def get_copy(self, copy_id: int) -> dict | None:
         rows = self.list_copies()
@@ -238,29 +248,12 @@ class CatalogService:
         srp_minor = int(round(float(srp_value) * 100)) if srp_value not in (None, "") else None
         isbn = normalize_isbn(payload.get("isbn"))
         with self.db.connect() as conn:
-            current = conn.execute("SELECT status FROM copies WHERE id=?", (copy_id,)).fetchone()
-        if not current:
-            raise KeyError(f"Copy {copy_id} was not found")
-        status = current["status"]
-        if status == "Sold":
-            try:
-                actual_value = float(str(payload.get("price") or "").replace(",", ""))
-                scaled_actual = actual_value * 100
-                if (
-                    not math.isfinite(actual_value)
-                    or actual_value <= 0
-                    or not math.isfinite(scaled_actual)
-                    or scaled_actual > MAX_MONEY_MINOR
-                ):
-                    raise ValueError
-                actual_minor = int(round(actual_value * 100))
-            except (OverflowError, TypeError, ValueError):
-                raise ValidationError({"price": "Enter the actual sale price, greater than PHP 0."})
-        with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT book_id FROM copies WHERE id=?", (copy_id,)).fetchone()
+            row = conn.execute("SELECT book_id,status,price_minor FROM copies WHERE id=?", (copy_id,)).fetchone()
             if not row:
                 raise KeyError(f"Copy {copy_id} was not found")
+            if row["status"] == "Sold" and price_minor != row["price_minor"]:
+                raise ValidationError({"price": "Price is locked while this copy is Sold. Change its status before editing Price."})
             book_id = row["book_id"]
             try:
                 conn.execute(
@@ -275,38 +268,30 @@ class CatalogService:
             conn.execute(
                 """UPDATE copies SET format=?,condition=?,location=?,photo_path=?,price_minor=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (payload["format"].strip(),payload["condition"].strip(),self._canonical_location(conn,payload.get("location")),
-                 self._stored_photo_path(payload["photo_path"]),price_minor if status != "Sold" else conn.execute("SELECT price_minor FROM copies WHERE id=?", (copy_id,)).fetchone()[0],copy_id),
+                 self._stored_photo_path(payload["photo_path"]),price_minor,copy_id),
             )
-            if status == "Sold":
-                conn.execute("UPDATE sales SET actual_sale_price_minor=? WHERE copy_id=?", (actual_minor, copy_id))
-            # Historical sale rows are deliberately retained if status changes away from Sold.
             conn.commit()
 
-    def change_status(self, copy_id: int, status: str, *, sale_price: str | None = None, sale_date: str | None = None) -> None:
+    def change_status(self, copy_id: int, status: str) -> None:
         if status not in COPY_STATUSES:
             raise ValidationError({"status": "Choose a valid status."})
-        actual_minor = None
-        if status == "Sold":
-            try:
-                value = float(str(sale_price or "").replace(",", ""))
-                scaled = value * 100
-                if not math.isfinite(value) or value <= 0 or not math.isfinite(scaled) or scaled > MAX_MONEY_MINOR:
-                    raise ValueError
-                actual_minor = int(round(scaled))
-            except (OverflowError, TypeError, ValueError):
-                raise ValidationError({"price": "Enter the actual sale price, greater than PHP 0."})
-            try:
-                date.fromisoformat(str(sale_date or ""))
-            except ValueError:
-                raise ValidationError({"sale_date": "Enter the sale date in YYYY-MM-DD format."})
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if not conn.execute("SELECT 1 FROM copies WHERE id=?", (copy_id,)).fetchone():
+            current = conn.execute("SELECT status,price_minor FROM copies WHERE id=?", (copy_id,)).fetchone()
+            if not current:
                 raise KeyError(f"Copy {copy_id} was not found")
+            if current["status"] == status:
+                raise ValidationError({"status": "This copy already has that status."})
+            if status == "Sold" and (current["price_minor"] is None or current["price_minor"] <= 0):
+                raise ValidationError({"price": "Enter a valid current Price greater than PHP 0 before marking Sold."})
             conn.execute("UPDATE copies SET status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (status, copy_id))
             if status == "Sold":
-                conn.execute("INSERT INTO sales(copy_id,actual_sale_price_minor,sale_date) VALUES(?,?,?) ON CONFLICT(copy_id) DO UPDATE SET actual_sale_price_minor=excluded.actual_sale_price_minor,sale_date=excluded.sale_date", (copy_id, actual_minor, sale_date))
+                conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_id, current["price_minor"], date.today().isoformat()))
             conn.commit()
+
+    @staticmethod
+    def status_change_requires_confirmation(current_status: str, target_status: str) -> bool:
+        return current_status != target_status and current_status in {"Not for Sale", "Sold"}
 
     def counts(self) -> dict[str, int]:
         with self.db.connect() as conn:
