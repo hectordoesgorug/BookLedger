@@ -50,7 +50,7 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert widget.title() == "Add Book"
     assert "actual_sale_price" not in widget._widgets
     assert "sale_date" not in widget._widgets
-    assert widget._get("status") == "Available"
+    assert "status" not in widget._widgets
     assert widget._get("location") == DEFAULT_LOCATION
     assert tuple(widget._widgets["genre"]["values"]) == APPROVED_GENRES
     assert str(widget.refresh_button.cget("state")) == "disabled"
@@ -165,7 +165,7 @@ def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     assert str(widget.refresh_button.cget("state")) == "disabled"
 
 
-def test_edit_form_keeps_sale_details_but_add_form_does_not(form):
+def test_edit_form_uses_one_contextual_price_and_keeps_status_out_of_form(form):
     widget, root, photo = form
     payload = {
         "title": "Example Book",
@@ -183,9 +183,10 @@ def test_edit_form_keeps_sale_details_but_add_form_does_not(form):
 
     edit_form = BookForm(root, service=widget.service, photo_service=widget.photo_service, on_saved=lambda: None, existing=row)
     edit_form.update_idletasks()
-    assert "sale_date" in edit_form._widgets
-    assert edit_form._field_labels["actual_sale_price"].cget("text") == "Price"
-    assert edit_form._field_labels["sale_date"].cget("text") == "Date Sold"
+    assert "sale_date" not in edit_form._widgets
+    assert "actual_sale_price" not in edit_form._widgets
+    assert "status" not in edit_form._widgets
+    assert "price" in edit_form._widgets
     edit_form._close()
 
 
@@ -200,7 +201,7 @@ def test_clear_confirms_discard_and_cancel_closes_without_saving(form, monkeypat
     widget._clear()
     assert widget._get("title") == ""
     assert widget._get("location") == DEFAULT_LOCATION
-    assert widget._get("status") == "Available"
+    assert "status" not in widget._widgets
     assert widget.mobile_status.get() == "Idle — Ready"
 
     widget.cancel_button.invoke()

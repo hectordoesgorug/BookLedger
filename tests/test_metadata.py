@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 import urllib.error
+import urllib.parse
 
 from bookledger.services.metadata import (
     GoogleBooksProvider,
@@ -55,6 +56,18 @@ def test_google_books_requires_a_matching_isbn_identifier():
     assert result.values == {}
 
 
+def test_google_books_api_key_is_optional_and_only_added_when_configured():
+    provider = GoogleBooksProvider("private-test-key")
+    requested = []
+    provider._request_json = lambda url: (requested.append(url) or {"items": []})
+    assert provider.lookup("9780306406157").status == "No data"
+    assert urllib.parse.parse_qs(urllib.parse.urlparse(requested[0]).query)["key"] == ["private-test-key"]
+    no_key = GoogleBooksProvider()
+    no_key._request_json = lambda url: (requested.append(url) or {"items": []})
+    no_key.lookup("9780306406157")
+    assert "key" not in urllib.parse.parse_qs(urllib.parse.urlparse(requested[1]).query)
+
+
 def test_matching_record_without_usable_metadata_is_a_miss():
     provider = OpenLibraryProvider()
     provider._request_json = lambda _url: {"ISBN:9780306406157": {"identifiers": {"isbn_13": ["9780306406157"]}}}
@@ -89,6 +102,18 @@ def test_lookup_service_falls_back_and_reports_provider_progress():
         "Searching ISBN: Google Books",
         "Fetching Data…",
     ]
+
+
+def test_lookup_service_fills_partial_metadata_without_replacing_primary_values():
+    first = StubProvider("Open Library", MetadataResult("Retrieved", {"title": "Primary title", "author": "Primary author"}, "Open Library"))
+    fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Fallback title", "publisher": "Fallback press", "page_count": 140}, "Google Books"))
+    result = MetadataLookupService((first, fallback)).lookup("9780306406157")
+    assert result.status == "Retrieved"
+    assert result.values["title"] == "Primary title"
+    assert result.values["author"] == "Primary author"
+    assert result.values["publisher"] == "Fallback press"
+    assert result.values["page_count"] == 140
+    assert result.source == "Open Library + Google Books"
 
 
 def test_lookup_service_distinguishes_miss_from_technical_failure():

@@ -69,10 +69,13 @@ def test_create_copy_assigns_copy_id_and_default_location(setup):
     assert row["location"] == DEFAULT_LOCATION
     assert row["price_minor"] == 50000
     assert row["srp_minor"] == 60000
+    assert row["display_price_minor"] == 50000
 
 
 def test_copy_filters_and_dashboard_counts_use_physical_and_record_levels(setup):
     _, _, _, service, payload, _ = setup
+    service.add_location("Shelf A")
+    service.add_location("Shelf B")
     first = service.create_copy({**payload, "location": "Shelf A", "condition": "Good"})
     shared_book = service.duplicate_by_isbn(payload["isbn"])
     service.create_copy({**payload, "location": "Shelf B", "condition": "Like New"}, existing_book_id=shared_book["id"])
@@ -81,7 +84,7 @@ def test_copy_filters_and_dashboard_counts_use_physical_and_record_levels(setup)
     filtered = service.list_copies(genre="Science", condition="Good", location="Shelf A", status="Available")
     assert [row["copy_id"] for row in filtered] == [first]
     assert service.list_copies(location="Shelf B")[0]["condition"] == "Like New"
-    service.update_copy(first, {**payload, "location": "Shelf A", "condition": "Good", "status": "Sold", "actual_sale_price": "425", "sale_date": "2026-10-17"})
+    service.change_status(first, "Sold", sale_price="425", sale_date="2026-10-17")
 
     counts = service.counts()
     assert counts["Total copies"] == 3
@@ -118,33 +121,57 @@ def test_no_isbn_title_author_duplicate_search(setup):
 def test_sale_record_persists_when_status_changes_away_from_sold(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
-    edit = {**payload, "status": "Sold", "actual_sale_price": "480", "sale_date": "2026-10-17"}
-    service.update_copy(copy_id, edit)
+    service.change_status(copy_id, "Sold", sale_price="480", sale_date="2026-10-17")
     row = service.get_copy(copy_id)
     assert row["status"] == "Sold"
     assert row["actual_sale_price_minor"] == 48000
     assert row["sale_date"] == "2026-10-17"
-    edit["status"] = "Listed"
-    service.update_copy(copy_id, edit)
+    service.change_status(copy_id, "Listed")
     row = service.get_copy(copy_id)
     assert row["status"] == "Listed"
     assert row["actual_sale_price_minor"] == 48000  # retained as historical information
+
+
+def test_contextual_price_edits_sale_price_without_overwriting_asking_price(setup):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold", sale_price="480", sale_date="2026-10-17")
+    service.update_copy(copy_id, {**payload, "price": "510"})
+    row = service.get_copy(copy_id)
+    assert row["price_minor"] == 50000
+    assert row["display_price_minor"] == 51000
+    assert row["actual_sale_price_minor"] == 51000
+    assert row["sale_date"] == "2026-10-17"
+    service.change_status(copy_id, "Available")
+    service.update_copy(copy_id, {**payload, "price": "525"})
+    row = service.get_copy(copy_id)
+    assert row["price_minor"] == row["display_price_minor"] == 52500
+    assert row["actual_sale_price_minor"] == 51000
+
+
+def test_edit_payload_cannot_change_copy_status_implicitly(setup):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Listed")
+    service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "999", "sale_date": "2026-10-17"})
+    assert service.get_copy(copy_id)["status"] == "Listed"
+    assert service.get_copy(copy_id)["actual_sale_price_minor"] is None
 
 
 def test_invalid_sold_record_is_rejected(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
     with pytest.raises(ValidationError) as exc:
-        service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "", "sale_date": ""})
-    assert "actual_sale_price" in exc.value.errors
+        service.change_status(copy_id, "Sold", sale_price="", sale_date="")
+    assert "price" in exc.value.errors
 
 
 def test_non_finite_actual_sale_price_is_rejected(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
     with pytest.raises(ValidationError) as exc:
-        service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "inf", "sale_date": "2026-10-17"})
-    assert "actual_sale_price" in exc.value.errors
+        service.change_status(copy_id, "Sold", sale_price="inf", sale_date="2026-10-17")
+    assert "price" in exc.value.errors
 
 
 def test_database_connections_close_after_success_and_exception(setup):
@@ -207,8 +234,51 @@ def test_all_four_statuses_are_supported(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
     for status in COPY_STATUSES:
-        edit = {**payload, "status": status}
         if status == "Sold":
-            edit.update(actual_sale_price="450", sale_date="2026-10-17")
-        service.update_copy(copy_id, edit)
+            service.change_status(copy_id, status, sale_price="450", sale_date="2026-10-17")
+        else:
+            service.change_status(copy_id, status)
         assert service.get_copy(copy_id)["status"] == status
+
+
+def test_location_registry_canonicalizes_and_protects_referenced_values(setup):
+    _, _, _, service, payload, _ = setup
+    service.add_location("Main Shelf")
+    copy_id = service.create_copy({**payload, "location": "main shelf"})
+    assert service.get_copy(copy_id)["location"] == "Main Shelf"
+    with pytest.raises(ValidationError, match="invalid"):
+        service.add_location(" main shelf ")
+    with pytest.raises(ValidationError):
+        service.delete_location("Main Shelf")
+    service.rename_location("Main Shelf", "Front Room")
+    assert service.get_copy(copy_id)["location"] == "Front Room"
+    with pytest.raises(ValidationError):
+        service.delete_location("Front Room")
+    service.update_copy(copy_id, {**payload, "location": DEFAULT_LOCATION})
+    service.delete_location("Front Room")
+    assert "Front Room" not in service.list_locations()
+
+
+def test_v1_database_migrates_existing_locations_and_data(tmp_path):
+    path = tmp_path / "v1.sqlite3"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE book_records(id INTEGER PRIMARY KEY, title TEXT NOT NULL, author TEXT NOT NULL, isbn TEXT, genre TEXT NOT NULL, book_details TEXT, publisher TEXT, publication_year INTEGER, edition TEXT, page_count INTEGER, srp_minor INTEGER, metadata_source TEXT, metadata_status TEXT NOT NULL DEFAULT 'Manual entry', created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '');
+        CREATE TABLE copies(id INTEGER PRIMARY KEY, copy_code TEXT UNIQUE, book_id INTEGER NOT NULL, copy_number INTEGER NOT NULL, format TEXT NOT NULL, condition TEXT NOT NULL, location TEXT NOT NULL DEFAULT 'Not Specified', photo_path TEXT NOT NULL, price_minor INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'Available', created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '');
+        CREATE TABLE sales(id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL, actual_sale_price_minor INTEGER NOT NULL, sale_date TEXT NOT NULL, created_at TEXT DEFAULT '');
+        CREATE TABLE app_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        INSERT INTO book_records(id,title,author,genre) VALUES(1,'Kept','Author','Science');
+        INSERT INTO copies(id,book_id,copy_number,format,condition,location,photo_path,price_minor) VALUES(1,1,1,'Paperback','Good','Shelf A','photos/a.jpg',12345);
+        INSERT INTO sales(id,copy_id,actual_sale_price_minor,sale_date) VALUES(1,1,9900,'2026-10-01');
+        PRAGMA user_version=1;
+    """)
+    conn.close()
+    db = Database(path)
+    service = CatalogService(db)
+    row = service.get_copy(1)
+    assert row["title"] == "Kept"
+    assert row["location"] == "Shelf A"
+    assert "Shelf A" in service.list_locations()
+    assert row["actual_sale_price_minor"] == 9900
+    with db.connect() as migrated:
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 2

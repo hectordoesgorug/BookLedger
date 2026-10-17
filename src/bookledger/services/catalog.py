@@ -72,18 +72,6 @@ class CatalogService:
             valid, message = isbn_check(isbn)
             if not valid and not isbn_override:
                 errors["isbn"] = message + " Select the manual override to continue anyway."
-        if payload.get("status") == "Sold":
-            try:
-                actual_price = float(str(payload.get("actual_sale_price") or "").replace(",", ""))
-                scaled_actual = actual_price * 100
-                if not math.isfinite(actual_price) or actual_price <= 0 or not math.isfinite(scaled_actual) or scaled_actual > MAX_MONEY_MINOR:
-                    raise ValueError
-            except (OverflowError, TypeError, ValueError):
-                errors["actual_sale_price"] = "Enter the actual sale price, greater than PHP 0."
-            try:
-                date.fromisoformat(str(payload.get("sale_date") or ""))
-            except ValueError:
-                errors["sale_date"] = "Enter the sale date in YYYY-MM-DD format."
         return errors
 
     def duplicate_by_isbn(self, isbn: str | None):
@@ -99,6 +87,55 @@ class CatalogService:
                 "SELECT * FROM book_records WHERE (isbn IS NULL OR trim(isbn)='') AND title=? COLLATE NOCASE AND author=? COLLATE NOCASE ORDER BY id",
                 (title.strip(), author.strip()),
             ).fetchall()
+
+    def list_locations(self) -> tuple[str, ...]:
+        with self.db.connect() as conn:
+            return tuple(row[0] for row in conn.execute("SELECT name FROM locations ORDER BY name COLLATE NOCASE"))
+
+    def add_location(self, name: str) -> str:
+        name = (name or "").strip()
+        if not name:
+            raise ValidationError({"location": "Location name is required."})
+        try:
+            with self.db.connect() as conn:
+                conn.execute("INSERT INTO locations(name) VALUES(?)", (name,))
+        except sqlite3.IntegrityError as exc:
+            raise ValidationError({"location": "A location with this name already exists."}) from exc
+        return name
+
+    def rename_location(self, current: str, replacement: str) -> str:
+        replacement = (replacement or "").strip()
+        if not replacement:
+            raise ValidationError({"location": "Location name is required."})
+        if current.casefold() == DEFAULT_LOCATION.casefold() and replacement.casefold() != DEFAULT_LOCATION.casefold():
+            raise ValidationError({"location": "The default location cannot be renamed."})
+        with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM locations WHERE name=? COLLATE NOCASE", (current,)).fetchone():
+                raise ValidationError({"location": "Choose an existing location."})
+            if current.casefold() != replacement.casefold() and conn.execute(
+                "SELECT 1 FROM locations WHERE name=? COLLATE NOCASE", (replacement,)
+            ).fetchone():
+                raise ValidationError({"location": "A location with this name already exists."})
+            conn.execute("UPDATE locations SET name=? WHERE name=? COLLATE NOCASE", (replacement, current))
+            conn.execute("UPDATE copies SET location=? WHERE location=? COLLATE NOCASE", (replacement, current))
+        return replacement
+
+    def delete_location(self, name: str) -> None:
+        with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if name.casefold() == DEFAULT_LOCATION.casefold():
+                raise ValidationError({"location": "The default location cannot be deleted."})
+            if conn.execute("SELECT 1 FROM copies WHERE location=? COLLATE NOCASE LIMIT 1", (name,)).fetchone():
+                raise ValidationError({"location": "This location is assigned to one or more copies."})
+            conn.execute("DELETE FROM locations WHERE name=? COLLATE NOCASE", (name,))
+
+    def _canonical_location(self, conn, value: str | None) -> str:
+        name = (value or "").strip() or DEFAULT_LOCATION
+        row = conn.execute("SELECT name FROM locations WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+        if not row:
+            raise ValidationError({"location": "Choose a location from the approved location list."})
+        return row[0]
 
     def create_copy(self, payload: dict, *, isbn_override: bool = False, existing_book_id: int | None = None) -> int:
         errors = self.validate(payload, isbn_override=isbn_override)
@@ -141,7 +178,7 @@ class CatalogService:
                     raise ValidationError({"isbn": "A record with this ISBN already exists. Review the duplicate before saving."}) from exc
                 book_id = int(cur.lastrowid)
             next_number = conn.execute("SELECT COALESCE(MAX(copy_number),0)+1 FROM copies WHERE book_id=?", (book_id,)).fetchone()[0]
-            location = (payload.get("location") or "").strip() or DEFAULT_LOCATION
+            location = self._canonical_location(conn, payload.get("location"))
             cur = conn.execute(
                 """INSERT INTO copies(book_id,copy_number,format,condition,location,photo_path,price_minor,status)
                    VALUES(?,?,?,?,?,?,?,?)""",
@@ -162,7 +199,8 @@ class CatalogService:
         condition: str = "All",
         location: str = "All",
     ) -> list[dict]:
-        sql = """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,c.status,
+        sql = """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,
+                        CASE WHEN c.status='Sold' THEN COALESCE(s.actual_sale_price_minor,c.price_minor) ELSE c.price_minor END AS display_price_minor,c.status,
                         b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
                         s.actual_sale_price_minor,s.sale_date,b.metadata_source,b.metadata_status
                  FROM copies c JOIN book_records b ON b.id=c.book_id LEFT JOIN sales s ON s.copy_id=c.id WHERE 1=1"""
@@ -199,14 +237,14 @@ class CatalogService:
         srp_value = payload.get("srp")
         srp_minor = int(round(float(srp_value) * 100)) if srp_value not in (None, "") else None
         isbn = normalize_isbn(payload.get("isbn"))
-        status = payload.get("status", "Available")
-        if status not in COPY_STATUSES:
-            raise ValidationError({"status": "Choose a valid status."})
-        actual_price = payload.get("actual_sale_price")
-        sale_date = (payload.get("sale_date") or "").strip()
+        with self.db.connect() as conn:
+            current = conn.execute("SELECT status FROM copies WHERE id=?", (copy_id,)).fetchone()
+        if not current:
+            raise KeyError(f"Copy {copy_id} was not found")
+        status = current["status"]
         if status == "Sold":
             try:
-                actual_value = float(str(actual_price).replace(",", ""))
+                actual_value = float(str(payload.get("price") or "").replace(",", ""))
                 scaled_actual = actual_value * 100
                 if (
                     not math.isfinite(actual_value)
@@ -217,11 +255,7 @@ class CatalogService:
                     raise ValueError
                 actual_minor = int(round(actual_value * 100))
             except (OverflowError, TypeError, ValueError):
-                raise ValidationError({"actual_sale_price": "Enter the actual sale price, greater than PHP 0."})
-            try:
-                date.fromisoformat(sale_date)
-            except ValueError:
-                raise ValidationError({"sale_date": "Enter the sale date in YYYY-MM-DD format."})
+                raise ValidationError({"price": "Enter the actual sale price, greater than PHP 0."})
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT book_id FROM copies WHERE id=?", (copy_id,)).fetchone()
@@ -239,17 +273,39 @@ class CatalogService:
             except sqlite3.IntegrityError as exc:
                 raise ValidationError({"isbn": "Another bibliographic record already uses this ISBN."}) from exc
             conn.execute(
-                """UPDATE copies SET format=?,condition=?,location=?,photo_path=?,price_minor=?,status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                (payload["format"].strip(),payload["condition"].strip(),(payload.get("location") or "").strip() or DEFAULT_LOCATION,
-                 self._stored_photo_path(payload["photo_path"]),price_minor,status,copy_id),
+                """UPDATE copies SET format=?,condition=?,location=?,photo_path=?,price_minor=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                (payload["format"].strip(),payload["condition"].strip(),self._canonical_location(conn,payload.get("location")),
+                 self._stored_photo_path(payload["photo_path"]),price_minor if status != "Sold" else conn.execute("SELECT price_minor FROM copies WHERE id=?", (copy_id,)).fetchone()[0],copy_id),
             )
             if status == "Sold":
-                conn.execute(
-                    """INSERT INTO sales(copy_id,actual_sale_price_minor,sale_date) VALUES(?,?,?)
-                       ON CONFLICT(copy_id) DO UPDATE SET actual_sale_price_minor=excluded.actual_sale_price_minor,sale_date=excluded.sale_date""",
-                    (copy_id,actual_minor,sale_date),
-                )
+                conn.execute("UPDATE sales SET actual_sale_price_minor=? WHERE copy_id=?", (actual_minor, copy_id))
             # Historical sale rows are deliberately retained if status changes away from Sold.
+            conn.commit()
+
+    def change_status(self, copy_id: int, status: str, *, sale_price: str | None = None, sale_date: str | None = None) -> None:
+        if status not in COPY_STATUSES:
+            raise ValidationError({"status": "Choose a valid status."})
+        actual_minor = None
+        if status == "Sold":
+            try:
+                value = float(str(sale_price or "").replace(",", ""))
+                scaled = value * 100
+                if not math.isfinite(value) or value <= 0 or not math.isfinite(scaled) or scaled > MAX_MONEY_MINOR:
+                    raise ValueError
+                actual_minor = int(round(scaled))
+            except (OverflowError, TypeError, ValueError):
+                raise ValidationError({"price": "Enter the actual sale price, greater than PHP 0."})
+            try:
+                date.fromisoformat(str(sale_date or ""))
+            except ValueError:
+                raise ValidationError({"sale_date": "Enter the sale date in YYYY-MM-DD format."})
+        with self.db.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM copies WHERE id=?", (copy_id,)).fetchone():
+                raise KeyError(f"Copy {copy_id} was not found")
+            conn.execute("UPDATE copies SET status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (status, copy_id))
+            if status == "Sold":
+                conn.execute("INSERT INTO sales(copy_id,actual_sale_price_minor,sale_date) VALUES(?,?,?) ON CONFLICT(copy_id) DO UPDATE SET actual_sale_price_minor=excluded.actual_sale_price_minor,sale_date=excluded.sale_date", (copy_id, actual_minor, sale_date))
             conn.commit()
 
     def counts(self) -> dict[str, int]:

@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 import shutil
 import sys
+import json
+import threading
 from PIL import Image, ImageTk
 
 from bookledger import __version__
@@ -13,6 +15,7 @@ from bookledger.db.database import Database
 from bookledger.paths import AppPaths
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService
+from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService, OpenLibraryProvider
 from bookledger.services.photos import PhotoService
 from bookledger.ui.forms import BookForm
 
@@ -36,6 +39,7 @@ class BookLedgerApp(_WindowBase):
         self.catalog = CatalogService(self.db, self.paths.data)
         self.photos = PhotoService(self.paths.photos)
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
+        self.metadata_lookup = MetadataLookupService((OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key())))
         self.title(f"{APP_NAME} · Book collection manager")
         self.geometry("1280x800")
         self.minsize(1000, 650)
@@ -153,7 +157,7 @@ class BookLedgerApp(_WindowBase):
         self._make_tree(recent, columns=("code", "title", "author", "status", "price"), headings=("Copy ID", "Title", "Author", "Status", "Price"), height=8)
         rows = self.catalog.list_copies()
         for row in sorted(rows, key=lambda r: r["copy_id"], reverse=True)[:8]:
-            self.tree.insert("", "end", iid=str(row["copy_id"]), values=(row["copy_code"], row["title"], row["author"], row["status"], self.money(row["price_minor"])))
+            self.tree.insert("", "end", iid=str(row["copy_id"]), values=(row["copy_code"], row["title"], row["author"], row["status"], self.money(row["display_price_minor"])))
         self.tree.bind("<Double-1>", self._on_tree_double_click)
 
     def _build_catalog_page(self, inventory=False):
@@ -168,7 +172,7 @@ class BookLedgerApp(_WindowBase):
         self.condition_filter = tk.StringVar(value="All")
         self.location_filter = tk.StringVar(value="All")
         self.status_filter = tk.StringVar(value="All")
-        locations = tuple(sorted({row["location"] for row in self.catalog.list_copies() if row["location"]}))
+        locations = self.catalog.list_locations()
         filter_specs = (
             ("Genre", self.genre_filter, ("All",) + APPROVED_GENRES, 20),
             ("Condition", self.condition_filter, ("All", "Like New", "Very Good", "Good", "Acceptable", "Poor"), 13),
@@ -184,6 +188,7 @@ class BookLedgerApp(_WindowBase):
         frame = ttk.Frame(self.workspace)
         frame.pack(fill="both", expand=True)
         if inventory:
+            ttk.Button(top, text="Change Status…", command=self.change_selected_status).pack(side="right", padx=(0, 8))
             ttk.Button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
             self._make_tree(frame, columns=("code", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
             self.tree.bind("<Double-1>", self._on_tree_double_click)
@@ -228,13 +233,13 @@ class BookLedgerApp(_WindowBase):
                 return
             self.tree.delete(*self.tree.get_children())
             for row in rows:
-                values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["price_minor"]), row["status"])
+                values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
                 self.tree.insert("", "end", iid=str(row["copy_id"]), values=values)
         else:
             if self.catalog_sort.get() == "Price: Low to High":
-                rows.sort(key=lambda row: row["price_minor"])
+                rows.sort(key=lambda row: row["display_price_minor"])
             elif self.catalog_sort.get() == "Price: High to Low":
-                rows.sort(key=lambda row: row["price_minor"], reverse=True)
+                rows.sort(key=lambda row: row["display_price_minor"], reverse=True)
             elif self.catalog_sort.get() == "Copy ID: Newest":
                 rows.sort(key=lambda row: row["copy_id"], reverse=True)
             self._render_catalog_cards(rows)
@@ -256,11 +261,11 @@ class BookLedgerApp(_WindowBase):
             child.destroy()
         self._catalog_images = []
         width = max(self.catalog_canvas.winfo_width(), 760)
-        columns = max(2, min(5, width // 230))
+        columns = max(2, min(6, width // 195))
         for col in range(columns):
             self.catalog_cards.grid_columnconfigure(col, weight=1, uniform="catalog-card")
         for index, row in enumerate(rows):
-            card = ttk.LabelFrame(self.catalog_cards, text=row["copy_code"], padding=10)
+            card = ttk.LabelFrame(self.catalog_cards, text=row["copy_code"], padding=8)
             card.grid(row=index // columns, column=index % columns, sticky="nsew", padx=7, pady=7)
             art = tk.Frame(card, width=150, height=170, background="#edf1f5")
             art.pack(fill="x", pady=(0, 7))
@@ -280,11 +285,11 @@ class BookLedgerApp(_WindowBase):
                 tk.Label(art, text="Photo Unavailable", background="#edf1f5", foreground="#596579").place(relx=0.5, rely=0.5, anchor="center")
             if row["status"] == "Sold":
                 tk.Label(art, text="SOLD", bg="#a61b1b", fg="white", font=("Segoe UI", 11, "bold"), padx=8, pady=3).place(relx=0.5, rely=0.5, anchor="center")
-            ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=195).pack(anchor="w")
-            ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=195).pack(anchor="w", pady=(2, 5))
-            ttk.Label(card, text=self.money(row["price_minor"]), font=("Segoe UI", 11, "bold")).pack(anchor="w")
+            ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=165).pack(anchor="w")
+            ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=165).pack(anchor="w", pady=(2, 5))
+            ttk.Label(card, text=self.money(row["display_price_minor"]), font=("Segoe UI", 11, "bold")).pack(anchor="w")
             def bind_card(widget, copy_id=row["copy_id"]):
-                widget.bind("<Double-Button-1>", lambda _event: self.open_selected_edit(copy_id))
+                widget.bind("<Double-Button-1>", lambda _event: self.open_copy_details(copy_id))
                 for child in widget.winfo_children():
                     bind_card(child, copy_id)
             bind_card(card)
@@ -294,10 +299,10 @@ class BookLedgerApp(_WindowBase):
         if not hasattr(self, "_sort_reverse"):
             self._sort_reverse = {}
         self._sort_reverse[column] = not reverse
-        value_key = {"code": "copy_code", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "price_minor", "status": "status"}[column]
+        value_key = {"code": "copy_code", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "display_price_minor", "status": "status"}[column]
         self._visible_rows.sort(key=lambda row: row[value_key] or "", reverse=reverse)
         for index, row in enumerate(self._visible_rows):
-            values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["price_minor"]), row["status"])
+            values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
             self.tree.item(str(row["copy_id"]), values=values)
             self.tree.move(str(row["copy_id"]), "", index)
 
@@ -384,6 +389,8 @@ class BookLedgerApp(_WindowBase):
         ttk.Button(row, text="Open Data Folder", command=lambda: self._open_path(self.paths.data)).pack(side="left", padx=8)
         ttk.Button(row, text="Verify Database", command=self.verify_database).pack(side="left", padx=8)
         ttk.Button(row, text="Restore Backup…", command=self.restore_backup).pack(side="left", padx=8)
+        ttk.Button(row, text="Manage Locations…", command=self.manage_locations).pack(side="left", padx=8)
+        ttk.Button(row, text="Google Books Settings…", command=self.google_books_settings).pack(side="left", padx=8)
         genres = ttk.LabelFrame(self.workspace, text="Approved genres", padding=16)
         genres.pack(fill="x", pady=16)
         ttk.Label(genres, text=" · ".join(APPROVED_GENRES), wraplength=900).pack(anchor="w")
@@ -392,8 +399,14 @@ class BookLedgerApp(_WindowBase):
         companion.pack(fill="x")
         ttk.Label(companion, text="The desktop data model is being designed for future local Wi-Fi pairing and photo/ISBN transfer. Pairing will be implemented after desktop stabilization.", wraplength=900).pack(anchor="w")
 
+    def _load_google_books_key(self):
+        try:
+            return json.loads(self.paths.google_books_config.read_text(encoding="utf-8")).get("api_key", "")
+        except (OSError, ValueError, AttributeError):
+            return ""
+
     def open_add_form(self):
-        BookForm(self, service=self.catalog, photo_service=self.photos, on_saved=lambda: self._after_save("Book saved."))
+        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup, on_saved=lambda: self._after_save("Book saved."))
 
     def open_selected_edit(self, copy_id=None):
         if copy_id is None:
@@ -416,7 +429,206 @@ class BookLedgerApp(_WindowBase):
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")
             return
-        BookForm(self, service=self.catalog, photo_service=self.photos, on_saved=lambda: self._after_save("Book updated."), existing=row)
+        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=getattr(self, "metadata_lookup", None), on_saved=lambda: self._after_save("Book updated."), existing=row)
+
+    def open_copy_details(self, copy_id):
+        row = self.catalog.get_copy(int(copy_id))
+        if not row:
+            self.status_var.set("That copy could not be found. Refresh and try again.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title(f"More Details · {row['copy_code']}")
+        dialog.transient(self)
+        dialog.geometry("620x650")
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Book Details", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 12))
+        fields = (
+            ("Title", row.get("title")), ("Author", row.get("author")), ("ISBN", row.get("isbn")),
+            ("Genre", row.get("genre")), ("Publisher", row.get("publisher")),
+            ("Publication Year", row.get("publication_year")), ("Edition", row.get("edition")),
+            ("Page Count", row.get("page_count")), ("Book Details", row.get("book_details")),
+            ("SRP (reference)", self.money(row["srp_minor"]) if row.get("srp_minor") is not None else None),
+            ("Copy ID", row.get("copy_code")), ("Format", row.get("format")),
+            ("Condition", row.get("condition")), ("Location", row.get("location")),
+            ("Status", row.get("status")),
+            ("Price", self.money(row["display_price_minor"])),
+            ("Date Sold", row.get("sale_date")), ("Metadata", row.get("metadata_source")),
+        )
+        text = tk.Text(frame, wrap="word", height=24, relief="flat", background=dialog.cget("background"))
+        for label, value in fields:
+            if value not in (None, ""):
+                text.insert("end", f"{label}: {value}\n\n")
+        text.configure(state="disabled")
+        text.pack(fill="both", expand=True)
+        ttk.Button(frame, text="Close", command=dialog.destroy).pack(anchor="e", pady=(12, 0))
+
+    def change_selected_status(self):
+        tree = getattr(self, "tree", None)
+        try:
+            if tree is None or not tree.winfo_exists() or not tree.selection():
+                self.status_var.set("Select a physical copy first.")
+                return
+            copy_id = int(tree.selection()[0])
+        except (tk.TclError, ValueError):
+            self.status_var.set("Select a physical copy first.")
+            return
+        row = self.catalog.get_copy(copy_id)
+        if not row:
+            self.status_var.set("That copy could not be found. Refresh and try again.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Change Status · {row['copy_code']}")
+        dialog.transient(self)
+        dialog.grab_set()
+        body = ttk.Frame(dialog, padding=18)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="New status").grid(row=0, column=0, sticky="w", pady=5)
+        status = tk.StringVar(value=row["status"])
+        ttk.Combobox(body, textvariable=status, values=COPY_STATUSES, state="readonly", width=24).grid(row=0, column=1, sticky="ew", pady=5)
+        ttk.Label(body, text="Sale price (PHP)").grid(row=1, column=0, sticky="w", pady=5)
+        price = ttk.Entry(body, width=27)
+        default_price = row.get("actual_sale_price_minor") or row["price_minor"]
+        price.insert(0, f"{default_price / 100:.2f}")
+        price.grid(row=1, column=1, sticky="ew", pady=5)
+        ttk.Label(body, text="Date sold (YYYY-MM-DD)").grid(row=2, column=0, sticky="w", pady=5)
+        sale_date = ttk.Entry(body, width=27)
+        sale_date.insert(0, row.get("sale_date") or datetime.now().date().isoformat())
+        sale_date.grid(row=2, column=1, sticky="ew", pady=5)
+        errors = ttk.Label(body, foreground="#b42318", wraplength=360)
+        errors.grid(row=3, column=0, columnspan=2, sticky="w")
+        def apply():
+            try:
+                self.catalog.change_status(copy_id, status.get(), sale_price=price.get(), sale_date=sale_date.get())
+            except (ValueError, KeyError) as exc:
+                errors.configure(text=str(exc))
+                return
+            dialog.destroy()
+            self._after_save("Copy status updated.")
+        ttk.Button(body, text="Save Status", command=apply).grid(row=4, column=1, sticky="e", pady=(12, 0))
+        ttk.Button(body, text="Cancel", command=dialog.destroy).grid(row=4, column=0, sticky="w", pady=(12, 0))
+        def update_sale_fields(*_args):
+            state = "normal" if status.get() == "Sold" else "disabled"
+            price.configure(state=state)
+            sale_date.configure(state=state)
+        status.trace_add("write", update_sale_fields)
+        update_sale_fields()
+
+    def manage_locations(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Manage Locations")
+        dialog.transient(self)
+        dialog.grab_set()
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        listing = tk.Listbox(frame, height=12, exportselection=False)
+        listing.pack(fill="both", expand=True)
+        entry = ttk.Entry(frame)
+        entry.pack(fill="x", pady=8)
+        error = ttk.Label(frame, foreground="#b42318")
+        error.pack(anchor="w")
+        def refresh(select=None):
+            values = self.catalog.list_locations()
+            listing.delete(0, "end")
+            for name in values:
+                listing.insert("end", name)
+            if select in values:
+                listing.selection_set(values.index(select))
+        def selected():
+            selection = listing.curselection()
+            return listing.get(selection[0]) if selection else None
+        def add():
+            try:
+                name = self.catalog.add_location(entry.get())
+                error.configure(text="")
+                entry.delete(0, "end")
+                refresh(name)
+            except ValueError as exc:
+                error.configure(text=str(exc))
+        def rename():
+            old = selected()
+            try:
+                if not old:
+                    raise ValueError("Select a location to rename.")
+                name = self.catalog.rename_location(old, entry.get())
+                error.configure(text="")
+                refresh(name)
+            except ValueError as exc:
+                error.configure(text=str(exc))
+        def delete():
+            old = selected()
+            try:
+                if not old:
+                    raise ValueError("Select a location to delete.")
+                self.catalog.delete_location(old)
+                error.configure(text="")
+                refresh()
+            except ValueError as exc:
+                error.configure(text=str(exc))
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(8, 0))
+        ttk.Button(buttons, text="Add", command=add).pack(side="left")
+        ttk.Button(buttons, text="Rename Selected", command=rename).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Delete Selected", command=delete).pack(side="left")
+        ttk.Button(buttons, text="Done", command=lambda: (dialog.destroy(), self.refresh_current())).pack(side="right")
+        def use_selected(_event=None):
+            name = selected()
+            if name:
+                entry.delete(0, "end")
+                entry.insert(0, name)
+        listing.bind("<<ListboxSelect>>", use_selected)
+        refresh()
+
+    def google_books_settings(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Google Books Settings")
+        dialog.transient(self)
+        dialog.grab_set()
+        frame = ttk.Frame(dialog, padding=18)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Google Books works without an API key for this integration. A key is optional.", wraplength=500).pack(anchor="w")
+        ttk.Label(frame, text="Optional API key").pack(anchor="w", pady=(12, 4))
+        key = tk.StringVar(value=self._load_google_books_key())
+        ttk.Entry(frame, textvariable=key, show="•", width=58).pack(fill="x")
+        ttk.Label(frame, text=f"Stored in your user profile: {self.paths.google_books_config}\nThe key is plain text, protected by your Windows user account access controls, and is excluded from portable backups.", wraplength=500, foreground="#64748b").pack(anchor="w", pady=8)
+        status = ttk.Label(frame, text="Not tested", wraplength=500)
+        status.pack(anchor="w", pady=6)
+        def save_key():
+            self.paths.user_config.mkdir(parents=True, exist_ok=True)
+            self.paths.google_books_config.write_text(json.dumps({"api_key": key.get().strip()}, indent=2), encoding="utf-8")
+            self.metadata_lookup.providers = (OpenLibraryProvider(), GoogleBooksProvider(key.get().strip()))
+        def test():
+            try:
+                save_key()
+            except OSError as exc:
+                status.configure(text=f"Could not save settings: {exc}")
+                return
+            api_key = key.get().strip()
+            status.configure(text="Testing Google Books…")
+            def worker():
+                result = GoogleBooksProvider(api_key).lookup("9780306406157")
+                def complete():
+                    try:
+                        if dialog.winfo_exists():
+                            status.configure(text=("Connection succeeded" if result.status != "Lookup failed" else f"Connection failed: {result.error}"))
+                    except tk.TclError:
+                        pass
+                try:
+                    self.after(0, complete)
+                except tk.TclError:
+                    pass
+            threading.Thread(target=worker, daemon=True).start()
+        def save():
+            try:
+                save_key()
+                status.configure(text="Settings saved.")
+            except OSError as exc:
+                status.configure(text=f"Could not save settings: {exc}")
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(8, 0))
+        ttk.Button(buttons, text="Save", command=save).pack(side="left")
+        ttk.Button(buttons, text="Test Connectivity", command=test).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Close", command=dialog.destroy).pack(side="right")
 
     def _after_save(self, message):
         self.status_var.set(message)

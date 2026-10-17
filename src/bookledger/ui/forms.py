@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_LOCATION
+from bookledger.config import APPROVED_GENRES, DEFAULT_LOCATION
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
@@ -66,8 +66,6 @@ class BookForm(tk.Toplevel):
             self._populate(existing)
         else:
             self._set("location", DEFAULT_LOCATION)
-            self._set("status", "Available")
-            self._widgets["status"].configure(state="disabled")
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.bind("<Destroy>", self._on_destroy, add="+")
         self._ui_poll_id = self.after(40, self._poll_ui_queue)
@@ -130,16 +128,9 @@ class BookForm(tk.Toplevel):
         row += 1
         row = self._field(body, "Format", "format", row, required=True, values=("Paperback", "Hardcover", "Mass Market Paperback", "Board Book", "Other"))
         row = self._field(body, "Condition", "condition", row, required=True, values=("Like New", "Very Good", "Good", "Acceptable", "Poor"))
-        row = self._field(body, "Location", "location", row)
+        row = self._field(body, "Location", "location", row, values=self.service.list_locations())
         row = self._field(body, "Price (PHP)", "price", row, required=True)
-        row = self._field(body, "Status", "status", row, values=COPY_STATUSES)
         row = self._photo_row(body, row)
-
-        if self.existing:
-            ttk.Label(body, text="Sale Details", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(18, 8))
-            row += 1
-            row = self._field(body, "Price", "actual_sale_price", row)
-            row = self._field(body, "Date Sold", "sale_date", row)
 
         self.metadata_label = ttk.Label(body, textvariable=self.metadata_status, foreground="#596579")
         self.metadata_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 2))
@@ -289,15 +280,13 @@ class BookForm(tk.Toplevel):
         return widget.get().strip()
 
     def _populate(self, row):
-        for key in ("title", "author", "isbn", "genre", "publisher", "publication_year", "edition", "page_count", "book_details", "format", "condition", "location", "status"):
+        for key in ("title", "author", "isbn", "genre", "publisher", "publication_year", "edition", "page_count", "book_details", "format", "condition", "location"):
             if key in self._widgets:
                 self._set(key, row.get(key))
-        self._set("price", f"{row.get('price_minor', 0) / 100:.2f}")
+        price_minor = row.get("actual_sale_price_minor") if row.get("status") == "Sold" else row.get("price_minor")
+        self._set("price", f"{price_minor / 100:.2f}" if price_minor is not None else "")
         if "srp" in self._widgets:
             self._set("srp", f"{row['srp_minor'] / 100:.2f}" if row.get("srp_minor") is not None else "")
-        if "actual_sale_price" in self._widgets:
-            self._set("actual_sale_price", f"{row['actual_sale_price_minor'] / 100:.2f}" if row.get("actual_sale_price_minor") is not None else "")
-            self._set("sale_date", row.get("sale_date"))
         if row.get("photo_path"):
             self.set_photo(row["photo_path"])
 
@@ -435,11 +424,13 @@ class BookForm(tk.Toplevel):
                 self.mobile_status.set("Idle — Ready")
             return
 
-        if result.status == "Retrieved" and result.values:
+        if result.values:
             self._apply_metadata(result)
+        if result.status == "Retrieved" and result.values:
             self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
         elif result.status == "No data":
-            self.metadata_status.set(f"No data · {result.source or 'Metadata Providers'}")
+            missing = [key.replace("_", " ").title() for key in ("publisher", "publication_year", "edition", "page_count", "book_details", "srp") if not self._get(key)]
+            self.metadata_status.set(f"No data · {result.source or 'Metadata Providers'}" + (f" · No Data: {', '.join(missing)}" if missing else ""))
             self.metadata_source = result.source
             self.mobile_status.set("ISBN Not Found")
         else:
@@ -455,7 +446,9 @@ class BookForm(tk.Toplevel):
 
     def _apply_metadata(self, result: MetadataResult):
         self.metadata_source = result.source
-        self.metadata_status.set(f"Retrieved · {result.source or 'Metadata Provider'}")
+        optional = ("publisher", "publication_year", "edition", "page_count", "book_details", "srp")
+        missing = [key.replace("_", " ").title() for key in optional if result.values.get(key) in (None, "") and not self._get(key)]
+        self.metadata_status.set(f"Retrieved · {result.source or 'Metadata Provider'}" + (f" · No Data: {', '.join(missing)}" if missing else ""))
         for key in ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count", "srp"):
             value = result.values.get(key)
             # Fill empty controls only, preserving manual or newer user input.
@@ -667,7 +660,7 @@ class BookForm(tk.Toplevel):
         self._close()
 
     def _has_input(self):
-        defaults = {"location": DEFAULT_LOCATION, "status": "Available"}
+        defaults = {"location": DEFAULT_LOCATION}
         return any(self._get(key) != defaults.get(key, "") for key in self._widgets) or bool(self.photo_path.get())
 
     def _clear(self):
@@ -700,8 +693,5 @@ class BookForm(tk.Toplevel):
         self._connection_ready = False
         self.mobile_status.set("Idle — Ready")
         self._set("location", DEFAULT_LOCATION)
-        self._set("status", "Available")
-        if not self.existing:
-            self._widgets["status"].configure(state="disabled")
         self._populate_validation({})
         self._update_control_states()

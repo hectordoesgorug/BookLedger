@@ -102,9 +102,15 @@ class GoogleBooksProvider(MetadataProvider):
 
     name = "Google Books"
 
+    def __init__(self, api_key: str | None = None):
+        self.api_key = (api_key or "").strip()
+
     def lookup(self, isbn: str) -> MetadataResult:
         isbn = normalize_isbn(isbn) or ""
-        query = urllib.parse.urlencode({"q": f"isbn:{isbn}", "maxResults": 5})
+        params = {"q": f"isbn:{isbn}", "maxResults": 5}
+        if self.api_key:
+            params["key"] = self.api_key
+        query = urllib.parse.urlencode(params)
         try:
             payload = self._request_json(f"https://www.googleapis.com/books/v1/volumes?{query}")
         except Exception as exc:
@@ -146,7 +152,13 @@ class MetadataLookupService:
 
     def lookup(self, isbn: str, *, on_status: Callable[[str], None] | None = None) -> MetadataResult:
         failures: list[MetadataResult] = []
+        combined: dict = {}
+        sources: list[str] = []
+        supported = ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count", "srp")
         for provider in self.providers:
+            missing = [key for key in supported if combined.get(key) in (None, "")]
+            if combined and not missing:
+                break
             if on_status:
                 on_status(f"Searching ISBN: {provider.name}")
                 on_status("Fetching Data…")
@@ -154,11 +166,21 @@ class MetadataLookupService:
                 result = provider.lookup(isbn)
             except Exception as exc:
                 result = MetadataResult("Lookup failed", {}, provider.name, str(exc), _failure_kind(exc))
-            if result.status == "Retrieved" and result.values:
-                return result
+            values = {key: value for key, value in result.values.items() if value not in (None, "")}
+            if values:
+                if result.source:
+                    sources.append(result.source)
+                for key, value in values.items():
+                    if combined.get(key) in (None, ""):
+                        combined[key] = value
             if result.status == "Lookup failed":
                 failures.append(result)
 
+        if combined:
+            if failures and len(sources) <= 1:
+                failure = failures[0]
+                return MetadataResult("Lookup failed", combined, ", ".join(sources) or failure.source, failure.error, failure.failure_kind)
+            return MetadataResult("Retrieved", combined, " + ".join(dict.fromkeys(sources)))
         if failures:
             # The first provider is primary; its specific error is the most useful
             # explanation when the fallback also fails or returns no matching record.

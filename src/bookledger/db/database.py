@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS book_records (
@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS copies (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     UNIQUE(book_id, copy_number)
 );
+CREATE TABLE IF NOT EXISTS locations (
+    name TEXT PRIMARY KEY COLLATE NOCASE
+);
 CREATE INDEX IF NOT EXISTS ix_copies_book_id ON copies(book_id);
 CREATE INDEX IF NOT EXISTS ix_copies_status ON copies(status);
 CREATE INDEX IF NOT EXISTS ix_copies_location ON copies(location COLLATE NOCASE);
@@ -65,7 +68,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 """
 
 
@@ -92,8 +95,22 @@ class Database:
 
     def _initialize(self) -> None:
         with self.connect() as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version == 1:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("CREATE TABLE locations (name TEXT PRIMARY KEY COLLATE NOCASE)")
+                conn.execute("INSERT OR IGNORE INTO locations(name) VALUES('Not Specified')")
+                conn.execute("INSERT OR IGNORE INTO locations(name) SELECT DISTINCT trim(location) FROM copies WHERE trim(location) <> ''")
+                conn.execute("UPDATE copies SET location='Not Specified' WHERE trim(location) = ''")
+                for row in conn.execute("SELECT DISTINCT location FROM copies").fetchall():
+                    canonical = conn.execute("SELECT name FROM locations WHERE name=? COLLATE NOCASE", (str(row[0]).strip(),)).fetchone()
+                    if canonical:
+                        conn.execute("UPDATE copies SET location=? WHERE trim(location)=? COLLATE NOCASE", (canonical[0], str(row[0]).strip()))
+                conn.execute("PRAGMA user_version = 2")
+                conn.commit()
             conn.executescript(SCHEMA)
-            conn.execute("INSERT OR IGNORE INTO app_meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
+            conn.execute("INSERT INTO app_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+            conn.execute("INSERT OR IGNORE INTO locations(name) VALUES('Not Specified')")
 
     def transaction(self) -> ContextManager[sqlite3.Connection]:
         """Return a connection context manager; sqlite commits/rolls back on exit."""

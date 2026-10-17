@@ -16,6 +16,8 @@ BookLedger is a fresh, modular rebuild of a personal book collection and invento
 - Inline form validation (no validation dialog for missing/invalid fields).
 - Local database backup with photo files and integrity verification.
 - Catalog photo-card grid and detailed sortable Inventory table over the same physical-copy records, with Genre, Condition, Location, and Status filters.
+- Catalog cards open a read-only More Details view; Inventory double-click edits the selected copy. Status changes are made explicitly in Inventory.
+- Canonical locations can be added, renamed (including updating assigned copies), and deleted when unused.
 - Dashboard counters distinguish all physical copies (including Sold) from distinct bibliographic records. Sales and revenue summaries use actual sale prices and dates.
 
 This is an early development build, not a release candidate. Fuller reporting, exports/imports, additional metadata providers, Android integration, and Windows packaging are still planned. Multi-record duplicate selection and restore behavior have initial implementations and require broader edge-case testing.
@@ -43,6 +45,14 @@ python -m pytest -q
 ```
 
 On Windows, use `.venv\Scripts\python.exe -m pip install -e ".[dev]"` and `.venv\Scripts\python.exe -m pytest -q` (or activate `.venv` first and use the commands above).
+
+## Metadata settings
+
+Open **Settings → Google Books Settings** to save an optional API key or test connectivity. This Google Books integration currently works without a key. If provided, the key is stored as plain text in your Windows user profile (`%LOCALAPPDATA%\BookLedger\google_books.json`), protected by that account's file access controls; it is not stored in the project or included in portable BookLedger backups. Anyone with access to that Windows account can read it. Open Library remains the primary provider and missing fields from it are filled from Google Books where available. Provider values fill empty form fields only.
+
+## Price and status behavior
+
+Add and Edit use one **Price** field. It is the current asking price for an unsold copy and the transaction price for a sold copy. The stored asking price and historical sale record remain separate so changing one cannot erase the other. New copies start as Available. Use **Inventory → Change Status** for explicit status changes; marking a copy Sold requires a sale price and date. Moving away from Sold keeps its sale history.
 
 ## Portable data
 When run from source, data is stored in `BookLedger_Data/` in the project root. In a packaged build, data is stored next to the executable. Backups include a SQLite snapshot and compressed copy photos.
