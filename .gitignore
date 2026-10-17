@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local data and backups
+BookLedger_Data/
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+
+# Build output
+build/
+dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
