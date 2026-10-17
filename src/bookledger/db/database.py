@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import ContextManager, Iterator
 
 SCHEMA_VERSION = 1
 
@@ -76,19 +77,25 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield a configured connection and always close it after the transaction."""
         conn = sqlite3.connect(self.path, timeout=15)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 15000")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 15000")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
             conn.execute("INSERT OR IGNORE INTO app_meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
 
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(self) -> ContextManager[sqlite3.Connection]:
         """Return a connection context manager; sqlite commits/rolls back on exit."""
         return self.connect()
 

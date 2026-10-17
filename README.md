@@ -18,23 +18,28 @@ BookLedger is a fresh, modular rebuild of a personal book collection and invento
 This is an early development build, not a release candidate. Fuller reporting, exports/imports, additional metadata providers, Android integration, and Windows packaging are still planned. Multi-record duplicate selection and restore behavior have initial implementations and require broader edge-case testing.
 
 ## Run from source
-Requires Python 3.10+ and Tkinter. On Windows, run `run_bookledger.bat`; or install manually:
+Requires Python 3.10+ and Tkinter. On Windows, run `run_bookledger.bat`; it creates `.venv` if needed, checks the editable install and runtime dependencies, and launches the `bookledger` console entry point. If setup or startup fails, the launcher displays the diagnostic and waits before closing.
 
-```bash
-python -m venv .venv
-.venv\\Scripts\\activate
-pip install -e .
-python -m bookledger
+For manual installation, create a virtual environment and install the project in editable mode:
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -e .
+.venv\Scripts\bookledger.exe
 ```
 
-On Linux/macOS, install Tk support for your Python distribution, then `pip install -e .` and run `python -m bookledger`.
+On Linux/macOS, install Tk support for your Python distribution, then run `python -m venv .venv`, `python -m pip install -e .`, and `.venv/bin/bookledger` (activate `.venv` first if preferred).
 
-## Run tests
+## Development setup and tests
+
+Install the development extra into the same virtual environment used to run tests. It includes pytest and PyInstaller; pytest is a development dependency, not an application runtime dependency.
 
 ```bash
-pip install -e .[dev]
-pytest -q
+python -m pip install -e ".[dev]"
+python -m pytest -q
 ```
+
+On Windows, use `.venv\Scripts\python.exe -m pip install -e ".[dev]"` and `.venv\Scripts\python.exe -m pytest -q` (or activate `.venv` first and use the commands above).
 
 ## Portable data
 When run from source, data is stored in `BookLedger_Data/` in the project root. In a packaged build, data is stored next to the executable. Backups include a SQLite snapshot and compressed copy photos.

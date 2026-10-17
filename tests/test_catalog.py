@@ -111,6 +111,21 @@ def test_invalid_sold_record_is_rejected(setup):
     assert "actual_sale_price" in exc.value.errors
 
 
+def test_database_connections_close_after_success_and_exception(setup):
+    _, _, db, _, _, _ = setup
+
+    with db.connect() as conn:
+        conn.execute("SELECT 1")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        conn.execute("SELECT 1")
+
+    with pytest.raises(RuntimeError, match="expected failure"):
+        with db.connect() as failed_conn:
+            raise RuntimeError("expected failure")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        failed_conn.execute("SELECT 1")
+
+
 def test_photo_compression_and_backup_integrity(setup):
     _, data, db, service, payload, photo = setup
     assert Image.open(photo).width <= 1600
