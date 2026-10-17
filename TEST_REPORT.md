@@ -7,8 +7,8 @@ Date: 2026-10-17
 - Syntax check: `.venv\Scripts\python.exe -m py_compile src/bookledger/app.py src/bookledger/ui/forms.py src/bookledger/services/catalog.py` — passed.
 - Diff check: `git diff --check` — passed; Git reported only its configured LF-to-CRLF conversion notices.
 - Platform: Windows, Python 3.14.6, pytest 9.1.1
-- Result: **31 passed, 2 skipped**
-- Coverage includes catalog validation and duplicate rules, distinct-record versus copy counts, copy-level filters, finite monetary values, backup creation/verification/restoration, Add/Edit layout, service-side validation, simulated connection and scan retry, ISBN not-found versus technical lookup failures, per-provider timeouts, stale-result protection, and Clear/Cancel behavior.
+- Result: **35 passed, 2 skipped**
+- Coverage includes destroyed/stale Treeview callback handling and Copy ID matching, catalog validation and duplicate rules, distinct-record versus copy counts, copy-level filters, finite monetary values, backup creation/verification/restoration, Add/Edit layout, service-side validation, simulated connection and scan retry, ISBN not-found versus technical lookup failures, per-provider timeouts, stale-result protection, and Clear/Cancel behavior.
 - Two Tk UI tests were skipped. This Python installation has incomplete Tcl/Tk files (`tk.tcl`, `ttk.tcl`, and `init.tcl` are missing), so Tk windows cannot be initialized reliably in this environment. The UI tests that initialized Tk passed.
 - Metadata provider tests use mocked responses; no live provider request was made.
 

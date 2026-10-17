@@ -108,6 +108,8 @@ class BookLedgerApp(_WindowBase):
         ttk.Label(right, textvariable=self.status_var, foreground="#64748b", anchor="w").pack(fill="x", pady=(12, 0))
 
     def _clear_workspace(self):
+        # Destroyed page widgets must not remain the active source for a later event.
+        self.tree = None
         for child in self.workspace.winfo_children():
             child.destroy()
 
@@ -152,7 +154,7 @@ class BookLedgerApp(_WindowBase):
         rows = self.catalog.list_copies()
         for row in sorted(rows, key=lambda r: r["copy_id"], reverse=True)[:8]:
             self.tree.insert("", "end", iid=str(row["copy_id"]), values=(row["copy_code"], row["title"], row["author"], row["status"], self.money(row["price_minor"])))
-        self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
 
     def _build_catalog_page(self, inventory=False):
         self._catalog_inventory = inventory
@@ -184,7 +186,7 @@ class BookLedgerApp(_WindowBase):
         if inventory:
             ttk.Button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
             self._make_tree(frame, columns=("code", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
-            self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
+            self.tree.bind("<Double-1>", self._on_tree_double_click)
             for col in self.tree["columns"]:
                 self.tree.heading(col, command=lambda c=col: self._sort_inventory(c))
         else:
@@ -299,6 +301,24 @@ class BookLedgerApp(_WindowBase):
             self.tree.item(str(row["copy_id"]), values=values)
             self.tree.move(str(row["copy_id"]), "", index)
 
+    def _on_tree_double_click(self, event):
+        """Open the row activated in the currently displayed Treeview."""
+        tree = event.widget
+        if tree is not getattr(self, "tree", None):
+            return "break"
+        try:
+            if not tree.winfo_exists():
+                return "break"
+            clicked_item = tree.identify_row(event.y)
+            if not clicked_item or clicked_item not in tree.selection():
+                return "break"
+        except tk.TclError:
+            # A deferred event can race with page teardown. Ignore only when the
+            # originating widget has been destroyed, not arbitrary callback errors.
+            return "break"
+        self.open_selected_edit(int(clicked_item))
+        return "break"
+
     def _clear_filters(self):
         self.global_search.set("")
         self.status_filter.set("All")
@@ -332,7 +352,7 @@ class BookLedgerApp(_WindowBase):
         self._make_tree(frame, columns=("code", "title", "author", "sale_date", "sale_price"), headings=("Copy ID", "Title", "Author", "Date Sold", "Price"), height=18)
         for row in rows:
             self.tree.insert("", "end", iid=str(row["copy_id"]), values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["actual_sale_price_minor"])))
-        self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
         if not rows:
             self.status_var.set("No sales recorded yet")
 
@@ -376,12 +396,22 @@ class BookLedgerApp(_WindowBase):
         BookForm(self, service=self.catalog, photo_service=self.photos, on_saved=lambda: self._after_save("Book saved."))
 
     def open_selected_edit(self, copy_id=None):
-        tree = getattr(self, "tree", None)
-        selection = tree.selection() if tree else ()
-        if copy_id is None and not selection:
-            self.status_var.set("Select a physical copy first.")
-            return
-        copy_id = int(copy_id if copy_id is not None else selection[0])
+        if copy_id is None:
+            tree = getattr(self, "tree", None)
+            try:
+                if tree is None or not tree.winfo_exists():
+                    self.status_var.set("Select a physical copy first.")
+                    return
+                selection = tree.selection()
+            except tk.TclError:
+                self.status_var.set("Select a physical copy first.")
+                return
+            if not selection:
+                self.status_var.set("Select a physical copy first.")
+                return
+            copy_id = int(selection[0])
+        else:
+            copy_id = int(copy_id)
         row = self.catalog.get_copy(copy_id)
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")

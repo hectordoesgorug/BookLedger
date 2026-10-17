@@ -21,7 +21,8 @@
 - [x] Dashboard distinguishes all physical copies from distinct bibliographic records and status counts
 - [x] Catalog photo-card grid and sortable Inventory table share copy records and ordered Genre, Condition, Location, Status filters
 - [x] Sales view shows Date Sold and actual Price only; revenue summaries use actual transaction prices
-- [x] Full test suite on Windows: 31 passed, 2 skipped (Tcl/Tk files missing in the Python installation)
+- [x] Treeview double-click handlers reject destroyed/stale views and open the clicked Copy ID
+- [x] Full test suite on Windows: 35 passed, 2 skipped (Tcl/Tk files missing in the Python installation)
 - [ ] Test GUI manually on Windows (virtual-display smoke test passed; native Windows check pending)
 - [ ] Package portable Windows executable
 
@@ -37,4 +38,4 @@
 - [x] Backup restoration service and Settings action with verification/confirmation
 - [x] Store photo paths relative to the portable data folder
 - [x] GUI smoke-tested under a virtual X display across all initial pages
-- [x] 31 automated tests passing on Windows; 2 Tk UI tests skipped because Tcl/Tk files are missing
+- [x] 35 automated tests passing on Windows; 2 Tk UI tests skipped because Tcl/Tk files are missing
