@@ -10,10 +10,13 @@ BookLedger is a fresh, modular rebuild of a personal book collection and invento
 - ISBN-10/ISBN-13 check-digit validation with manual override.
 - Individual-copy IDs and stable copy numbers.
 - Photo import/compression with per-copy photo storage.
-- Optional Google Books metadata lookup adapter; manual cataloging remains possible.
+- Optional Open Library metadata lookup with Google Books fallback; manual cataloging remains possible.
+- Add Book intake form with photo preview, inline validation, and clear/retry/cancel actions.
+- BookLedger Mobile connection and ISBN scanning are testable UI simulations; no phone networking is included.
 - Inline form validation (no validation dialog for missing/invalid fields).
 - Local database backup with photo files and integrity verification.
-- Search/filter catalog and inventory, basic dashboard, sales view, settings, and summary report.
+- Catalog photo-card grid and detailed sortable Inventory table over the same physical-copy records, with Genre, Condition, Location, and Status filters.
+- Dashboard counters distinguish all physical copies (including Sold) from distinct bibliographic records. Sales and revenue summaries use actual sale prices and dates.
 
 This is an early development build, not a release candidate. Fuller reporting, exports/imports, additional metadata providers, Android integration, and Windows packaging are still planned. Multi-record duplicate selection and restore behavior have initial implementations and require broader edge-case testing.
 
@@ -46,5 +49,5 @@ When run from source, data is stored in `BookLedger_Data/` in the project root. 
 
 ## Important
 - Online metadata lookup requires internet access; cataloging does not.
-- The Android companion is not included in this build.
+- BookLedger Mobile is not connected in this build; connection and scanning controls simulate phone events.
 - Do not treat this early build as the sole storage location for irreplaceable catalog data until backup/restore testing is complete.

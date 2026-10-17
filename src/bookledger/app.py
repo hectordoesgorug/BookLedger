@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import shutil
 import sys
+from PIL import Image, ImageTk
 
 from bookledger import __version__
 from bookledger.config import APP_NAME, APPROVED_GENRES, COPY_STATUSES
@@ -134,7 +135,7 @@ class BookLedgerApp(_WindowBase):
         counts = self.catalog.counts()
         cards = ttk.Frame(self.workspace)
         cards.pack(fill="x", pady=(0, 20))
-        metrics = [("Total copies", counts.get("Total copies", 0)), ("Available", counts.get("Available", 0)), ("Listed", counts.get("Listed", 0)), ("Not for Sale", counts.get("Not for Sale", 0)), ("Sold", counts.get("Sold", 0)), ("Book records", counts.get("Bibliographic records", 0))]
+        metrics = [("Total Copies", counts.get("Total copies", 0)), ("Distinct Titles", counts.get("Distinct Titles", 0)), ("Available", counts.get("Available", 0)), ("Listed", counts.get("Listed", 0)), ("Not for Sale", counts.get("Not for Sale", 0)), ("Sold", counts.get("Sold", 0))]
         for idx, (label, value) in enumerate(metrics):
             card = ttk.LabelFrame(cards, text=label, padding=16)
             card.grid(row=idx // 3, column=idx % 3, sticky="nsew", padx=(0, 12), pady=(0, 12))
@@ -154,28 +155,47 @@ class BookLedgerApp(_WindowBase):
         self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
 
     def _build_catalog_page(self, inventory=False):
+        self._catalog_inventory = inventory
         top = ttk.Frame(self.workspace)
         top.pack(fill="x", pady=(0, 12))
-        ttk.Label(top, text="Search and filter physical copies" if inventory else "Search titles, authors, ISBNs, and individual copies", foreground="#64748b").pack(side="left")
+        ttk.Label(top, text="Manage physical copies" if inventory else "Browse physical copies", foreground="#64748b").pack(side="left")
         ttk.Button(top, text="＋ Add Book", style="Primary.TButton", command=self.open_add_form).pack(side="right")
         filters = ttk.Frame(self.workspace)
         filters.pack(fill="x", pady=(0, 12))
-        self.status_filter = tk.StringVar(value="All")
         self.genre_filter = tk.StringVar(value="All")
-        ttk.Label(filters, text="Status").pack(side="left", padx=(0, 6))
-        status_combo = ttk.Combobox(filters, textvariable=self.status_filter, values=("All",) + COPY_STATUSES, state="readonly", width=16)
-        status_combo.pack(side="left", padx=(0, 16))
-        ttk.Label(filters, text="Genre").pack(side="left", padx=(0, 6))
-        genre_combo = ttk.Combobox(filters, textvariable=self.genre_filter, values=("All",) + APPROVED_GENRES, state="readonly", width=22)
-        genre_combo.pack(side="left", padx=(0, 16))
-        ttk.Button(filters, text="Apply filters", command=self._populate_catalog).pack(side="left")
-        ttk.Button(filters, text="Clear", command=self._clear_filters).pack(side="left", padx=6)
-        ttk.Button(filters, text="Edit selected", command=self.open_selected_edit).pack(side="right")
-        ttk.Label(filters, text="Double-click a row to edit", foreground="#64748b").pack(side="right", padx=12)
+        self.condition_filter = tk.StringVar(value="All")
+        self.location_filter = tk.StringVar(value="All")
+        self.status_filter = tk.StringVar(value="All")
+        locations = tuple(sorted({row["location"] for row in self.catalog.list_copies() if row["location"]}))
+        filter_specs = (
+            ("Genre", self.genre_filter, ("All",) + APPROVED_GENRES, 20),
+            ("Condition", self.condition_filter, ("All", "Like New", "Very Good", "Good", "Acceptable", "Poor"), 13),
+            ("Location", self.location_filter, ("All",) + locations, 14),
+            ("Status", self.status_filter, ("All",) + COPY_STATUSES, 13),
+        )
+        for label, variable, values, width in filter_specs:
+            ttk.Label(filters, text=label).pack(side="left", padx=(0, 5))
+            combo = ttk.Combobox(filters, textvariable=variable, values=values, state="readonly", width=width)
+            combo.pack(side="left", padx=(0, 10))
+            combo.bind("<<ComboboxSelected>>", lambda _event: self._populate_catalog())
+        ttk.Button(filters, text="Clear", command=self._clear_filters).pack(side="left")
         frame = ttk.Frame(self.workspace)
         frame.pack(fill="both", expand=True)
-        self._make_tree(frame, columns=("code", "title", "author", "genre", "status", "price", "location"), headings=("Copy ID", "Title", "Author", "Genre", "Status", "Price (PHP)", "Location"), height=18)
-        self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
+        if inventory:
+            ttk.Button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
+            self._make_tree(frame, columns=("code", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
+            self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
+            for col in self.tree["columns"]:
+                self.tree.heading(col, command=lambda c=col: self._sort_inventory(c))
+        else:
+            sort_bar = ttk.Frame(frame)
+            sort_bar.pack(fill="x", pady=(0, 8))
+            ttk.Label(sort_bar, text="Sort by").pack(side="left")
+            self.catalog_sort = tk.StringVar(value="Title")
+            sort_box = ttk.Combobox(sort_bar, textvariable=self.catalog_sort, values=("Title", "Price: Low to High", "Price: High to Low", "Copy ID: Newest"), state="readonly", width=22)
+            sort_box.pack(side="left", padx=(6, 0))
+            sort_box.bind("<<ComboboxSelected>>", lambda _event: self._populate_catalog())
+            self._build_catalog_grid(frame)
         self._populate_catalog()
 
     def _make_tree(self, parent, *, columns, headings, height=15):
@@ -196,26 +216,95 @@ class BookLedgerApp(_WindowBase):
         container.grid_columnconfigure(0, weight=1)
 
     def _populate_catalog(self):
-        if not hasattr(self, "tree") or not self.tree.winfo_exists():
-            return
-        self.tree.delete(*self.tree.get_children())
-        search = self.global_search.get()
-        status = getattr(self, "status_filter", tk.StringVar(value="All")).get()
-        genre = getattr(self, "genre_filter", tk.StringVar(value="All")).get()
-        rows = self.catalog.list_copies(search, status, genre)
-        columns = self.tree["columns"]
-        for row in rows:
-            values = {
-                "code": row["copy_code"], "title": row["title"], "author": row["author"], "genre": row["genre"],
-                "status": row["status"], "price": self.money(row["price_minor"]), "location": row["location"]
-            }
-            self.tree.insert("", "end", iid=str(row["copy_id"]), values=tuple(values[c] for c in columns))
+        rows = self.catalog.list_copies(
+            self.global_search.get(), self.status_filter.get(), self.genre_filter.get(),
+            self.condition_filter.get(), self.location_filter.get(),
+        )
+        self._visible_rows = rows
+        if self._catalog_inventory:
+            if not hasattr(self, "tree") or not self.tree.winfo_exists():
+                return
+            self.tree.delete(*self.tree.get_children())
+            for row in rows:
+                values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["price_minor"]), row["status"])
+                self.tree.insert("", "end", iid=str(row["copy_id"]), values=values)
+        else:
+            if self.catalog_sort.get() == "Price: Low to High":
+                rows.sort(key=lambda row: row["price_minor"])
+            elif self.catalog_sort.get() == "Price: High to Low":
+                rows.sort(key=lambda row: row["price_minor"], reverse=True)
+            elif self.catalog_sort.get() == "Copy ID: Newest":
+                rows.sort(key=lambda row: row["copy_id"], reverse=True)
+            self._render_catalog_cards(rows)
         self.status_var.set(f"{len(rows)} physical copy/copies shown")
+
+    def _build_catalog_grid(self, parent):
+        self.catalog_canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=self.catalog_canvas.yview)
+        self.catalog_canvas.configure(yscrollcommand=scrollbar.set)
+        self.catalog_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.catalog_cards = ttk.Frame(self.catalog_canvas)
+        self._catalog_window = self.catalog_canvas.create_window((0, 0), window=self.catalog_cards, anchor="nw")
+        self.catalog_cards.bind("<Configure>", lambda _event: self.catalog_canvas.configure(scrollregion=self.catalog_canvas.bbox("all")))
+        self.catalog_canvas.bind("<Configure>", lambda event: self.catalog_canvas.itemconfigure(self._catalog_window, width=event.width))
+
+    def _render_catalog_cards(self, rows):
+        for child in self.catalog_cards.winfo_children():
+            child.destroy()
+        self._catalog_images = []
+        width = max(self.catalog_canvas.winfo_width(), 760)
+        columns = max(2, min(5, width // 230))
+        for col in range(columns):
+            self.catalog_cards.grid_columnconfigure(col, weight=1, uniform="catalog-card")
+        for index, row in enumerate(rows):
+            card = ttk.LabelFrame(self.catalog_cards, text=row["copy_code"], padding=10)
+            card.grid(row=index // columns, column=index % columns, sticky="nsew", padx=7, pady=7)
+            art = tk.Frame(card, width=150, height=170, background="#edf1f5")
+            art.pack(fill="x", pady=(0, 7))
+            art.pack_propagate(False)
+            photo_path = Path(row["photo_path"])
+            if not photo_path.is_absolute():
+                photo_path = self.paths.data / photo_path
+            try:
+                with Image.open(photo_path) as source:
+                    image = source.convert("RGB")
+                    image.thumbnail((145, 165), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(image)
+                self._catalog_images.append(photo)
+                image_label = tk.Label(art, image=photo, background="#edf1f5")
+                image_label.place(relx=0.5, rely=0.5, anchor="center")
+            except (OSError, tk.TclError):
+                tk.Label(art, text="Photo Unavailable", background="#edf1f5", foreground="#596579").place(relx=0.5, rely=0.5, anchor="center")
+            if row["status"] == "Sold":
+                tk.Label(art, text="SOLD", bg="#a61b1b", fg="white", font=("Segoe UI", 11, "bold"), padx=8, pady=3).place(relx=0.5, rely=0.5, anchor="center")
+            ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=195).pack(anchor="w")
+            ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=195).pack(anchor="w", pady=(2, 5))
+            ttk.Label(card, text=self.money(row["price_minor"]), font=("Segoe UI", 11, "bold")).pack(anchor="w")
+            def bind_card(widget, copy_id=row["copy_id"]):
+                widget.bind("<Double-Button-1>", lambda _event: self.open_selected_edit(copy_id))
+                for child in widget.winfo_children():
+                    bind_card(child, copy_id)
+            bind_card(card)
+
+    def _sort_inventory(self, column):
+        reverse = getattr(self, "_sort_reverse", {}).get(column, False)
+        if not hasattr(self, "_sort_reverse"):
+            self._sort_reverse = {}
+        self._sort_reverse[column] = not reverse
+        value_key = {"code": "copy_code", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "price_minor", "status": "status"}[column]
+        self._visible_rows.sort(key=lambda row: row[value_key] or "", reverse=reverse)
+        for index, row in enumerate(self._visible_rows):
+            values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["price_minor"]), row["status"])
+            self.tree.item(str(row["copy_id"]), values=values)
+            self.tree.move(str(row["copy_id"]), "", index)
 
     def _clear_filters(self):
         self.global_search.set("")
         self.status_filter.set("All")
         self.genre_filter.set("All")
+        self.condition_filter.set("All")
+        self.location_filter.set("All")
         self._populate_catalog()
 
     def _build_acquisitions(self):
@@ -235,13 +324,14 @@ class BookLedgerApp(_WindowBase):
     def _build_sales(self):
         top = ttk.Frame(self.workspace)
         top.pack(fill="x", pady=(0, 12))
-        ttk.Label(top, text="Completed sales and historical sale details", foreground="#64748b").pack(side="left")
+        rows = [r for r in self.catalog.list_copies() if r.get("actual_sale_price_minor") is not None]
+        revenue = sum(r["actual_sale_price_minor"] for r in rows)
+        ttk.Label(top, text=f"Completed Sales · Revenue {self.money(revenue)} (actual sale prices)", foreground="#64748b").pack(side="left")
         frame = ttk.Frame(self.workspace)
         frame.pack(fill="both", expand=True)
-        self._make_tree(frame, columns=("code", "title", "author", "sale_date", "sale_price", "status"), headings=("Copy ID", "Title", "Author", "Sale date", "Actual sale price", "Current status"), height=18)
-        rows = [r for r in self.catalog.list_copies() if r.get("actual_sale_price_minor") is not None]
+        self._make_tree(frame, columns=("code", "title", "author", "sale_date", "sale_price"), headings=("Copy ID", "Title", "Author", "Date Sold", "Price"), height=18)
         for row in rows:
-            self.tree.insert("", "end", iid=str(row["copy_id"]), values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["actual_sale_price_minor"]), row["status"]))
+            self.tree.insert("", "end", iid=str(row["copy_id"]), values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["actual_sale_price_minor"])))
         self.tree.bind("<Double-1>", lambda _e: self.open_selected_edit())
         if not rows:
             self.status_var.set("No sales recorded yet")
@@ -250,9 +340,17 @@ class BookLedgerApp(_WindowBase):
         counts = self.catalog.counts()
         frame = ttk.LabelFrame(self.workspace, text="Inventory summary", padding=18)
         frame.pack(fill="x", anchor="n")
-        for label in ("Total copies", "Bibliographic records", *COPY_STATUSES):
-            ttk.Label(frame, text=label, width=25).pack(side="left", padx=(0, 4))
-            ttk.Label(frame, text=str(counts.get(label, 0)), font=("Segoe UI", 10, "bold"), width=8).pack(side="left", padx=(0, 18))
+        summary_labels = ("Total copies", "Distinct Titles", *COPY_STATUSES)
+        for index, label in enumerate(summary_labels):
+            ttk.Label(frame, text=label, width=20).grid(row=0, column=index, sticky="w", padx=(0, 8))
+            value = counts.get(label, 0)
+            ttk.Label(frame, text=str(value), font=("Segoe UI", 10, "bold"), width=8).grid(row=1, column=index, sticky="w", padx=(0, 8), pady=(4, 0))
+        sales = [row for row in self.catalog.list_copies() if row.get("actual_sale_price_minor") is not None]
+        revenue = sum(row["actual_sale_price_minor"] for row in sales)
+        revenue_frame = ttk.LabelFrame(self.workspace, text="Completed sales revenue", padding=16)
+        revenue_frame.pack(fill="x", pady=(12, 0))
+        ttk.Label(revenue_frame, text="Total of actual transaction prices; copy selling prices are not used.").pack(side="left", padx=(0, 12))
+        ttk.Label(revenue_frame, text=self.money(revenue), font=("Segoe UI", 16, "bold")).pack(side="left")
         ttk.Label(self.workspace, text="Further reports will be added after the core catalog and sales workflows are stable.", foreground="#64748b").pack(anchor="w", pady=18)
 
     def _build_settings(self):
@@ -277,13 +375,13 @@ class BookLedgerApp(_WindowBase):
     def open_add_form(self):
         BookForm(self, service=self.catalog, photo_service=self.photos, on_saved=lambda: self._after_save("Book saved."))
 
-    def open_selected_edit(self):
+    def open_selected_edit(self, copy_id=None):
         tree = getattr(self, "tree", None)
         selection = tree.selection() if tree else ()
-        if not selection:
+        if copy_id is None and not selection:
             self.status_var.set("Select a physical copy first.")
             return
-        copy_id = int(selection[0])
+        copy_id = int(copy_id if copy_id is not None else selection[0])
         row = self.catalog.get_copy(copy_id)
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")

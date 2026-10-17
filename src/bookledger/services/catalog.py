@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import date
+import math
 from pathlib import Path
 import sqlite3
 from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_LOCATION
@@ -7,6 +8,7 @@ from bookledger.db.database import Database
 from bookledger.services.isbn import isbn_check, normalize_isbn
 
 REQUIRED_COPY_FIELDS = ("title", "author", "genre", "format", "condition", "price", "photo_path")
+MAX_MONEY_MINOR = 2**63 - 1
 
 
 class ValidationError(ValueError):
@@ -37,14 +39,22 @@ class CatalogService:
         errors: dict[str, str] = {}
         for field in ("title", "author", "genre", "format", "condition", "photo_path"):
             if not str(payload.get(field) or "").strip():
-                errors[field] = "Required."
+                errors[field] = {
+                    "title": "Title is required.",
+                    "author": "Author is required.",
+                    "genre": "Genre is required.",
+                    "format": "Format is required.",
+                    "condition": "Condition is required.",
+                    "photo_path": "A copy photo is required.",
+                }[field]
         genre = str(payload.get("genre") or "").strip()
         if genre and genre not in APPROVED_GENRES:
             errors["genre"] = "Choose one of the approved genres."
         try:
             price = float(str(payload.get("price") or "").replace(",", ""))
-            if price <= 0:
-                errors["price"] = "Price must be greater than PHP 0."
+            scaled_price = price * 100
+            if not math.isfinite(price) or price <= 0 or not math.isfinite(scaled_price) or scaled_price > MAX_MONEY_MINOR:
+                errors["price"] = "Enter a valid price greater than PHP 0."
         except (TypeError, ValueError):
             errors["price"] = "Enter a valid price greater than PHP 0."
         photo = str(payload.get("photo_path") or "").strip()
@@ -62,6 +72,18 @@ class CatalogService:
             valid, message = isbn_check(isbn)
             if not valid and not isbn_override:
                 errors["isbn"] = message + " Select the manual override to continue anyway."
+        if payload.get("status") == "Sold":
+            try:
+                actual_price = float(str(payload.get("actual_sale_price") or "").replace(",", ""))
+                scaled_actual = actual_price * 100
+                if not math.isfinite(actual_price) or actual_price <= 0 or not math.isfinite(scaled_actual) or scaled_actual > MAX_MONEY_MINOR:
+                    raise ValueError
+            except (OverflowError, TypeError, ValueError):
+                errors["actual_sale_price"] = "Enter the actual sale price, greater than PHP 0."
+            try:
+                date.fromisoformat(str(payload.get("sale_date") or ""))
+            except ValueError:
+                errors["sale_date"] = "Enter the sale date in YYYY-MM-DD format."
         return errors
 
     def duplicate_by_isbn(self, isbn: str | None):
@@ -132,7 +154,14 @@ class CatalogService:
             conn.commit()
             return copy_id
 
-    def list_copies(self, search: str = "", status: str = "All", genre: str = "All") -> list[dict]:
+    def list_copies(
+        self,
+        search: str = "",
+        status: str = "All",
+        genre: str = "All",
+        condition: str = "All",
+        location: str = "All",
+    ) -> list[dict]:
         sql = """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,c.status,
                         b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
                         s.actual_sale_price_minor,s.sale_date,b.metadata_source,b.metadata_status
@@ -140,14 +169,20 @@ class CatalogService:
         args: list = []
         if search.strip():
             q = f"%{search.strip()}%"
-            sql += " AND (b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR c.copy_code LIKE ?)"
-            args.extend([q, q, q, q])
+            sql += " AND (b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR c.copy_code LIKE ? OR c.format LIKE ? OR c.location LIKE ?)"
+            args.extend([q, q, q, q, q, q])
         if status != "All":
             sql += " AND c.status=?"
             args.append(status)
         if genre != "All":
             sql += " AND b.genre=?"
             args.append(genre)
+        if condition != "All":
+            sql += " AND c.condition=?"
+            args.append(condition)
+        if location != "All":
+            sql += " AND c.location=?"
+            args.append(location)
         sql += " ORDER BY b.title COLLATE NOCASE, c.copy_number"
         with self.db.connect() as conn:
             return [dict(row) for row in conn.execute(sql, args).fetchall()]
@@ -171,10 +206,17 @@ class CatalogService:
         sale_date = (payload.get("sale_date") or "").strip()
         if status == "Sold":
             try:
-                actual_minor = int(round(float(str(actual_price).replace(",", "")) * 100))
-                if actual_minor <= 0:
+                actual_value = float(str(actual_price).replace(",", ""))
+                scaled_actual = actual_value * 100
+                if (
+                    not math.isfinite(actual_value)
+                    or actual_value <= 0
+                    or not math.isfinite(scaled_actual)
+                    or scaled_actual > MAX_MONEY_MINOR
+                ):
                     raise ValueError
-            except (TypeError, ValueError):
+                actual_minor = int(round(actual_value * 100))
+            except (OverflowError, TypeError, ValueError):
                 raise ValidationError({"actual_sale_price": "Enter the actual sale price, greater than PHP 0."})
             try:
                 date.fromisoformat(sale_date)
@@ -216,5 +258,8 @@ class CatalogService:
             for row in conn.execute("SELECT status, COUNT(*) AS n FROM copies GROUP BY status"):
                 result[row["status"]] = row["n"]
             result["Total copies"] = sum(result.values())
-            result["Bibliographic records"] = conn.execute("SELECT COUNT(*) FROM book_records").fetchone()[0]
+            distinct_titles = conn.execute("SELECT COUNT(*) FROM book_records").fetchone()[0]
+            result["Distinct Titles"] = distinct_titles
+            # Retain the existing service key for callers that still use the older label.
+            result["Bibliographic records"] = distinct_titles
             return result

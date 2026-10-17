@@ -49,6 +49,15 @@ def test_required_fields_price_and_genre_are_validated(setup):
     invalid = {**payload, "photo_path": "", "title": ""}
     errors = service.validate(invalid)
     assert "photo_path" in errors and "title" in errors
+    for invalid_price in ("nan", "inf", "-inf", "1e308"):
+        assert "price" in service.validate({**payload, "price": invalid_price})
+
+
+def test_catalog_service_rejects_unapproved_genres(setup):
+    _, _, _, service, payload, _ = setup
+    with pytest.raises(ValidationError) as exc:
+        service.create_copy({**payload, "genre": "Astronomy"})
+    assert "genre" in exc.value.errors
 
 
 def test_create_copy_assigns_copy_id_and_default_location(setup):
@@ -60,6 +69,25 @@ def test_create_copy_assigns_copy_id_and_default_location(setup):
     assert row["location"] == DEFAULT_LOCATION
     assert row["price_minor"] == 50000
     assert row["srp_minor"] == 60000
+
+
+def test_copy_filters_and_dashboard_counts_use_physical_and_record_levels(setup):
+    _, _, _, service, payload, _ = setup
+    first = service.create_copy({**payload, "location": "Shelf A", "condition": "Good"})
+    shared_book = service.duplicate_by_isbn(payload["isbn"])
+    service.create_copy({**payload, "location": "Shelf B", "condition": "Like New"}, existing_book_id=shared_book["id"])
+    service.create_copy({**payload, "title": "Second Record", "isbn": "9780140449136", "genre": "History", "location": "Shelf A", "condition": "Good"})
+
+    filtered = service.list_copies(genre="Science", condition="Good", location="Shelf A", status="Available")
+    assert [row["copy_id"] for row in filtered] == [first]
+    assert service.list_copies(location="Shelf B")[0]["condition"] == "Like New"
+    service.update_copy(first, {**payload, "location": "Shelf A", "condition": "Good", "status": "Sold", "actual_sale_price": "425", "sale_date": "2026-10-17"})
+
+    counts = service.counts()
+    assert counts["Total copies"] == 3
+    assert counts["Distinct Titles"] == 2
+    assert counts["Bibliographic records"] == 2
+    assert counts["Sold"] == 1
 
 
 def test_exact_isbn_duplicate_requires_reusing_record(setup):
@@ -108,6 +136,14 @@ def test_invalid_sold_record_is_rejected(setup):
     copy_id = service.create_copy(payload)
     with pytest.raises(ValidationError) as exc:
         service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "", "sale_date": ""})
+    assert "actual_sale_price" in exc.value.errors
+
+
+def test_non_finite_actual_sale_price_is_rejected(setup):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    with pytest.raises(ValidationError) as exc:
+        service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "inf", "sale_date": "2026-10-17"})
     assert "actual_sale_price" in exc.value.errors
 
 
