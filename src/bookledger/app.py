@@ -14,6 +14,7 @@ from bookledger.db.database import Database
 from bookledger.paths import AppPaths
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService
+from bookledger.services.booktopia import BooktopiaProvider
 from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService, OpenLibraryProvider
 from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
@@ -50,7 +51,9 @@ class BookLedgerApp(_WindowBase):
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
         self.verifier = VerificationService(self.db, self.paths.data)
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
-        self.metadata_lookup = MetadataLookupService((OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key())))
+        self.metadata_lookup = MetadataLookupService((
+            OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key()), BooktopiaProvider(),
+        ))
         self.title(f"{APP_NAME} · Book collection manager")
         self.geometry("1280x800")
         self.minsize(1000, 650)
@@ -691,7 +694,9 @@ class BookLedgerApp(_WindowBase):
         def save_key():
             self.paths.user_config.mkdir(parents=True, exist_ok=True)
             self.paths.google_books_config.write_text(json.dumps({"api_key": key.get().strip()}, indent=2), encoding="utf-8")
-            self.metadata_lookup.providers = (OpenLibraryProvider(), GoogleBooksProvider(key.get().strip()))
+            self.metadata_lookup.providers = (
+                OpenLibraryProvider(), GoogleBooksProvider(key.get().strip()), BooktopiaProvider(),
+            )
         def test():
             try:
                 save_key()
@@ -805,7 +810,9 @@ class BookLedgerApp(_WindowBase):
             self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
             self.verifier = VerificationService(self.db, self.paths.data)
             self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
-            self.metadata_lookup = MetadataLookupService((OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key())))
+            self.metadata_lookup = MetadataLookupService((
+                OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key()), BooktopiaProvider(),
+            ))
             self.status_var.set("BookLedger data was purged. Root-level backups were retained.")
             self.show_page("Dashboard")
         except Exception as exc:

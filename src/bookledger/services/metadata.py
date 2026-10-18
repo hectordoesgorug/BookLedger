@@ -356,9 +356,14 @@ class MetadataLookupService:
         combined: dict = {}
         sources: list[str] = []
         any_record_found = False
-        # These are the bibliographic fields at least one configured provider can
-        # supply. SRP is intentionally excluded: neither current provider supplies it.
-        supported = ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count")
+        # SRP is intentionally excluded: Booktopia's Australian retail price is
+        # neither the user's Price nor the PHP reference SRP field.
+        provider_fields = {
+            "Open Library": ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count"),
+            "Google Books": ("title", "author", "genre", "book_details", "publisher", "publication_year", "page_count"),
+            "Booktopia": ("title", "author", "book_details", "publisher", "publication_year", "edition", "page_count", "format"),
+        }
+        supported = tuple(dict.fromkeys(field for fields in provider_fields.values() for field in fields))
         provider_statuses: dict[str, str] = {}
 
         def set_provider_status(name: str, status: str) -> None:
@@ -371,14 +376,10 @@ class MetadataLookupService:
             initial_status = f"Waiting for {previous}…" if previous else f"Retrieving from {provider.name}…"
             set_provider_status(provider.name, initial_status)
         for index, provider in enumerate(self.providers):
-            if provider.name == "Booktopia" and combined.get("book_details") not in (None, ""):
+            fields_for_provider = provider_fields.get(provider.name, supported)
+            if combined and not any(combined.get(key) in (None, "") for key in fields_for_provider):
                 set_provider_status(provider.name, "Not needed (skipped)")
                 continue
-            missing = [key for key in supported if combined.get(key) in (None, "")]
-            if combined and not missing:
-                for skipped in self.providers[index:]:
-                    set_provider_status(skipped.name, "Not needed (skipped)")
-                break
             if on_status:
                 on_status(f"Searching ISBN: {provider.name}")
                 on_status("Fetching Data…")
@@ -390,17 +391,10 @@ class MetadataLookupService:
                 result = MetadataResult("Lookup failed", {}, provider.name, str(exc), _failure_kind(exc))
             any_record_found = any_record_found or result.record_found is True
             values = {key: value for key, value in result.values.items() if value not in (None, "")}
-            provider_fields = (
-                ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count")
-                if provider.name == "Open Library"
-                else ("book_details",)
-                if provider.name == "Booktopia"
-                else ("title", "author", "genre", "book_details", "publisher", "publication_year", "page_count")
-            )
             normalized_values = dict(values)
             if "title" in normalized_values:
                 normalized_values["title"] = normalize_provider_title(str(normalized_values["title"]))
-            provider_partial = bool(normalized_values) and any(normalized_values.get(key) in (None, "") for key in provider_fields)
+            provider_partial = bool(normalized_values) and any(normalized_values.get(key) in (None, "") for key in fields_for_provider)
             set_provider_status(provider.name, _provider_outcome(
                 MetadataResult(result.status, normalized_values, result.source, result.error, result.failure_kind,
                                result.record_found, partial=provider_partial)

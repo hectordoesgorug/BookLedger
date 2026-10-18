@@ -550,7 +550,7 @@ class BookForm(tk.Toplevel):
         optional = ("publisher", "publication_year", "edition", "page_count", "book_details", "srp")
         missing = [key.replace("_", " ").title() for key in optional if result.values.get(key) in (None, "") and not self._get(key)]
         self.metadata_status.set(f"Retrieved · {result.source or 'Metadata Provider'}" + (f" · No Data: {', '.join(missing)}" if missing else ""))
-        for key in ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count", "srp"):
+        for key in ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count", "format", "srp"):
             value = result.values.get(key)
             # Fill empty controls only, preserving manual or newer user input.
             if value not in (None, "") and key in self._widgets and not self._get(key):

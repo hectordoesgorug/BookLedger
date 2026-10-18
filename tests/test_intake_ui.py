@@ -140,14 +140,22 @@ def test_optional_metadata_placeholder_can_be_replaced_with_manual_value(form):
 def test_photo_preview_and_manual_metadata_values_are_preserved(form):
     widget, _root, photo = form
     widget._set("title", "Manually Entered Title")
+    widget._set("format", "Hardcover")
 
     widget.set_photo(photo)
-    widget._apply_metadata(MetadataResult("Retrieved", {"title": "Provider Title", "author": "Provider Author"}, "Open Library"))
+    widget._apply_metadata(MetadataResult(
+        "Retrieved", {"title": "Provider Title", "author": "Provider Author", "format": "Paperback"}, "Open Library"
+    ))
 
     assert widget.photo_path.get() == str(photo)
     assert widget.photo_preview.cget("image")
     assert widget._get("title") == "Manually Entered Title"
+    assert widget._get("format") == "Hardcover"
     assert widget._get("author") == "Provider Author"
+
+    widget._set("format", "")
+    widget._apply_metadata(MetadataResult("Retrieved", {"format": "Paperback"}, "Booktopia"))
+    assert widget._get("format") == "Paperback"
 
 
 def test_connection_failure_refresh_retries_simulated_connection(form):
