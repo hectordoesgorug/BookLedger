@@ -1,0 +1,44 @@
+BookLedger — To Do
+
+The following items are intentionally deferred as low priority. They are
+not blockers for the configurable metadata provider registry work.
+Revisit when convenient.
+
+1.  Review remaining storage edge cases — LOW PRIORITY
+    -   Confirm the legacy migration regression for photos belonging to
+        trashed copies is covered and passing.
+    -   Review pending-operation interactions identified in the earlier
+        static audit, including Clear Trash versus pending restore
+        operations.
+    -   Review recovery/error-reporting behavior for exceptional
+        filesystem or database failures.
+    -   Keep the scope limited to confirming, testing, and fixing
+        demonstrated issues; do not reopen already-working normal
+        workflows without evidence.
+2.  Close the backup/restore test gap — LOW PRIORITY
+    -   Manually test a normal backup and restore, including database
+        records and photos.
+    -   Review the previously identified risk involving backups taken
+        while photo-install operations are pending.
+    -   Review backup verification coverage, including SQLite integrity,
+        foreign-key consistency, and referenced photo files.
+    -   Backup is expected to be used rarely, so this is deliberately
+        low priority. Do not expand into a backup overhaul unless
+        testing demonstrates a concrete need.
+3.  Confirm small GUI polish items — LOW PRIORITY
+    -   Confirm Catalog and Inventory clearly distinguish multiple
+        physical copies of the same bibliographic record (for example,
+        Title — Copy 1, Title — Copy 2).
+    -   Confirm optional missing metadata is displayed consistently as
+        “No Data” in relevant form fields as well as status/footer
+        areas.
+    -   Check the current GUI before changing anything; these were
+        previously observed items and may already have been addressed.
+
+Notes
+
+-   These items are deferred, not confirmed resolved.
+-   Sales and Reports are explicitly out of scope for the current phase.
+-   Continue with the configurable metadata source/provider registry
+    independently.
+-   Do not commit or push changes unless explicitly authorized.
