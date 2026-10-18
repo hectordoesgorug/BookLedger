@@ -219,7 +219,11 @@ class MetadataLookupService:
     """Try replaceable providers in order, giving each its own request timeout."""
 
     def __init__(self, providers: Iterable[MetadataProvider] | None = None):
-        self.providers = tuple(providers) if providers is not None else (OpenLibraryProvider(), GoogleBooksProvider())
+        if providers is None:
+            from bookledger.services.booktopia import BooktopiaProvider
+
+            providers = (OpenLibraryProvider(), GoogleBooksProvider(), BooktopiaProvider())
+        self.providers = tuple(providers)
 
     def lookup(
         self,
@@ -244,9 +248,13 @@ class MetadataLookupService:
                 on_provider_status(name, status)
 
         for index, provider in enumerate(self.providers):
-            initial_status = f"Waiting for Open Library…" if index else f"Retrieving from {provider.name}…"
+            previous = self.providers[index - 1].name if index else None
+            initial_status = f"Waiting for {previous}…" if previous else f"Retrieving from {provider.name}…"
             set_provider_status(provider.name, initial_status)
         for index, provider in enumerate(self.providers):
+            if provider.name == "Booktopia" and combined.get("book_details") not in (None, ""):
+                set_provider_status(provider.name, "Not needed (skipped)")
+                continue
             missing = [key for key in supported if combined.get(key) in (None, "")]
             if combined and not missing:
                 for skipped in self.providers[index:]:
@@ -266,6 +274,8 @@ class MetadataLookupService:
             provider_fields = (
                 ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count")
                 if provider.name == "Open Library"
+                else ("book_details",)
+                if provider.name == "Booktopia"
                 else ("title", "author", "genre", "book_details", "publisher", "publication_year", "page_count")
             )
             normalized_values = dict(values)

@@ -10,7 +10,7 @@ BookLedger is a fresh, modular rebuild of a personal book collection and invento
 - ISBN-10/ISBN-13 check-digit validation with manual override.
 - Individual-copy IDs and stable copy numbers.
 - Photo import/compression with per-copy photo storage.
-- Optional Open Library metadata lookup with Google Books fallback; manual cataloging remains possible.
+- Optional Open Library metadata lookup with Google Books fallback and best-effort Booktopia description enrichment; manual cataloging remains possible.
 - Add Book intake form with photo preview, inline validation, and clear/retry/cancel actions.
 - BookLedger Mobile connection and ISBN scanning are testable UI simulations; no phone networking is included.
 - Inline form validation (no validation dialog for missing/invalid fields).
@@ -49,7 +49,7 @@ On Windows, use `.venv\Scripts\python.exe -m pip install -e ".[dev]"` and `.venv
 
 ## Metadata settings
 
-Open **Settings → Google Books API** to save an optional API key or test connectivity. This Google Books integration currently works without a key. If provided, the key is stored as plain text in `data/assets/google_books.json` and is excluded from portable backups. On first migration, an existing `%LOCALAPPDATA%\BookLedger\google_books.json` is copied and validated in portable data before the profile copy is removed; conflicting values stop startup for manual resolution. Its value is never logged. Open Library remains the primary provider and missing fields from Google Books are used where available. The Add Book form displays separate Open Library and Google Books activity and final outcomes alongside an overall retrieval summary. A matching provider record with sparse fields is distinguished from an ISBN miss; provider errors are summarized without displaying technical details. Provider-derived titles are normalized; manually entered titles remain unchanged. Provider values fill empty form fields only. Lookup runs in a worker thread, while status and form updates are applied on Tk's UI thread; clearing the form or changing the ISBN prevents stale results from being applied.
+Open **Settings → Google Books API** to save an optional API key or test connectivity. This Google Books integration currently works without a key. If provided, the key is stored as plain text in `data/assets/google_books.json` and is excluded from portable backups. On first migration, an existing `%LOCALAPPDATA%\BookLedger\google_books.json` is copied and validated in portable data before the profile copy is removed; conflicting values stop startup for manual resolution. Its value is never logged. Open Library remains the primary provider and Google Books supplies fallback metadata. Booktopia is an additional best-effort description source when the description is still missing. Booktopia responses are bounded, redirects stay on Booktopia, and a product page must match the requested ISBN before its description is accepted. The Add Book form displays separate activity and final outcomes for all three providers alongside an overall retrieval summary. A matching provider record with sparse fields is distinguished from an ISBN miss; provider errors are summarized without displaying technical details. Provider-derived titles are normalized; manually entered titles remain unchanged. Provider values fill empty form fields only. Lookup runs in a worker thread, while status and form updates are applied on Tk's UI thread; clearing the form or changing the ISBN prevents stale results from being applied.
 
 ## Price and status behavior
 
@@ -67,6 +67,6 @@ Interruption during backup creation or restoration, photo capture or replacement
 An approved follow-up is a separate, explicit orphan-file cleanup action. **Verify Database** must remain read-only; cleanup must recheck both database and pending-operation references, ask for confirmation, and report exactly which files were removed or retained. That cleanup action is outside the current implementation scope.
 
 ## Important
-- Online metadata lookup requires internet access; cataloging does not.
+- Online metadata lookup (Open Library, Google Books, and Booktopia) requires internet access; cataloging does not.
 - BookLedger Mobile is not connected in this build; connection and scanning controls simulate phone events.
 - Do not treat this early build as the sole storage location for irreplaceable catalog data until backup/restore testing is complete.

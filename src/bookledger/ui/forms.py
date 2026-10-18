@@ -44,6 +44,7 @@ class BookForm(tk.Toplevel):
         self.metadata_status = tk.StringVar(value="Manual entry")
         self.open_library_status = tk.StringVar(value="Not attempted")
         self.google_books_status = tk.StringVar(value="Not attempted")
+        self.booktopia_status = tk.StringVar(value="Not attempted")
         self.mobile_status = tk.StringVar(value="Idle — Ready")
         self.connection_outcome = tk.StringVar(value="Connected — Ready")
         self.mock_scan_isbn = tk.StringVar()
@@ -149,6 +150,9 @@ class BookForm(tk.Toplevel):
         ttk.Label(self.metadata_status_panel, text="Google Books:", foreground="#596579").grid(row=2, column=0, sticky="w", padx=(0, 4))
         self.google_books_label = ttk.Label(self.metadata_status_panel, textvariable=self.google_books_status, foreground="#596579")
         self.google_books_label.grid(row=2, column=1, sticky="w")
+        ttk.Label(self.metadata_status_panel, text="Booktopia:", foreground="#596579").grid(row=3, column=0, sticky="w", padx=(0, 4))
+        self.booktopia_label = ttk.Label(self.metadata_status_panel, textvariable=self.booktopia_status, foreground="#596579")
+        self.booktopia_label.grid(row=3, column=1, sticky="w")
         row += 1
         ttk.Label(body, text="Fields marked * are required. Metadata lookup is optional.", foreground="#596579").grid(
             row=row, column=0, columnspan=2, sticky="w"
@@ -448,6 +452,7 @@ class BookForm(tk.Toplevel):
         self.metadata_status.set("Looking up ISBN…")
         self.open_library_status.set("Retrieving from Open Library…")
         self.google_books_status.set("Waiting for Open Library…")
+        self.booktopia_status.set("Waiting for Google Books…")
         self._update_control_states()
 
         def report_provider(provider_name, status):
@@ -485,6 +490,7 @@ class BookForm(tk.Toplevel):
         target = {
             "Open Library": self.open_library_status,
             "Google Books": self.google_books_status,
+            "Booktopia": self.booktopia_status,
         }.get(provider_name)
         if target is not None:
             target.set(status)
@@ -492,6 +498,7 @@ class BookForm(tk.Toplevel):
     def _reset_provider_statuses(self):
         self.open_library_status.set("Not attempted")
         self.google_books_status.set("Not attempted")
+        self.booktopia_status.set("Not attempted")
 
     def _finish_lookup(self, operation_id, requested_isbn, result):
         if not self._active_operation or self._active_operation[1] != operation_id:
@@ -510,6 +517,7 @@ class BookForm(tk.Toplevel):
             target = {
                 "Open Library": self.open_library_status,
                 "Google Books": self.google_books_status,
+                "Booktopia": self.booktopia_status,
             }.get(provider_name)
             if target is not None:
                 target.set(status)

@@ -52,6 +52,9 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert "sale_date" not in widget._widgets
     assert "status" not in widget._widgets
     assert widget._get("location") == DEFAULT_LOCATION
+    assert widget.open_library_status.get() == "Not attempted"
+    assert widget.google_books_status.get() == "Not attempted"
+    assert widget.booktopia_status.get() == "Not attempted"
     assert tuple(widget._widgets["genre"]["values"]) == APPROVED_GENRES
     assert str(widget.refresh_button.cget("state")) == "disabled"
     assert [widget.save_button.cget("text"), widget.refresh_button.cget("text")] == ["Save Book", "Refresh"]
@@ -237,7 +240,11 @@ def test_successful_fallback_lookup_reports_primary_provider_failure(form):
     widget._finish_lookup(46, isbn, MetadataResult(
         "Retrieved", {"title": "Fallback Title", "publisher": "Fallback Press"}, "Google Books",
         "timed out", "timeout",
-        provider_statuses={"Open Library": "Timed out", "Google Books": "Metadata retrieved · some fields missing"},
+        provider_statuses={
+            "Open Library": "Timed out",
+            "Google Books": "Metadata retrieved · some fields missing",
+            "Booktopia": "Metadata retrieved",
+        },
         partial=True,
     ))
 
@@ -246,6 +253,7 @@ def test_successful_fallback_lookup_reports_primary_provider_failure(form):
     assert widget.metadata_status.get().startswith("Partially retrieved")
     assert widget.open_library_status.get() == "Timed out"
     assert widget.google_books_status.get() == "Metadata retrieved · some fields missing"
+    assert widget.booktopia_status.get() == "Metadata retrieved"
 
 
 def test_edit_form_uses_one_contextual_price_and_keeps_status_out_of_form(form):
