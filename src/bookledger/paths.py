@@ -57,6 +57,17 @@ class AppPaths:
         return self.assets / "google_books.json"
 
     @property
+    def provider_config(self) -> Path:
+        return self.root / "config.json"
+
+    @staticmethod
+    def provider_config_fallback() -> Path:
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base:
+            return Path(base) / "BookLedger" / "config.json"
+        return Path.home() / ".config" / "BookLedger" / "config.json"
+
+    @property
     def legacy_data(self) -> Path:
         return self.root / "BookLedger_Data"
 

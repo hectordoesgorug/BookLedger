@@ -14,8 +14,9 @@ from bookledger.db.database import Database
 from bookledger.paths import AppPaths
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService
-from bookledger.services.booktopia import BooktopiaProvider
-from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService, OpenLibraryProvider
+from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService
+from bookledger.provider_registry import PROVIDER_REGISTRY, build_providers
+from bookledger.provider_settings import ProviderSettings, ProviderSettingsStore
 from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
 from bookledger.services.verification import VerificationService
@@ -46,14 +47,18 @@ class BookLedgerApp(_WindowBase):
                 raise RuntimeError(f"Portable migration verification failed; legacy data was preserved.\n{migration_report.message}")
             self.paths.finalize_legacy_migration()
         self.paths.finalize_profile_config_migration()
+        self.provider_settings_store = ProviderSettingsStore(
+            self.paths.provider_config, self.paths.provider_config_fallback()
+        )
+        self.provider_settings = self.provider_settings_store.load()
         self.catalog = CatalogService(self.db, self.paths.data)
         self.photos = PhotoService(self.paths.photos, self.paths.trash)
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
         self.verifier = VerificationService(self.db, self.paths.data)
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
-        self.metadata_lookup = MetadataLookupService((
-            OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key()), BooktopiaProvider(),
-        ))
+        self.metadata_lookup = MetadataLookupService(
+            build_providers(self.provider_settings, self._load_google_books_key())
+        )
         self.title(f"{APP_NAME} · Book collection manager")
         self.geometry("1280x800")
         self.minsize(1000, 650)
@@ -515,6 +520,7 @@ class BookLedgerApp(_WindowBase):
         ttk.Label(self.workspace, text="Further reports will be added after the core catalog and sales workflows are stable.", foreground="#64748b").pack(anchor="w", pady=18)
 
     def _build_settings(self):
+        self._build_metadata_sources()
         panel = ttk.LabelFrame(self.workspace, text="Portable data and backups", padding=18)
         panel.pack(fill="x", anchor="n")
         ttk.Label(panel, text=f"Data folder: {self.paths.data}", wraplength=850).pack(anchor="w", pady=(0, 8))
@@ -541,6 +547,99 @@ class BookLedgerApp(_WindowBase):
         companion = ttk.LabelFrame(self.workspace, text="Android companion (planned)", padding=16)
         companion.pack(fill="x")
         ttk.Label(companion, text="The desktop data model is being designed for future local Wi-Fi pairing and photo/ISBN transfer. Pairing will be implemented after desktop stabilization.", wraplength=900).pack(anchor="w")
+
+    def _build_metadata_sources(self):
+        panel = ttk.LabelFrame(self.workspace, text="Metadata Sources", padding=16)
+        panel.pack(fill="x", anchor="n", pady=(0, 14))
+        ttk.Label(panel, text="Enabled sources are searched from top to bottom. Drag a source by its handle to change priority.", wraplength=900).pack(anchor="w")
+        self._provider_rows = {}
+        self._provider_variables = {}
+        rows = ttk.Frame(panel)
+        rows.pack(fill="x", pady=(8, 4))
+        for descriptor in PROVIDER_REGISTRY:
+            if not descriptor.implemented:
+                continue
+            row = ttk.Frame(rows, padding=(4, 3))
+            row.pack(fill="x")
+            var = tk.BooleanVar(value=self.provider_settings.enabled.get(descriptor.id, True))
+            ttk.Checkbutton(row, variable=var).pack(side="left")
+            name = ttk.Label(row, text=descriptor.name, width=24, anchor="w")
+            name.pack(side="left")
+            ttk.Label(row, text="Implemented" if descriptor.implemented else "Planned · unavailable", foreground="#64748b").pack(side="left", padx=(6, 0))
+            handle = ttk.Label(row, text="⠿", cursor="fleur", foreground="#64748b", padding=(12, 0))
+            handle.pack(side="right")
+            for widget in (row, name, handle):
+                widget.bind("<ButtonPress-1>", lambda event, key=descriptor.id: self._provider_drag_start(event, key))
+                widget.bind("<B1-Motion>", self._provider_drag_motion)
+                widget.bind("<ButtonRelease-1>", self._provider_drag_end)
+            self._provider_rows[descriptor.id] = row
+            self._provider_variables[descriptor.id] = var
+        self._reorder_provider_rows(self.provider_settings.order)
+        controls = ttk.Frame(panel)
+        controls.pack(fill="x", pady=(6, 0))
+        ttk.Button(controls, text="Save Metadata Sources", command=self._save_provider_settings).pack(side="left")
+        ttk.Button(controls, text="Restore Defaults", command=self._restore_provider_defaults).pack(side="left", padx=8)
+        warning = self.provider_settings_store.warning or ""
+        config_path = self.provider_settings_store.active_path
+        self._provider_config_status = tk.StringVar(value=warning or f"Settings file: {config_path}")
+        ttk.Label(panel, textvariable=self._provider_config_status, foreground="#64748b", wraplength=900).pack(anchor="w", pady=(8, 0))
+
+    def _provider_drag_start(self, event, provider_id):
+        self._provider_drag_id = provider_id
+
+    def _provider_drag_motion(self, event):
+        if not getattr(self, "_provider_drag_id", None):
+            return
+        rows = list(self._provider_order)
+        moving = self._provider_drag_id
+        target_y = event.y_root
+        for provider_id in rows:
+            if provider_id == moving:
+                continue
+            row = self._provider_rows[provider_id]
+            midpoint = row.winfo_rooty() + row.winfo_height() / 2
+            if target_y < midpoint:
+                rows.remove(moving)
+                rows.insert(rows.index(provider_id), moving)
+                break
+        else:
+            rows.remove(moving)
+            rows.append(moving)
+        self._reorder_provider_rows(rows)
+
+    def _provider_drag_end(self, _event):
+        self._provider_drag_id = None
+
+    def _reorder_provider_rows(self, provider_ids):
+        self._provider_order = list(provider_ids)
+        for row in self._provider_rows.values():
+            row.pack_forget()
+        for provider_id in self._provider_order:
+            if provider_id in self._provider_rows:
+                self._provider_rows[provider_id].pack(fill="x")
+
+    def _save_provider_settings(self):
+        order = list(self._provider_order)
+        self.provider_settings.order = order
+        self.provider_settings.enabled = {
+            provider_id: bool(variable.get()) for provider_id, variable in self._provider_variables.items()
+        }
+        try:
+            saved_path = self.provider_settings_store.save(self.provider_settings)
+        except OSError as exc:
+            self._provider_config_status.set(f"Could not save provider settings: {exc}")
+            return
+        self.metadata_lookup = MetadataLookupService(
+            build_providers(self.provider_settings, self._load_google_books_key())
+        )
+        self._provider_config_status.set(f"Provider settings saved to {saved_path}")
+
+    def _restore_provider_defaults(self):
+        self.provider_settings = ProviderSettings.defaults()
+        for provider_id, variable in self._provider_variables.items():
+            variable.set(True)
+        self._reorder_provider_rows(list(self.provider_settings.order))
+        self._save_provider_settings()
 
     def _load_google_books_key(self):
         try:
@@ -694,8 +793,8 @@ class BookLedgerApp(_WindowBase):
         def save_key():
             self.paths.user_config.mkdir(parents=True, exist_ok=True)
             self.paths.google_books_config.write_text(json.dumps({"api_key": key.get().strip()}, indent=2), encoding="utf-8")
-            self.metadata_lookup.providers = (
-                OpenLibraryProvider(), GoogleBooksProvider(key.get().strip()), BooktopiaProvider(),
+            self.metadata_lookup = MetadataLookupService(
+                build_providers(self.provider_settings, key.get().strip())
             )
         def test():
             try:
@@ -795,7 +894,7 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Clear Trash Incomplete", str(exc), parent=self)
 
     def purge_data(self):
-        if not messagebox.askyesno("Reset BookLedger Data?", "This removes the database, photos, Trash, locations, provider settings, and other data under the portable data folder. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
+        if not messagebox.askyesno("Reset BookLedger Data?", "This removes the database, photos, Trash, locations, Google Books API key, and other data under the portable data folder. Metadata provider order and enabled settings are stored separately and retained. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
             return
         from tkinter import simpledialog
         typed = simpledialog.askstring("Confirm Purge", "Type PURGE to permanently reset BookLedger data:", parent=self)
@@ -810,9 +909,9 @@ class BookLedgerApp(_WindowBase):
             self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
             self.verifier = VerificationService(self.db, self.paths.data)
             self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
-            self.metadata_lookup = MetadataLookupService((
-                OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key()), BooktopiaProvider(),
-            ))
+            self.metadata_lookup = MetadataLookupService(
+                build_providers(self.provider_settings, self._load_google_books_key())
+            )
             self.status_var.set("BookLedger data was purged. Root-level backups were retained.")
             self.show_page("Dashboard")
         except Exception as exc:

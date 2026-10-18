@@ -53,6 +53,14 @@
 - [ ] Windows packaging and frozen-executable verification (no packaging spec or executable exists)
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)
 
+## Configurable metadata provider registry
+- [x] Central registry for Open Library, Google Books, and Booktopia with implemented status and provider field support
+- [x] Settings controls for enable/disable, functional drag-and-drop priority, and Restore Defaults
+- [x] Versioned root `config.json`, per-user fallback for read-only roots, malformed-config preservation, and Purge persistence
+- [x] Configured lookup order with field-level first-value-wins merge and completion at title, author, genre, publisher, and publication year; edition, format, synopsis, and page count remain optional
+- [x] Focused tests: 91 passed; full suite: 170 passed, 2 Tk tests skipped because Tcl/Tk files are missing; compileall and `git diff --check` passed
+- [ ] Native Tk UI runtime acceptance remains pending because the installed Tcl/Tk files are incomplete
+
 ## Next stages
 1. Visually review the Catalog grid, Inventory table, and Add/Edit layouts on a complete native Windows Tk installation.
 2. Add import/export and fuller reports.

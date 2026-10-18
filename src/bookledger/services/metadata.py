@@ -307,9 +307,10 @@ class MetadataLookupService:
 
     def __init__(self, providers: Iterable[MetadataProvider] | None = None):
         if providers is None:
-            from bookledger.services.booktopia import BooktopiaProvider
+            from bookledger.provider_registry import build_providers
+            from bookledger.provider_settings import ProviderSettings
 
-            providers = (OpenLibraryProvider(), GoogleBooksProvider(), BooktopiaProvider())
+            providers = build_providers(ProviderSettings.defaults())
         self.providers = tuple(providers)
 
     def lookup(
@@ -325,14 +326,25 @@ class MetadataLookupService:
         combined: dict = {}
         sources: list[str] = []
         any_record_found = False
-        # SRP is intentionally excluded: Booktopia's Australian retail price is
-        # neither the user's Price nor the PHP reference SRP field.
-        provider_fields = {
-            "Open Library": ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count"),
-            "Google Books": ("title", "author", "genre", "book_details", "publisher", "publication_year", "page_count"),
-            "Booktopia": ("title", "author", "book_details", "publisher", "publication_year", "edition", "page_count", "format"),
-        }
-        supported = tuple(dict.fromkeys(field for fields in provider_fields.values() for field in fields))
+        # Provider field support lives with the registry descriptors rather than
+        # being duplicated in the lookup loop. SRP is intentionally excluded.
+        from bookledger.provider_registry import PROVIDERS_BY_NAME
+        supported = tuple(dict.fromkeys(
+            field for descriptor in PROVIDERS_BY_NAME.values() for field in descriptor.supported_fields
+            if field != "srp"
+        ))
+        # Stop when the main bibliographic fields are available. Edition, format,
+        # synopsis, and page count remain optional enrichment and never force all
+        # sources to run. Unsupported fields are not blockers.
+        completion_fields = set()
+        for provider in self.providers:
+            descriptor = PROVIDERS_BY_NAME.get(provider.name)
+            if descriptor:
+                completion_fields.update(descriptor.supported_fields)
+            else:
+                completion_fields.update(supported)
+        completion_fields.update(("title", "author"))
+        completion_fields.difference_update(("book_details", "page_count", "edition", "format", "isbn", "srp"))
         provider_statuses: dict[str, str] = {}
 
         def set_provider_status(name: str, status: str) -> None:
@@ -345,7 +357,12 @@ class MetadataLookupService:
             initial_status = f"Waiting for {previous}…" if previous else f"Retrieving from {provider.name}…"
             set_provider_status(provider.name, initial_status)
         for index, provider in enumerate(self.providers):
-            fields_for_provider = provider_fields.get(provider.name, supported)
+            descriptor = PROVIDERS_BY_NAME.get(provider.name)
+            fields_for_provider = descriptor.supported_fields if descriptor else supported
+            if combined and completion_fields.issubset(combined.keys()):
+                for remaining in self.providers[index:]:
+                    set_provider_status(remaining.name, "Not needed (skipped)")
+                break
             if combined and not any(combined.get(key) in (None, "") for key in fields_for_provider):
                 set_provider_status(provider.name, "Not needed (skipped)")
                 continue
@@ -384,7 +401,7 @@ class MetadataLookupService:
                 unverified_result = result
 
         if combined:
-            partial = bool(failures) or any(combined.get(key) in (None, "") for key in supported)
+            partial = bool(failures) or any(combined.get(key) in (None, "") for key in completion_fields)
             if primary_failure is not None and len(sources) == 1 and sources[0] != primary_failure.source:
                 # A matching fallback result is a successful lookup even when the
                 # primary provider was unavailable; retain that failure for diagnostics.

@@ -562,7 +562,7 @@ def test_booktopia_runs_last_to_fill_only_a_missing_description():
     assert result.provider_statuses["Booktopia"] == "Metadata retrieved · some fields missing"
 
 
-def test_google_books_is_not_skipped_when_book_details_is_the_only_missing_supported_field():
+def test_google_books_is_skipped_when_only_optional_book_details_is_missing():
     class StubProvider:
         def __init__(self, name, values):
             self.name = name
@@ -581,9 +581,10 @@ def test_google_books_is_not_skipped_when_book_details_is_the_only_missing_suppo
 
     result = MetadataLookupService((open_library, google_books)).lookup(ISBN)
 
-    assert google_books.calls == 1
-    assert result.provider_statuses["Google Books"] != "Not needed (skipped)"
-    assert result.values["book_details"] == "A full synopsis."
+    assert google_books.calls == 0
+    assert result.provider_statuses["Google Books"] == "Not needed (skipped)"
+    assert "book_details" not in result.values
+    assert result.partial is False
 
 
 def test_booktopia_is_skipped_when_earlier_providers_supply_all_supported_fields():

@@ -1,6 +1,15 @@
 # Test report
 
-Date: 2026-10-18
+Date: 2026-10-19
+
+## Configurable metadata provider registry
+
+Implementation adds a central provider registry and a versioned root `config.json` for enabled states and lookup priority, with a per-user fallback when the portable root is read-only. Settings includes functional drag reordering and Restore Defaults. Lookup stops when title, author, genre, publisher, and publication year are available; edition, format, synopsis, and page count are optional enrichment. Google Books credentials remain in their existing separate file. Inventory Purge preserves provider configuration.
+
+- `.venv\Scripts\python.exe -m pytest tests\test_provider_settings.py tests\test_metadata.py tests\test_booktopia.py tests\test_portable_lifecycle.py -q --basetemp=.pytest-tmp-provider-focused-final` — **91 passed**.
+- `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-provider-full-final` — **170 passed, 2 skipped**. Tk could not initialize because required Tcl/Tk files are missing; Settings drag/drop was not runtime-tested.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
+- `git diff --check` — passed; Git reported configured LF-to-CRLF notices only.
 
 ## Direct ISBN fallback follow-up
 
