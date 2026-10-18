@@ -1,4 +1,5 @@
 from email.message import Message
+from io import BytesIO
 from pathlib import Path
 
 import urllib.error
@@ -15,8 +16,12 @@ PRODUCT_URL = "https://www.booktopia.com.au/crime-and-punishment-fyodor-dostoyev
 SEARCH_URL = "https://www.booktopia.com.au/search.ep?keywords=9780140449136"
 STRENGTH_ISBN = "9781923058507"
 STRENGTH_URL = "https://www.booktopia.com.au/the-strength-of-the-few-james-islington/book/9781923058507.html"
-EVOLUTION_ISBN = "9780716736387"
-EVOLUTION_URL = "https://www.booktopia.com.au/the-triumph-of-evolution-niles-eldredge/book/9780716736387.html"
+UNAVAILABLE_ISBN = "9780306406157"
+UNAVAILABLE_URL = "https://www.booktopia.com.au/synthetic-unavailable-book/book/9780306406157.html"
+NIGHTFALL_ISBN = "9780553290998"
+NIGHTFALL_SEARCH_URL = "https://www.booktopia.com.au/search.ep?keywords=9780553290998"
+NIGHTFALL_DIRECT_URL = "https://booktopia.com.au/book/9780553290998.html/"
+NIGHTFALL_CANONICAL_URL = "https://www.booktopia.com.au/nightfall-isaac-asimov/book/9780553290998.html"
 
 
 class FakeResponse:
@@ -41,6 +46,16 @@ class FakeResponse:
 
 def _fixture(name):
     return (FIXTURES / name).read_bytes()
+
+
+def _http_error(url, body=None, status=404):
+    headers = Message()
+    if body is not None:
+        headers["Content-Type"] = "text/html; charset=utf-8"
+    return urllib.error.HTTPError(
+        url, status, "Not Found", headers,
+        BytesIO(body) if body is not None else None,
+    )
 
 
 def _mock_response(monkeypatch, response):
@@ -78,6 +93,55 @@ def test_booktopia_follows_redirect_and_extracts_matching_book_description(monke
     }
 
 
+def test_booktopia_uses_verified_canonical_product_body_from_http_redirect(monkeypatch):
+    provider = BooktopiaProvider()
+    error_response = _http_error(PRODUCT_URL, _fixture("matching_product.html"))
+    called = _mock_response(monkeypatch, error_response)
+
+    result = provider.lookup(ISBN)
+
+    assert called == [(SEARCH_URL, 10)]
+    assert result.status == "Retrieved"
+    assert result.record_found is True
+    assert result.values["book_details"] == "Product description with nested markup."
+
+
+def test_booktopia_search_http_failure_falls_back_to_direct_isbn_redirect(monkeypatch):
+    provider = BooktopiaProvider()
+    called = _mock_responses(
+        monkeypatch,
+        _http_error(NIGHTFALL_SEARCH_URL, b"<!doctype html><title>Page Not Found</title>"),
+        FakeResponse(_fixture("nightfall_unavailable_synthetic.html"), NIGHTFALL_CANONICAL_URL),
+    )
+
+    result = provider.lookup(NIGHTFALL_ISBN)
+
+    assert called == [(NIGHTFALL_SEARCH_URL, 10), (NIGHTFALL_DIRECT_URL, 10)]
+    assert result.status == "Retrieved"
+    assert result.record_found is True
+    assert result.failure_kind == "unavailable"
+    assert result.values == {
+        "title": "Nightfall",
+        "author": "Isaac Asimov",
+        "book_details": "Synthetic synopsis used only to test the direct-ISBN fallback.",
+    }
+
+
+def test_booktopia_direct_isbn_fallback_requires_canonical_redirect(monkeypatch):
+    provider = BooktopiaProvider()
+    _mock_responses(
+        monkeypatch,
+        _http_error(NIGHTFALL_SEARCH_URL),
+        FakeResponse(_fixture("nightfall_unavailable_synthetic.html"), NIGHTFALL_DIRECT_URL),
+    )
+
+    result = provider.lookup(NIGHTFALL_ISBN)
+
+    assert result.status == "Lookup failed"
+    assert result.failure_kind == "provider"
+    assert result.record_found is None
+
+
 def test_booktopia_rejects_isbn_mismatch_even_when_redirected_url_matches(monkeypatch):
     provider = BooktopiaProvider()
     _mock_response(monkeypatch, FakeResponse(_fixture("mismatched_product.html")))
@@ -85,6 +149,21 @@ def test_booktopia_rejects_isbn_mismatch_even_when_redirected_url_matches(monkey
     result = provider.lookup(ISBN)
 
     assert result.status == "No data"
+    assert result.record_found is False
+    assert result.values == {}
+
+
+def test_booktopia_rejects_direct_isbn_route_without_canonical_redirect():
+    provider = BooktopiaProvider()
+
+    result = provider._product_result(
+        f"https://booktopia.com.au/book/{ISBN}.html/",
+        _fixture("matching_product.html").decode("utf-8"),
+        ISBN,
+    )
+
+    assert result.status == "No data"
+    assert result.failure_kind == "unverified"
     assert result.record_found is False
     assert result.values == {}
 
@@ -228,15 +307,16 @@ def test_booktopia_rejects_retail_copy_from_meta_and_book_jsonld():
     assert "book_details" not in result.values
 
 
-def test_booktopia_matching_unavailable_page_gets_distinct_provider_status():
+def test_booktopia_matching_unavailable_page_can_supply_a_verified_synopsis():
     provider = BooktopiaProvider()
     product_result = provider._product_result(
-        EVOLUTION_URL,
-        _fixture("triumph_of_evolution_unavailable_synthetic.html").decode("utf-8"),
-        EVOLUTION_ISBN,
+        UNAVAILABLE_URL,
+        _fixture("unavailable_matching_product_synthetic.html").decode("utf-8"),
+        UNAVAILABLE_ISBN,
     )
     assert product_result.record_found is True
     assert product_result.failure_kind == "unavailable"
+    assert product_result.values["book_details"] == "A synthetic narrative description for regression testing."
 
     class ResultProvider:
         name = "Booktopia"
@@ -244,11 +324,11 @@ def test_booktopia_matching_unavailable_page_gets_distinct_provider_status():
         def lookup(self, _isbn):
             return product_result
 
-    result = MetadataLookupService((ResultProvider(),)).lookup(EVOLUTION_ISBN)
+    result = MetadataLookupService((ResultProvider(),)).lookup(UNAVAILABLE_ISBN)
 
     assert result.status == "Retrieved"
-    assert result.values["title"] == "The Triumph of Evolution"
-    assert "book_details" not in result.values
+    assert result.values["title"] == "Synthetic Unavailable Book"
+    assert result.values["book_details"] == "A synthetic narrative description for regression testing."
     assert result.provider_statuses["Booktopia"] == "Product unavailable"
 
 
@@ -256,12 +336,12 @@ def test_booktopia_matching_structured_out_of_stock_offer_is_unavailable():
     provider = BooktopiaProvider()
     html = """
       <script type="application/ld+json">
-        {"@type":"Book","isbn":"9780716736387","name":"The Triumph of Evolution",
+        {"@type":"Book","isbn":"9780306406157","name":"Synthetic Unavailable Book",
          "offers":{"@type":"Offer","availability":"https://schema.org/OutOfStock"}}
       </script>
     """
 
-    result = provider._product_result(EVOLUTION_URL, html, EVOLUTION_ISBN)
+    result = provider._product_result(UNAVAILABLE_URL, html, UNAVAILABLE_ISBN)
 
     assert result.record_found is True
     assert result.failure_kind == "unavailable"
@@ -334,13 +414,14 @@ def test_redirect_handler_allows_canonical_booktopia_page_but_rejects_other_host
 
 def test_booktopia_search_404_is_reported_as_a_provider_error(monkeypatch):
     provider = BooktopiaProvider()
-
-    def missing(*_args, **_kwargs):
-        raise urllib.error.HTTPError("https://www.booktopia.com.au/", 404, "Not Found", {}, None)
-
-    monkeypatch.setattr("bookledger.services.booktopia.BooktopiaProvider._open", lambda *_args: missing())
+    called = _mock_responses(
+        monkeypatch,
+        _http_error(SEARCH_URL),
+        _http_error(f"https://booktopia.com.au/book/{ISBN}.html/"),
+    )
     result = provider.lookup(ISBN)
 
+    assert called == [(SEARCH_URL, 10), (f"https://booktopia.com.au/book/{ISBN}.html/", 10)]
     assert result.status == "Lookup failed"
     assert result.failure_kind == "provider"
     assert result.record_found is None
@@ -348,9 +429,7 @@ def test_booktopia_search_404_is_reported_as_a_provider_error(monkeypatch):
 
 def test_booktopia_candidate_404_is_not_treated_as_an_isbn_miss(monkeypatch):
     provider = BooktopiaProvider()
-    candidate_missing = urllib.error.HTTPError(
-        PRODUCT_URL, 404, "Not Found", {}, None
-    )
+    candidate_missing = _http_error(PRODUCT_URL)
     _mock_responses(
         monkeypatch,
         FakeResponse(_fixture("search_results_multiple.html"), SEARCH_URL),
@@ -362,6 +441,44 @@ def test_booktopia_candidate_404_is_not_treated_as_an_isbn_miss(monkeypatch):
     assert result.status == "Lookup failed"
     assert result.failure_kind == "provider"
     assert result.record_found is None
+
+
+def test_booktopia_candidate_http_error_body_is_used_only_when_isbn_verifies(monkeypatch):
+    provider = BooktopiaProvider()
+    wrong_isbn_page = _http_error(PRODUCT_URL, _fixture("mismatched_product.html"))
+    _mock_responses(
+        monkeypatch,
+        FakeResponse(_fixture("search_results_multiple.html"), SEARCH_URL),
+        wrong_isbn_page,
+    )
+
+    result = provider.lookup(ISBN)
+
+    assert result.status == "Lookup failed"
+    assert result.failure_kind == "provider"
+    assert result.record_found is None
+
+
+def test_booktopia_candidate_http_error_body_can_supply_unavailable_product_data(monkeypatch):
+    provider = BooktopiaProvider()
+    product_error = _http_error(
+        UNAVAILABLE_URL,
+        _fixture("unavailable_matching_product_synthetic.html"),
+    )
+    search_html = f'<a href="{UNAVAILABLE_URL}">matching ISBN product</a>'.encode()
+    search_url = "https://www.booktopia.com.au/search.ep?keywords=9780306406157"
+    _mock_responses(
+        monkeypatch,
+        FakeResponse(search_html, search_url),
+        product_error,
+    )
+
+    result = provider.lookup(UNAVAILABLE_ISBN)
+
+    assert result.status == "Retrieved"
+    assert result.record_found is True
+    assert result.failure_kind == "unavailable"
+    assert result.values["book_details"] == "A synthetic narrative description for regression testing."
 
 
 def test_booktopia_reports_provider_http_errors_without_calling_them_a_miss(monkeypatch):

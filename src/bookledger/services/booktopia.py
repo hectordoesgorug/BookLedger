@@ -354,7 +354,9 @@ def _metadata_from_jsonld(matching_nodes) -> tuple[dict, list[str]]:
 
 def _url_matches_isbn(url: str, requested_isbn: str) -> bool:
     path = urllib.parse.urlparse(url).path
-    match = re.search(r"/book/([0-9Xx-]{10,17})\.html/?$", path)
+    # Booktopia's direct ISBN route is only a redirect entry point. A product
+    # page must resolve to a slugged canonical URL before its URL can verify it.
+    match = re.search(r"/(?:[^/]+/)+book/([0-9Xx-]{10,17})\.html/?$", path)
     return bool(match and normalize_isbn(match.group(1)) in _isbn_aliases(requested_isbn))
 
 
@@ -386,22 +388,39 @@ class BooktopiaProvider(MetadataProvider):
         opener = urllib.request.build_opener(_BooktopiaRedirectHandler())
         return opener.open(request, timeout=self.timeout)
 
-    def _read_page(self, url: str) -> tuple[str, str]:
+    def _read_page(self, url: str) -> tuple[str, str, urllib.error.HTTPError | None]:
         request = urllib.request.Request(url, headers={"User-Agent": "BookLedger/0.1", "Accept": "text/html"})
-        with self._open(request) as response:
-            final_url = response.geturl()
-            parts = urllib.parse.urlparse(final_url)
-            if parts.scheme != "https" or (parts.hostname or "").casefold() not in _ALLOWED_HOSTS:
-                raise ValueError("Booktopia redirected outside its website")
-            content_type = response.headers.get_content_type()
-            if content_type not in {"text/html", "application/xhtml+xml"}:
-                raise ValueError("Booktopia returned an unexpected content type")
-            raw = response.read(_MAX_RESPONSE_BYTES + 1)
-            if len(raw) > _MAX_RESPONSE_BYTES:
-                raise ValueError("Booktopia page exceeded response limit")
-            charset = response.headers.get_content_charset() or "utf-8"
-            html = raw.decode(charset, errors="replace")
-        return final_url, html
+        try:
+            response = self._open(request)
+        except urllib.error.HTTPError as exc:
+            # urllib exposes non-2xx response bodies as HTTPError objects. Keep
+            # the error so callers can report it unless the body proves to be
+            # a usable, ISBN-verified product page.
+            response = exc
+            http_error = exc
+        else:
+            http_error = None
+
+        final_url = url
+        with response:
+            try:
+                final_url = response.geturl()
+                parts = urllib.parse.urlparse(final_url)
+                if parts.scheme != "https" or (parts.hostname or "").casefold() not in _ALLOWED_HOSTS:
+                    raise ValueError("Booktopia redirected outside its website")
+                content_type = response.headers.get_content_type()
+                if content_type not in {"text/html", "application/xhtml+xml"}:
+                    raise ValueError("Booktopia returned an unexpected content type")
+                raw = response.read(_MAX_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_RESPONSE_BYTES:
+                    raise ValueError("Booktopia page exceeded response limit")
+                charset = response.headers.get_content_charset() or "utf-8"
+                html = raw.decode(charset, errors="replace")
+            except Exception:
+                if http_error is not None:
+                    return final_url, "", http_error
+                raise
+        return final_url, html, http_error
 
     @staticmethod
     def _parse_page(html: str) -> _BookPageParser:
@@ -415,6 +434,12 @@ class BooktopiaProvider(MetadataProvider):
         matching_nodes, structured_isbns = _json_ld_metadata(parser.json_ld, isbn)
         structured_match = bool(matching_nodes)
         url_match = _url_matches_isbn(final_url, isbn)
+        if not url_match:
+            return MetadataResult(
+                "No data", {}, self.name,
+                "The response URL is not a canonical product URL for the requested ISBN",
+                "unverified", record_found=False,
+            )
         aliases = _isbn_aliases(isbn)
         page_isbns = parser.isbns | structured_isbns
         if not page_isbns:
@@ -445,6 +470,46 @@ class BooktopiaProvider(MetadataProvider):
             failure_kind="unavailable" if unavailable else None, record_found=True,
         )
 
+    def _verified_http_error_page_result(
+        self, final_url: str, html: str, isbn: str
+    ) -> MetadataResult | None:
+        """Accept an error response only when it contains usable canonical product data."""
+        if not html or not _url_matches_isbn(final_url, isbn):
+            return None
+        try:
+            result = self._product_result(final_url, html, isbn)
+        except Exception:
+            return None
+        if result.record_found is True and result.values:
+            return result
+        return None
+
+    def _lookup_direct_isbn_page(self, isbn: str) -> MetadataResult:
+        direct_url = f"https://booktopia.com.au/book/{isbn}.html/"
+        try:
+            final_url, html, http_error = self._read_page(direct_url)
+        except Exception as exc:
+            return self._failed(exc)
+
+        if http_error is not None:
+            return self._verified_http_error_page_result(final_url, html, isbn) or self._failed(http_error)
+        if not _url_matches_isbn(final_url, isbn):
+            return MetadataResult(
+                "No data", {}, self.name,
+                "The direct ISBN URL did not resolve to a canonical product page",
+                "unverified", record_found=False,
+            )
+        try:
+            return self._product_result(final_url, html, isbn)
+        except Exception as exc:
+            return self._failed(exc)
+
+    def _retry_direct_after_search_error(self, isbn: str, search_error: Exception) -> MetadataResult:
+        result = self._lookup_direct_isbn_page(isbn)
+        if result.record_found is True and result.values:
+            return result
+        return self._failed(search_error)
+
     def lookup(self, isbn: str) -> MetadataResult:
         isbn = normalize_isbn(isbn) or ""
         valid, _message = isbn_check(isbn)
@@ -453,11 +518,17 @@ class BooktopiaProvider(MetadataProvider):
 
         search_url = "https://www.booktopia.com.au/search.ep?" + urllib.parse.urlencode({"keywords": isbn})
         try:
-            search_final_url, search_html = self._read_page(search_url)
+            search_final_url, search_html, search_error = self._read_page(search_url)
         except urllib.error.HTTPError as exc:
-            return self._failed(exc)
+            return self._retry_direct_after_search_error(isbn, exc)
         except Exception as exc:
             return self._failed(exc)
+
+        if search_error is not None:
+            result = self._verified_http_error_page_result(search_final_url, search_html, isbn)
+            if result is not None:
+                return result
+            return self._retry_direct_after_search_error(isbn, search_error)
 
         if _url_matches_isbn(search_final_url, isbn):
             try:
@@ -482,8 +553,14 @@ class BooktopiaProvider(MetadataProvider):
         failures: list[MetadataResult] = []
         for candidate in candidates:
             try:
-                final_url, html = self._read_page(candidate)
-                result = self._product_result(final_url, html, isbn)
+                final_url, html, http_error = self._read_page(candidate)
+                if http_error is not None:
+                    result = self._verified_http_error_page_result(final_url, html, isbn)
+                    if result is None:
+                        failures.append(self._failed(http_error))
+                        continue
+                else:
+                    result = self._product_result(final_url, html, isbn)
             except urllib.error.HTTPError as exc:
                 failures.append(self._failed(exc))
                 continue
