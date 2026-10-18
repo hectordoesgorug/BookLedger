@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS book_records (
@@ -47,6 +47,22 @@ CREATE TABLE IF NOT EXISTS copies (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     UNIQUE(book_id, copy_number)
 );
+CREATE TABLE IF NOT EXISTS trash_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    copy_id INTEGER NOT NULL UNIQUE REFERENCES copies(id) ON DELETE RESTRICT,
+    deleted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    original_status TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS storage_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation TEXT NOT NULL,
+    copy_id INTEGER,
+    source_path TEXT,
+    target_path TEXT,
+    backup_path TEXT,
+    state TEXT NOT NULL DEFAULT 'prepared',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 CREATE TABLE IF NOT EXISTS locations (
     name TEXT PRIMARY KEY COLLATE NOCASE
 );
@@ -68,7 +84,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 """
 
 
@@ -124,6 +140,66 @@ class Database:
                 conn.execute("CREATE INDEX ix_sales_copy_id ON sales(copy_id, id)")
                 conn.execute("PRAGMA user_version = 3")
                 conn.commit()
+                version = 3
+            if version == 3:
+                # Rebuild legacy copies only here: old files may lack AUTOINCREMENT
+                # and the book foreign key. Explicit IDs/codes are copied verbatim.
+                # The child sales table keeps its table-name reference while the
+                # parent is replaced, with enforcement checked after the migration.
+                conn.execute("PRAGMA foreign_keys = OFF")
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    conn.execute("""CREATE TABLE copies_v4 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        copy_code TEXT UNIQUE,
+                        book_id INTEGER NOT NULL REFERENCES book_records(id) ON DELETE RESTRICT,
+                        copy_number INTEGER NOT NULL,
+                        format TEXT NOT NULL,
+                        condition TEXT NOT NULL,
+                        location TEXT NOT NULL DEFAULT 'Not Specified',
+                        photo_path TEXT NOT NULL,
+                        price_minor INTEGER NOT NULL CHECK(price_minor > 0),
+                        status TEXT NOT NULL DEFAULT 'Available'
+                            CHECK(status IN ('Available','Not for Sale','Listed','Sold')),
+                        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                        UNIQUE(book_id, copy_number)
+                    )""")
+                    conn.execute("""INSERT INTO copies_v4(
+                        id,copy_code,book_id,copy_number,format,condition,location,photo_path,
+                        price_minor,status,created_at,updated_at
+                    ) SELECT id,copy_code,book_id,copy_number,format,condition,location,photo_path,
+                             price_minor,status,created_at,updated_at FROM copies""")
+                    conn.execute("DROP TABLE copies")
+                    conn.execute("ALTER TABLE copies_v4 RENAME TO copies")
+                    conn.execute("CREATE INDEX ix_copies_book_id ON copies(book_id)")
+                    conn.execute("CREATE INDEX ix_copies_status ON copies(status)")
+                    conn.execute("CREATE INDEX ix_copies_location ON copies(location COLLATE NOCASE)")
+                    conn.execute("CREATE INDEX ix_copies_price ON copies(price_minor)")
+                    conn.execute("""CREATE TABLE trash_entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        copy_id INTEGER NOT NULL UNIQUE REFERENCES copies(id) ON DELETE RESTRICT,
+                        deleted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                        original_status TEXT NOT NULL
+                    )""")
+                    conn.execute("""CREATE TABLE storage_operations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        operation TEXT NOT NULL,
+                        copy_id INTEGER,
+                        source_path TEXT,
+                        target_path TEXT,
+                        backup_path TEXT,
+                        state TEXT NOT NULL DEFAULT 'prepared',
+                        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                    )""")
+                    conn.execute("PRAGMA user_version = 4")
+                    conn.commit()
+                    version = 4
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.execute("PRAGMA foreign_keys = ON")
             conn.executescript(SCHEMA)
             conn.execute("INSERT INTO app_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
             conn.execute("INSERT OR IGNORE INTO locations(name) VALUES('Not Specified')")

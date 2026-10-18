@@ -314,9 +314,19 @@ class BookForm(tk.Toplevel):
 
     def receive_photo(self, value: str | Path):
         """Accept a photo path from a future companion event without networking here."""
-        self.set_photo(value)
-        self.mobile_status.set("Photo Received")
-        self._update_control_states()
+        try:
+            staged = self.photo_service.import_and_compress(value)
+            self._replace_staged_photo(staged)
+            self.set_photo(staged)
+            self.mobile_status.set("Photo Received")
+            self._update_control_states()
+        except ValueError as exc:
+            self._populate_validation({"photo_path": str(exc)})
+
+    def _replace_staged_photo(self, new_path):
+        previous = self.photo_path.get()
+        if previous and Path(previous) != Path(new_path):
+            self.photo_service.discard_staged(previous)
 
     def phone_photo_capture_started(self):
         """Status hook for a future mobile capture event; no phone capture is performed here."""
@@ -333,6 +343,7 @@ class BookForm(tk.Toplevel):
             return
         try:
             compressed = self.photo_service.import_and_compress(path)
+            self._replace_staged_photo(compressed)
             self.set_photo(compressed)
         except ValueError as exc:
             current = {key: label.cget("text") for key, label in self._errors.items() if label.cget("text")}
@@ -368,6 +379,7 @@ class BookForm(tk.Toplevel):
                 self._ui_poll_id = None
 
     def _close(self):
+        self.photo_service.discard_staged(self.photo_path.get())
         self._closing = True
         if self._ui_poll_id:
             try:
@@ -660,6 +672,7 @@ class BookForm(tk.Toplevel):
             elif not self._save_copy(payload):
                 return
         self.on_saved()
+        self.photo_service.discard_staged(self.photo_path.get())
         self._close()
 
     def _has_input(self):
@@ -685,6 +698,7 @@ class BookForm(tk.Toplevel):
                 self._active_operation = None
         for key in self._widgets:
             self._set(key, "")
+        self.photo_service.discard_staged(self.photo_path.get())
         self.photo_path.set("")
         self.photo_path_label.configure(text="No Photo Selected")
         self._photo_image = None

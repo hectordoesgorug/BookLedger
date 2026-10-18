@@ -23,11 +23,13 @@ def setup(tmp_path):
     source = tmp_path / "sample.png"
     Image.new("RGB", (2200, 1400), "white").save(source)
     photo = photo_service.import_and_compress(source)
+    reusable_source = data / "selected-photo.png"
+    Image.new("RGB", (2200, 1400), "white").save(reusable_source)
     service = CatalogService(db)
     payload = {
         "title": "Test Book", "author": "Test Author", "isbn": "9780306406157",
         "genre": "Science", "format": "Paperback", "condition": "Good",
-        "location": "", "price": "500", "photo_path": str(photo), "srp": "600",
+        "location": "", "price": "500", "photo_path": str(reusable_source), "srp": "600",
         "book_details": "A test synopsis", "publisher": "Test Press", "publication_year": "2020",
         "edition": "1st", "page_count": "120", "metadata_source": "Test", "metadata_status": "Retrieved",
     }
@@ -226,7 +228,7 @@ def test_restore_replaces_database_and_photos_safely(setup, tmp_path):
     other_db = Database(other_data / "bookledger.sqlite3")
     other_service = CatalogService(other_db)
     other_photo_dir = other_data / "photos"
-    other_photo_dir.mkdir(parents=True)
+    other_photo_dir.mkdir(parents=True, exist_ok=True)
     other_image = tmp_path / "other.png"
     Image.new("RGB", (80, 80), "black").save(other_image)
     other_photo = PhotoService(other_photo_dir).import_and_compress(other_image)
@@ -326,7 +328,7 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
     service.change_status(1, "Sold")
     assert len(service.list_sales()) == 2

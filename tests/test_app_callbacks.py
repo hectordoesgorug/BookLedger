@@ -189,14 +189,17 @@ def test_status_menu_prompts_only_for_not_for_sale_or_sold_departures(monkeypatc
     assert actions == []
 
 
-def test_delete_confirmation_does_not_delete_data(monkeypatch):
+def test_delete_confirmation_moves_selected_copy_to_trash(monkeypatch):
     confirmations = []
-    info = []
+    deleted = []
+    refreshed = []
     subject = SimpleNamespace(
         catalog=SimpleNamespace(get_copy=lambda _copy_id: {"copy_code": "BL-000042", "title": "A Book"}),
+        lifecycle=SimpleNamespace(trash_copy=lambda copy_id: deleted.append(copy_id)),
+        status_var=SimpleNamespace(set=lambda message: refreshed.append(message)),
+        _after_save=lambda message: refreshed.append(message),
     )
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args, **kwargs: confirmations.append(args) or True)
-    monkeypatch.setattr(app_module.messagebox, "showinfo", lambda *args, **kwargs: info.append(args))
-    BookLedgerApp._confirm_delete_not_implemented(subject, 42)
+    BookLedgerApp._confirm_delete(subject, 42)
     assert "BL-000042" in confirmations[0][1]
-    assert len(info) == 1
+    assert deleted == [42]

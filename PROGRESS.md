@@ -33,15 +33,21 @@
 - [x] Add/Edit use one Price field and no Status or Sale Details controls; status changes are context-menu only
 - [x] Google Books API Settings entry shows config status and supports connectivity test without requiring a key
 - [x] v1-to-v3 database migration preserves location and sale values while enabling multiple sale events per copy
-- [x] Delete Book and Create Poster menu entries are present; deletion remains non-destructive pending separate policy approval and poster generation is unimplemented
-- [x] Full test suite on Windows: 78 passed, 2 skipped (Tcl/Tk runtime files missing in the Python installation)
+- [x] Portable `data/` paths, root-level backups, legacy storage copy/verification, conflict detection, and recovery rename
+- [x] Schema v4 migration adds Trash and durable storage-operation records while preserving copy identity and relationships
+- [x] Canonical per-copy JPEG filenames and shared staged photo processing for desktop selection and future mobile handoff
+- [x] Copy-level Trash, LIFO restore, Clear Trash, explicit recovery retry, protected two-step Purge, and read-only storage verifier
+- [x] Provider-derived title normalization with acronym and short-word handling; manual titles remain unchanged
+- [x] Backup format minimally includes Trash photo files
+- [x] Full Windows test suite: `.venv\Scripts\python.exe -m pytest` — 91 passed, 0 skipped on the final exact run
+- [ ] Manual Windows startup/migration/lifecycle acceptance test on a copy of user data
+- [ ] Windows packaging and frozen-executable verification (no packaging spec or executable exists)
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)
-- [ ] Package portable Windows executable
 
 ## Next stages
 1. Visually review the Catalog grid, Inventory table, and Add/Edit layouts on a complete native Windows Tk installation.
 2. Add import/export and fuller reports.
-3. Add integration and recovery tests.
+3. Expand migration and interrupted-operation recovery tests.
 4. Package the stable desktop app.
 5. Build the Android companion after desktop stabilization.
 - [ ] Connect BookLedger Mobile to real pairing, ISBN scanning, and photo transfer.

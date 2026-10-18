@@ -16,6 +16,8 @@ from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService
 from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService, OpenLibraryProvider
 from bookledger.services.photos import PhotoService
+from bookledger.services.lifecycle import CopyLifecycleService
+from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
 
 try:
@@ -34,9 +36,19 @@ class BookLedgerApp(_WindowBase):
         else:
             super().__init__()
         self.paths = AppPaths()
+        self.paths.prepare()
         self.db = Database(self.paths.database)
+        self.paths.migrate_legacy_photos(self.db)
+        if (self.paths.legacy_data / "bookledger.sqlite3").exists():
+            migration_report = VerificationService(self.db, self.paths.data).verify()
+            if not migration_report.ok:
+                raise RuntimeError(f"Portable migration verification failed; legacy data was preserved.\n{migration_report.message}")
+            self.paths.finalize_legacy_migration()
+        self.paths.finalize_profile_config_migration()
         self.catalog = CatalogService(self.db, self.paths.data)
-        self.photos = PhotoService(self.paths.photos)
+        self.photos = PhotoService(self.paths.photos, self.paths.trash)
+        self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
+        self.verifier = VerificationService(self.db, self.paths.data)
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
         self.metadata_lookup = MetadataLookupService((OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key())))
         self.title(f"{APP_NAME} · Book collection manager")
@@ -391,7 +403,7 @@ class BookLedgerApp(_WindowBase):
                 command=lambda target=status, cid=copy_id: self._change_copy_status(cid, target),
             )
         menu.add_command(label="Edit Book", command=lambda cid=copy_id: self.open_selected_edit(cid))
-        menu.add_command(label="Delete Book", command=lambda cid=copy_id: self._confirm_delete_not_implemented(cid))
+        menu.add_command(label="Delete Book", command=lambda cid=copy_id: self._confirm_delete(cid))
         try:
             menu.tk_popup(x_root, y_root)
         finally:
@@ -422,7 +434,7 @@ class BookLedgerApp(_WindowBase):
             return
         self._after_save(f"{row['copy_code']} marked {target_status}.")
 
-    def _confirm_delete_not_implemented(self, copy_id):
+    def _confirm_delete(self, copy_id):
         row = self.catalog.get_copy(int(copy_id))
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")
@@ -433,11 +445,11 @@ class BookLedgerApp(_WindowBase):
             parent=self,
         )
         if confirmed:
-            messagebox.showinfo(
-                "Delete Book",
-                "Deletion is not implemented. No data was changed because copy, photo, and sales-history deletion policy needs separate approval.",
-                parent=self,
-            )
+            try:
+                self.lifecycle.trash_copy(int(copy_id))
+                self._after_save(f"{row['copy_code']} moved to Trash.")
+            except Exception as exc:
+                messagebox.showerror("Delete Failed", f"The copy was not safely moved to Trash: {exc}", parent=self)
 
     def _clear_filters(self):
         self.global_search.set("")
@@ -505,6 +517,13 @@ class BookLedgerApp(_WindowBase):
         ttk.Button(row, text="Open Data Folder", command=lambda: self._open_path(self.paths.data)).pack(side="left", padx=8)
         ttk.Button(row, text="Verify Database", command=self.verify_database).pack(side="left", padx=8)
         ttk.Button(row, text="Restore Backup…", command=self.restore_backup).pack(side="left", padx=8)
+        trash_row = ttk.Frame(panel)
+        trash_row.pack(anchor="w", pady=(10, 0))
+        count = self.lifecycle.trash_count()
+        ttk.Button(trash_row, text="Restore Latest", state="normal" if count else "disabled", command=self.restore_latest).pack(side="left", padx=(0, 8))
+        ttk.Button(trash_row, text="Clear Trash…", state="normal" if count else "disabled", command=self.clear_trash).pack(side="left", padx=8)
+        ttk.Button(trash_row, text="Purge Data…", command=self.purge_data).pack(side="left", padx=8)
+        ttk.Button(trash_row, text="Retry Storage Recovery", command=self.retry_storage_recovery).pack(side="left", padx=8)
         ttk.Button(row, text="Manage Locations…", command=self.manage_locations).pack(side="left", padx=8)
         ttk.Button(row, text="Google Books API", command=self.google_books_settings).pack(side="left", padx=8)
         genres = ttk.LabelFrame(self.workspace, text="Approved genres", padding=16)
@@ -656,7 +675,7 @@ class BookLedgerApp(_WindowBase):
         ttk.Label(frame, text="Optional API key").pack(anchor="w", pady=(12, 4))
         key = tk.StringVar(value=self._load_google_books_key())
         ttk.Entry(frame, textvariable=key, show="•", width=58).pack(fill="x")
-        ttk.Label(frame, text=f"Stored in your user profile: {self.paths.google_books_config}\nThe key is plain text, protected by your Windows user account access controls, and is excluded from portable backups.", wraplength=500, foreground="#64748b").pack(anchor="w", pady=8)
+        ttk.Label(frame, text=f"Stored in portable data: {self.paths.google_books_config}\nThe key is plain text and is excluded from portable backups.", wraplength=500, foreground="#64748b").pack(anchor="w", pady=8)
         status = ttk.Label(
             frame,
             text="Configured: API key saved" if self._load_google_books_key() else "Not configured: using Google Books without an API key",
@@ -731,11 +750,60 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Restore failed", f"The backup could not be restored: {exc}", parent=self)
 
     def verify_database(self):
-        ok, message = self.db.integrity_check()
-        if ok:
-            messagebox.showinfo("Database check", "Database integrity check passed.", parent=self)
+        report = self.verifier.verify()
+        if report.ok:
+            messagebox.showinfo("Database check", report.message, parent=self)
         else:
-            messagebox.showerror("Database check", f"Integrity check failed: {message}", parent=self)
+            messagebox.showwarning("Database check", report.message, parent=self)
+
+    def restore_latest(self):
+        try:
+            copy_id = self.lifecycle.restore_latest()
+            if copy_id is not None:
+                self.status_var.set(f"Restored Copy ID {copy_id}.")
+                self.refresh_current()
+        except Exception as exc:
+            messagebox.showerror("Restore Failed", str(exc), parent=self)
+
+    def retry_storage_recovery(self):
+        failures = self.lifecycle.retry_pending_operations()
+        if failures:
+            messagebox.showerror("Recovery Needs Attention", "Some storage operations remain unresolved:\n" + "\n".join(failures), parent=self)
+        else:
+            messagebox.showinfo("Recovery Complete", "All pending storage operations were completed.", parent=self)
+        self.refresh_current()
+
+    def clear_trash(self):
+        if not messagebox.askyesno("Permanently Clear Trash?", "This permanently removes trashed copies, their sales history, and unshared photos. This cannot be undone.", parent=self):
+            return
+        try:
+            count = self.lifecycle.clear_trash()
+            self.status_var.set(f"Permanently removed {count} trashed copy/copies.")
+            self.refresh_current()
+        except Exception as exc:
+            messagebox.showerror("Clear Trash Incomplete", str(exc), parent=self)
+
+    def purge_data(self):
+        if not messagebox.askyesno("Reset BookLedger Data?", "This removes the database, photos, Trash, locations, provider settings, and other data under the portable data folder. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
+            return
+        from tkinter import simpledialog
+        typed = simpledialog.askstring("Confirm Purge", "Type PURGE to permanently reset BookLedger data:", parent=self)
+        if typed != "PURGE":
+            return
+        try:
+            self.lifecycle.purge()
+            self.paths.prepare(migrate_profile_config=False)
+            self.db = Database(self.paths.database)
+            self.catalog = CatalogService(self.db, self.paths.data)
+            self.photos = PhotoService(self.paths.photos, self.paths.trash)
+            self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
+            self.verifier = VerificationService(self.db, self.paths.data)
+            self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
+            self.metadata_lookup = MetadataLookupService((OpenLibraryProvider(), GoogleBooksProvider(self._load_google_books_key())))
+            self.status_var.set("BookLedger data was purged. Root-level backups were retained.")
+            self.show_page("Dashboard")
+        except Exception as exc:
+            messagebox.showerror("Purge Incomplete", f"BookLedger could not complete the purge. The data folder may be partially reset: {exc}", parent=self)
 
     def _open_path(self, path: Path):
         try:

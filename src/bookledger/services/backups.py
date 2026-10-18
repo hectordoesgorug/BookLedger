@@ -28,12 +28,13 @@ class BackupService:
                 raise RuntimeError(f"Database integrity check failed: {message}")
             with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
                 archive.write(snapshot, "bookledger.sqlite3")
-                photo_dir = self.data_dir / "photos"
-                if photo_dir.exists():
-                    for photo in photo_dir.rglob("*"):
-                        if photo.is_file():
-                            archive.write(photo, str(Path("photos") / photo.relative_to(photo_dir)))
-                archive.writestr("BACKUP_INFO.txt", f"BookLedger backup\nCreated: {datetime.now().isoformat(timespec='seconds')}\nContains database snapshot and stored copy photos.\n")
+                for folder_name in ("photos", "trash"):
+                    file_dir = self.data_dir / folder_name
+                    if file_dir.exists():
+                        for item in file_dir.rglob("*"):
+                            if item.is_file() and ".staging" not in item.parts:
+                                archive.write(item, str(Path(folder_name) / item.relative_to(file_dir)))
+                archive.writestr("BACKUP_INFO.txt", f"BookLedger backup\nCreated: {datetime.now().isoformat(timespec='seconds')}\nContains database snapshot and stored active/trash photos.\n")
             return target
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -47,7 +48,7 @@ class BackupService:
                 if "bookledger.sqlite3" not in archive.namelist():
                     return False, "The archive does not contain a database snapshot."
                 import tempfile
-                with tempfile.TemporaryDirectory() as temp:
+                with tempfile.TemporaryDirectory(prefix=".verify-", dir=self.backup_dir) as temp:
                     extracted = Path(temp) / "bookledger.sqlite3"
                     extracted.write_bytes(archive.read("bookledger.sqlite3"))
                     return Database(extracted).integrity_check()
@@ -63,7 +64,9 @@ class BackupService:
         import tempfile
         staging_parent = self.data_dir.parent / f".bookledger-restore-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         staged_photos = staging_parent / "photos"
+        staged_trash = staging_parent / "trash"
         staged_photos.mkdir(parents=True, exist_ok=True)
+        staged_trash.mkdir(parents=True, exist_ok=True)
         staged_db = staging_parent / "bookledger.sqlite3"
         try:
             with zipfile.ZipFile(archive_path, "r") as archive:
@@ -73,9 +76,10 @@ class BackupService:
                         raise ValueError("The backup contains an unsafe file path.")
                     if member == "bookledger.sqlite3":
                         staged_db.write_bytes(archive.read(member))
-                    elif member.startswith("photos/") and not member.endswith("/"):
-                        relative = member_path.relative_to("photos")
-                        destination = staged_photos / relative
+                    elif any(member.startswith(f"{folder}/") for folder in ("photos", "trash")) and not member.endswith("/"):
+                        folder = "photos" if member.startswith("photos/") else "trash"
+                        relative = member_path.relative_to(folder)
+                        destination = (staged_photos if folder == "photos" else staged_trash) / relative
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         destination.write_bytes(archive.read(member))
             ok, message = Database(staged_db).integrity_check()
@@ -88,12 +92,14 @@ class BackupService:
             replacement_db = self.data_dir / "bookledger.restore.tmp"
             old_db = self.data_dir / "bookledger.sqlite3.pre-restore"
             old_photos = self.data_dir / "photos.pre-restore"
+            live_trash = self.data_dir / "trash"
+            old_trash = self.data_dir / "trash.pre-restore"
             shutil.copy2(staged_db, replacement_db)
             if old_db.exists():
                 old_db.unlink()
             if old_photos.exists():
                 shutil.rmtree(old_photos)
-            db_moved = photos_moved = new_db_installed = new_photos_installed = False
+            db_moved = photos_moved = trash_moved = new_db_installed = new_photos_installed = new_trash_installed = False
             try:
                 if live_db.exists():
                     live_db.replace(old_db)
@@ -101,11 +107,20 @@ class BackupService:
                 if live_photos.exists():
                     live_photos.replace(old_photos)
                     photos_moved = True
+                if live_trash.exists():
+                    live_trash.replace(old_trash)
+                    trash_moved = True
                 replacement_db.replace(live_db)
                 new_db_installed = True
                 staged_photos.replace(live_photos)
                 new_photos_installed = True
+                staged_trash.replace(live_trash)
+                new_trash_installed = True
             except Exception:
+                if new_trash_installed and live_trash.exists():
+                    shutil.rmtree(live_trash, ignore_errors=True)
+                if trash_moved and old_trash.exists():
+                    old_trash.replace(live_trash)
                 if new_photos_installed and live_photos.exists():
                     shutil.rmtree(live_photos, ignore_errors=True)
                 if photos_moved and old_photos.exists():
@@ -117,5 +132,6 @@ class BackupService:
                 raise
             old_db.unlink(missing_ok=True)
             shutil.rmtree(old_photos, ignore_errors=True)
+            shutil.rmtree(old_trash, ignore_errors=True)
         finally:
             shutil.rmtree(staging_parent, ignore_errors=True)

@@ -2,23 +2,26 @@
 
 Date: 2026-10-18
 
-## Automated tests
+## Full test suite
 
-- Full-suite command: `.venv\Scripts\python.exe -m pytest`.
-- Result: **78 passed, 2 skipped**.
-- The Windows sandbox required pytest's `TEMP` and `TMP` directories to be redirected to a temporary folder inside the project workspace; the test command itself was unchanged.
-- Both skipped tests are Tk UI tests in `tests/test_intake_ui.py`. The installed Python runtime cannot find Tcl's `init.tcl`, so the tests cannot initialize their Tk windows. This is an environment limitation, not a passing UI verification.
-- Coverage includes catalog validation and status transitions, sold-last ordering and presentation, location migration and rename propagation, append-only sale history and v1-to-v3 migration, backup and restore, metadata fallback and settings behavior, and context-menu callback targeting.
-- Provider calls are mocked. Live Google Books connectivity and native GUI behavior were not verified.
+- Requested command: `.venv\Scripts\python.exe -m pytest`
+- Final result: **91 passed, 0 skipped**.
+- The sandbox blocked pytest's default Windows temporary-directory creation. The exact requested command was rerun with elevated filesystem access and completed with all tests passing.
+- Earlier runs intermittently skipped one Tk-dependent intake UI test because this Python installation is missing Tcl/Tk runtime files (the missing file varied between `icons.tcl`, `notebook.tcl`, and other toolkit scripts). The final exact run initialized Tk successfully and did not skip it.
+- Isolated workspace-temp command: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-work -q` — **91 passed, 0 skipped** on its final run.
+- Coverage added for portable-root resolution, legacy database/photo and profile-config migration, source preservation and conflict detection, canonical photos and failed replacement, Trash isolation/LIFO restore/Clear Trash, Purge backup preservation, and read-only photo verification.
+- Existing coverage includes catalog validation/status/sales, backup creation and restoration, metadata provider fallback/title normalization, and UI callback targeting.
 
 ## Additional checks
 
-- `.venv\Scripts\python.exe -m py_compile src\bookledger\app.py src\bookledger\ui\forms.py src\bookledger\services\catalog.py src\bookledger\services\metadata.py src\bookledger\db\database.py src\bookledger\paths.py` — passed.
-- `git diff --check` — passed. Git emitted only configured LF-to-CRLF conversion notices.
+- `.venv\Scripts\python.exe -m compileall -q src/bookledger tests` — passed.
+- `git diff --check` — passed; Git reports configured LF-to-CRLF conversion notices on edited files.
 
 ## Remaining verification
 
-- Native Windows visual review remains pending because this Python installation's Tcl/Tk runtime is incomplete.
-- Live Google Books connectivity, packaged executable behavior, and larger-catalog performance remain unverified.
+- Manual Windows GUI acceptance remains pending. Tk initialized in the final exact run, but earlier runs showed that the installed Tcl/Tk runtime can intermittently fail on missing scripts.
+- No packaged executable or packaging specification exists, so frozen-path behavior is unit-tested but packaging is not verified.
+- Legacy migration and Clear Trash/Purge have isolated tests but still need manual acceptance testing against a copy of real user data before release.
+- Live provider connectivity and larger-catalog performance were not verified.
 
-This is an early development build, not a release candidate. Keep independent backups of important catalog data while testing.
+This remains an early development build. Keep independent backups of important catalog data while testing.

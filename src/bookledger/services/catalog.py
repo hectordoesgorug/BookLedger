@@ -6,6 +6,7 @@ import sqlite3
 from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_LOCATION
 from bookledger.db.database import Database
 from bookledger.services.isbn import isbn_check, normalize_isbn
+from bookledger.services.photos import PhotoService
 
 REQUIRED_COPY_FIELDS = ("title", "author", "genre", "format", "condition", "price", "photo_path")
 MAX_MONEY_MINOR = 2**63 - 1
@@ -21,6 +22,7 @@ class CatalogService:
     def __init__(self, db: Database, data_dir: str | Path | None = None):
         self.db = db
         self.data_dir = Path(data_dir) if data_dir else db.path.parent
+        self.photos = PhotoService(self.data_dir / "photos", self.data_dir / "trash")
 
     def _resolve_photo(self, value: str | Path) -> Path:
         path = Path(value)
@@ -145,6 +147,15 @@ class CatalogService:
         srp_value = payload.get("srp")
         srp_minor = int(round(float(srp_value) * 100)) if srp_value not in (None, "") else None
         isbn = normalize_isbn(payload.get("isbn"))
+        selected_photo = self._resolve_photo(payload["photo_path"])
+        try:
+            selected_photo.resolve().relative_to(self.photos.staging_dir.resolve())
+            staged_photo = selected_photo
+        except ValueError:
+            try:
+                staged_photo = self.photos.import_and_compress(selected_photo)
+            except ValueError as exc:
+                raise ValidationError({"photo_path": str(exc)}) from exc
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             book_id = existing_book_id
@@ -183,13 +194,24 @@ class CatalogService:
                 """INSERT INTO copies(book_id,copy_number,format,condition,location,photo_path,price_minor,status)
                    VALUES(?,?,?,?,?,?,?,?)""",
                 (book_id, next_number, payload["format"].strip(), payload["condition"].strip(), location,
-                 self._stored_photo_path(payload["photo_path"]), price_minor, "Available"),
+                 "photos/pending.jpg", price_minor, "Available"),
             )
             copy_id = int(cur.lastrowid)
             code = f"BL-{copy_id:06d}"
             conn.execute("UPDATE copies SET copy_code=? WHERE id=?", (code, copy_id))
+            conn.execute("UPDATE copies SET photo_path=? WHERE id=?", (f"photos/{copy_id}.jpg", copy_id))
+            conn.execute("INSERT INTO storage_operations(operation,copy_id,source_path,target_path,state) VALUES('install',?,?,?,'prepared')",
+                         (copy_id, staged_photo.resolve().relative_to(self.data_dir.resolve()).as_posix(), f"photos/{copy_id}.jpg"))
             conn.commit()
+        try:
+            self.photos.install(copy_id, staged_photo)
+            with self.db.connect() as conn:
+                conn.execute("DELETE FROM storage_operations WHERE operation='install' AND copy_id=?", (copy_id,))
             return copy_id
+        except Exception:
+            # Keep the durable pending operation so verification can diagnose and
+            # retry recovery; ordinary views exclude copies with pending operations.
+            raise ValidationError({"photo_path": f"Photo installation needs recovery: {staged_photo}"})
 
     def list_copies(
         self,
@@ -204,7 +226,9 @@ class CatalogService:
                         b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
                         s.sale_date,b.metadata_source,b.metadata_status
                  FROM copies c JOIN book_records b ON b.id=c.book_id
-                 LEFT JOIN sales s ON s.id=(SELECT MAX(s2.id) FROM sales s2 WHERE s2.copy_id=c.id) WHERE 1=1"""
+                 LEFT JOIN sales s ON s.id=(SELECT MAX(s2.id) FROM sales s2 WHERE s2.copy_id=c.id)
+                 WHERE NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id)
+                   AND NOT EXISTS (SELECT 1 FROM storage_operations o WHERE o.copy_id=c.id)"""
         args: list = []
         if search.strip():
             q = f"%{search.strip()}%"
@@ -231,6 +255,8 @@ class CatalogService:
                         s.sale_date,s.price_minor
                  FROM sales s JOIN copies c ON c.id=s.copy_id
                  JOIN book_records b ON b.id=c.book_id
+                 WHERE NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id)
+                   AND NOT EXISTS (SELECT 1 FROM storage_operations o WHERE o.copy_id=c.id)
                  ORDER BY s.sale_date DESC,s.id DESC"""
         with self.db.connect() as conn:
             return [dict(row) for row in conn.execute(sql).fetchall()]
@@ -249,7 +275,7 @@ class CatalogService:
         isbn = normalize_isbn(payload.get("isbn"))
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT book_id,status,price_minor FROM copies WHERE id=?", (copy_id,)).fetchone()
+            row = conn.execute("SELECT book_id,status,price_minor,photo_path FROM copies c WHERE id=? AND NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id) AND NOT EXISTS (SELECT 1 FROM storage_operations o WHERE o.copy_id=c.id)", (copy_id,)).fetchone()
             if not row:
                 raise KeyError(f"Copy {copy_id} was not found")
             if row["status"] == "Sold" and price_minor != row["price_minor"]:
@@ -268,16 +294,32 @@ class CatalogService:
             conn.execute(
                 """UPDATE copies SET format=?,condition=?,location=?,photo_path=?,price_minor=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (payload["format"].strip(),payload["condition"].strip(),self._canonical_location(conn,payload.get("location")),
-                 self._stored_photo_path(payload["photo_path"]),price_minor,copy_id),
+                 row["photo_path"],price_minor,copy_id),
             )
+            new_photo = self._resolve_photo(payload["photo_path"])
+            try:
+                new_photo.resolve().relative_to(self.photos.staging_dir.resolve())
+                is_staged = True
+            except ValueError:
+                is_staged = False
+            if is_staged:
+                conn.execute("INSERT INTO storage_operations(operation,copy_id,source_path,target_path,state) VALUES('replace',?,?,?,'prepared')",
+                             (copy_id, new_photo.resolve().relative_to(self.data_dir.resolve()).as_posix(), row["photo_path"]))
             conn.commit()
+        if is_staged:
+            try:
+                self.photos.replace(copy_id, new_photo)
+                with self.db.connect() as conn:
+                    conn.execute("DELETE FROM storage_operations WHERE operation='replace' AND copy_id=?", (copy_id,))
+            except Exception as exc:
+                raise ValidationError({"photo_path": f"Photo replacement needs recovery: {exc}"}) from exc
 
     def change_status(self, copy_id: int, status: str) -> None:
         if status not in COPY_STATUSES:
             raise ValidationError({"status": "Choose a valid status."})
         with self.db.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            current = conn.execute("SELECT status,price_minor FROM copies WHERE id=?", (copy_id,)).fetchone()
+            current = conn.execute("SELECT status,price_minor FROM copies c WHERE id=? AND NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id) AND NOT EXISTS (SELECT 1 FROM storage_operations o WHERE o.copy_id=c.id)", (copy_id,)).fetchone()
             if not current:
                 raise KeyError(f"Copy {copy_id} was not found")
             if current["status"] == status:
@@ -296,10 +338,10 @@ class CatalogService:
     def counts(self) -> dict[str, int]:
         with self.db.connect() as conn:
             result = {status: 0 for status in COPY_STATUSES}
-            for row in conn.execute("SELECT status, COUNT(*) AS n FROM copies GROUP BY status"):
+            for row in conn.execute("SELECT status, COUNT(*) AS n FROM copies c WHERE NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id) AND NOT EXISTS (SELECT 1 FROM storage_operations o WHERE o.copy_id=c.id) GROUP BY status"):
                 result[row["status"]] = row["n"]
             result["Total copies"] = sum(result.values())
-            distinct_titles = conn.execute("SELECT COUNT(*) FROM book_records").fetchone()[0]
+            distinct_titles = conn.execute("SELECT COUNT(DISTINCT c.book_id) FROM copies c WHERE NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id) AND NOT EXISTS (SELECT 1 FROM storage_operations o WHERE o.copy_id=c.id)").fetchone()[0]
             result["Distinct Titles"] = distinct_titles
             # Retain the existing service key for callers that still use the older label.
             result["Bibliographic records"] = distinct_titles

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import urllib.error
 import urllib.parse
@@ -9,6 +10,47 @@ from dataclasses import dataclass
 from typing import Callable, Iterable
 
 from bookledger.services.isbn import normalize_isbn
+
+
+_SMALL_TITLE_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor", "of", "on", "onto", "or", "over", "the", "to", "up", "with"}
+_TITLE_ACRONYMS = {"api", "dna", "isbn", "nasa", "usa", "uk", "un", "us", "wwii"}
+
+
+def normalize_provider_title(title: str | None) -> str | None:
+    """Apply readable title case to provider titles while preserving common acronyms."""
+    if not title or not str(title).strip():
+        return title
+
+    def normalize_word(word: str, first: bool, after_colon: bool) -> str:
+        parts = re.split(r"([-'’])", word)
+        output = []
+        for part in parts:
+            if part in {"-", "'", "’"}:
+                output.append(part)
+                continue
+            leading = part[: len(part) - len(part.lstrip("([{\"“‘"))]
+            trailing = part[len(part.rstrip(").,!?;:]}\"”’")) :]
+            core = part[len(leading) : len(part) - len(trailing) if trailing else len(part)]
+            key = core.casefold()
+            if key in _TITLE_ACRONYMS:
+                output.append(leading + key.upper() + trailing)
+            elif len(core) > 1 and any(c.isupper() for c in core[1:]) and any(c.islower() for c in core):
+                output.append(part)
+            elif key in _SMALL_TITLE_WORDS and not first and not after_colon:
+                output.append(leading + key + trailing)
+            else:
+                output.append(leading + (core[:1].upper() + core[1:].lower()) + trailing)
+        return "".join(output)
+
+    words = str(title).split()
+    result = []
+    after_colon = False
+    for index, word in enumerate(words):
+        # Punctuation stays attached to each word; a colon starts a new subtitle.
+        normalized = normalize_word(word, index == 0 or after_colon or index == len(words) - 1, after_colon)
+        result.append(normalized)
+        after_colon = ":" in word
+    return " ".join(result)
 
 
 @dataclass
@@ -167,6 +209,8 @@ class MetadataLookupService:
             except Exception as exc:
                 result = MetadataResult("Lookup failed", {}, provider.name, str(exc), _failure_kind(exc))
             values = {key: value for key, value in result.values.items() if value not in (None, "")}
+            if "title" in values:
+                values["title"] = normalize_provider_title(str(values["title"]))
             if values:
                 if result.source:
                     sources.append(result.source)

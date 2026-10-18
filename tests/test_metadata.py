@@ -5,6 +5,7 @@ import urllib.parse
 from bookledger.services.metadata import (
     GoogleBooksProvider,
     MetadataLookupService,
+    normalize_provider_title,
     MetadataProvider,
     MetadataResult,
     OpenLibraryProvider,
@@ -109,11 +110,18 @@ def test_lookup_service_fills_partial_metadata_without_replacing_primary_values(
     fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Fallback title", "publisher": "Fallback press", "page_count": 140}, "Google Books"))
     result = MetadataLookupService((first, fallback)).lookup("9780306406157")
     assert result.status == "Retrieved"
-    assert result.values["title"] == "Primary title"
+    assert result.values["title"] == "Primary Title"
     assert result.values["author"] == "Primary author"
     assert result.values["publisher"] == "Fallback press"
     assert result.values["page_count"] == 140
     assert result.source == "Open Library + Google Books"
+
+
+def test_provider_title_normalization_handles_small_words_punctuation_and_acronyms():
+    assert normalize_provider_title("THE ART OF WAR") == "The Art of War"
+    assert normalize_provider_title("the great gatsby") == "The Great Gatsby"
+    assert normalize_provider_title("INTRODUCTION TO SOCIAL SCIENCE") == "Introduction to Social Science"
+    assert normalize_provider_title("NASA: an API guide to ISBN-13") == "NASA: An API Guide to ISBN-13"
 
 
 def test_lookup_service_distinguishes_miss_from_technical_failure():
