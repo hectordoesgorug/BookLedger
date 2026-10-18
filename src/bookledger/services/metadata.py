@@ -16,23 +16,6 @@ _SMALL_TITLE_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "from", 
 _TITLE_ACRONYMS = {"api", "dna", "isbn", "nasa", "usa", "uk", "un", "us", "wwii"}
 
 
-def _description_text(value) -> str | None:
-    """Normalize Open Library's string, object, and excerpt description shapes."""
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        for key in ("value", "description", "excerpt", "text"):
-            result = _description_text(value.get(key))
-            if result:
-                return result
-    if isinstance(value, list):
-        for item in value:
-            result = _description_text(item)
-            if result:
-                return result
-    return None
-
-
 def normalize_provider_title(title: str | None) -> str | None:
     """Apply readable title case to provider titles while preserving common acronyms."""
     if not title or not str(title).strip():
@@ -76,7 +59,7 @@ class MetadataResult:
     values: dict
     source: str | None = None
     error: str | None = None
-    failure_kind: str | None = None  # timeout, network, provider, unexpected, unverified
+    failure_kind: str | None = None  # timeout, network, provider, unexpected, unverified, unavailable
     record_found: bool | None = None
     provider_statuses: dict[str, str] = field(default_factory=dict)
     partial: bool = False
@@ -103,6 +86,8 @@ def _failure_kind(exc: Exception) -> str:
 
 def _provider_outcome(result: MetadataResult) -> str:
     """Return a short, user-facing status without exposing provider diagnostics."""
+    if result.failure_kind == "unavailable":
+        return "Product unavailable"
     if result.status == "Lookup failed":
         return {
             "timeout": "Timed out",
@@ -186,31 +171,15 @@ class OpenLibraryProvider(MetadataProvider):
         publishers = info.get("publishers") or []
         subjects = info.get("subjects") or []
         published = str(info.get("publish_date") or "")
-        description = _description_text(info.get("description"))
-        if not description:
-            description = _description_text(info.get("notes"))
-        if not description:
-            description = _description_text(info.get("excerpts"))
-        if not description:
-            for work in info.get("works") or []:
-                work_key = work.get("key") if isinstance(work, dict) else None
-                if not isinstance(work_key, str) or not re.fullmatch(r"/works/OL\d+W", work_key):
-                    continue
-                try:
-                    work_info = self._request_json(f"https://openlibrary.org{work_key}.json")
-                except Exception:
-                    # Work descriptions enrich a matched edition but are optional.
-                    continue
-                description = _description_text(work_info.get("description")) if isinstance(work_info, dict) else None
-                if description:
-                    break
 
         values = {
             "title": info.get("title"),
             "author": ", ".join(author.get("name", "") for author in authors if author.get("name")) or None,
             "isbn": isbn,
             "genre": next((subject.get("name") for subject in subjects if subject.get("name")), None),
-            "book_details": description,
+            # Open Library's edition notes/descriptions are often bibliographic
+            # notes rather than a useful synopsis. Leave this for later providers.
+            "book_details": None,
             "publisher": ", ".join(publisher.get("name", "") for publisher in publishers if publisher.get("name")) or None,
             "publication_year": int(published[:4]) if published[:4].isdigit() else None,
             "edition": info.get("edition_name"),

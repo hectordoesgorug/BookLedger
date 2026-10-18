@@ -13,6 +13,10 @@ FIXTURES = Path(__file__).parent / "fixtures" / "booktopia"
 ISBN = "9780140449136"
 PRODUCT_URL = "https://www.booktopia.com.au/crime-and-punishment-fyodor-dostoyevsky/book/9780140449136.html"
 SEARCH_URL = "https://www.booktopia.com.au/search.ep?keywords=9780140449136"
+STRENGTH_ISBN = "9781923058507"
+STRENGTH_URL = "https://www.booktopia.com.au/the-strength-of-the-few-james-islington/book/9781923058507.html"
+EVOLUTION_ISBN = "9780716736387"
+EVOLUTION_URL = "https://www.booktopia.com.au/the-triumph-of-evolution-niles-eldredge/book/9780716736387.html"
 
 
 class FakeResponse:
@@ -106,14 +110,14 @@ def test_booktopia_treats_page_without_isbn_evidence_as_unexpected(monkeypatch):
     assert result.failure_kind == "unverified"
 
 
-def test_booktopia_uses_standard_description_when_jsonld_is_malformed(monkeypatch):
+def test_booktopia_does_not_use_generic_meta_description_when_jsonld_is_malformed(monkeypatch):
     provider = BooktopiaProvider()
     _mock_response(monkeypatch, FakeResponse(_fixture("malformed_jsonld.html")))
 
     result = provider.lookup(ISBN)
 
-    assert result.status == "Retrieved"
-    assert result.values == {"book_details": "Readable description metadata."}
+    assert result.record_found is True
+    assert "book_details" not in result.values
 
 
 def test_booktopia_follows_only_the_isbn_matching_result_not_the_first_result(monkeypatch):
@@ -162,6 +166,105 @@ def test_booktopia_prefers_semantic_product_description_to_bibliographic_jsonld_
         "A desperate student commits a terrible crime in St Petersburg and struggles with its consequences."
     )
     assert "bibliographical references" not in result.values["book_details"]
+
+
+def test_booktopia_ignores_bibliographic_note_when_description_panel_is_absent():
+    provider = BooktopiaProvider()
+
+    result = provider._product_result(
+        PRODUCT_URL,
+        _fixture("matching_product_bibliographic_note_only.html").decode("utf-8"),
+        ISBN,
+    )
+
+    assert result.record_found is True
+    assert result.values["title"] == "Crime and Punishment"
+    assert "book_details" not in result.values
+
+
+def test_booktopia_does_not_guess_panel_from_description_tab_id_alone():
+    provider = BooktopiaProvider()
+
+    result = provider._product_result(
+        PRODUCT_URL,
+        _fixture("description_tab_without_panel_relation.html").decode("utf-8"),
+        ISBN,
+    )
+
+    assert result.record_found is True
+    assert result.values["title"] == "Crime and Punishment"
+    assert "book_details" not in result.values
+
+
+def test_booktopia_rejects_retail_copy_but_uses_related_description_panel():
+    provider = BooktopiaProvider()
+
+    result = provider._product_result(
+        STRENGTH_URL,
+        _fixture("strength_of_the_few_synthetic.html").decode("utf-8"),
+        STRENGTH_ISBN,
+    )
+
+    assert result.record_found is True
+    assert result.values["title"] == "The Strength of the Few"
+    assert result.values["author"] == "James Islington"
+    assert result.values["book_details"] == (
+        "On three worlds, one young man must hide, fight, and discover what threatens them all."
+    )
+    assert "Booktopia" not in result.values["book_details"]
+
+
+def test_booktopia_rejects_retail_copy_from_meta_and_book_jsonld():
+    provider = BooktopiaProvider()
+
+    result = provider._product_result(
+        STRENGTH_URL,
+        _fixture("matching_product_retail_copy_only.html").decode("utf-8"),
+        STRENGTH_ISBN,
+    )
+
+    assert result.record_found is True
+    assert result.values["title"] == "The Strength of the Few"
+    assert "book_details" not in result.values
+
+
+def test_booktopia_matching_unavailable_page_gets_distinct_provider_status():
+    provider = BooktopiaProvider()
+    product_result = provider._product_result(
+        EVOLUTION_URL,
+        _fixture("triumph_of_evolution_unavailable_synthetic.html").decode("utf-8"),
+        EVOLUTION_ISBN,
+    )
+    assert product_result.record_found is True
+    assert product_result.failure_kind == "unavailable"
+
+    class ResultProvider:
+        name = "Booktopia"
+
+        def lookup(self, _isbn):
+            return product_result
+
+    result = MetadataLookupService((ResultProvider(),)).lookup(EVOLUTION_ISBN)
+
+    assert result.status == "Retrieved"
+    assert result.values["title"] == "The Triumph of Evolution"
+    assert "book_details" not in result.values
+    assert result.provider_statuses["Booktopia"] == "Product unavailable"
+
+
+def test_booktopia_matching_structured_out_of_stock_offer_is_unavailable():
+    provider = BooktopiaProvider()
+    html = """
+      <script type="application/ld+json">
+        {"@type":"Book","isbn":"9780716736387","name":"The Triumph of Evolution",
+         "offers":{"@type":"Offer","availability":"https://schema.org/OutOfStock"}}
+      </script>
+    """
+
+    result = provider._product_result(EVOLUTION_URL, html, EVOLUTION_ISBN)
+
+    assert result.record_found is True
+    assert result.failure_kind == "unavailable"
 
 
 def test_booktopia_does_not_accept_matching_url_without_page_isbn_evidence(monkeypatch):

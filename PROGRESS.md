@@ -18,7 +18,8 @@
 - [x] BookLedger Mobile connection/scan UI simulation, retry rules, and 10-second scan timeout
 - [x] Open Library primary metadata lookup with Google Books fallback and per-provider timeouts
 - [x] Booktopia HTML provider activated after Open Library and Google Books; it follows only matching ISBN search results, verifies product-page ISBN evidence, and merges supported missing metadata and descriptions without replacing earlier values
-- [x] Booktopia prefers matching product-page body content marked `itemprop="description"` over a short schema.org description; synthetic regression covers the precedence, while current live page markup remains unverified because raw HTML retrieval failed
+- [x] Open Library no longer supplies Book Details/Synopsis from descriptions, notes, excerpts, or linked works while retaining supported bibliographic fields
+- [x] Booktopia accepts an explicitly tab-linked Description panel or a matching schema.org Book description after rejecting known bibliographic notes and retailer boilerplate; generic meta descriptions and unassociated `itemprop="description"` are ignored
 - [x] Service validation rejects non-finite or unrepresentable copy and sale prices and unapproved genres
 - [x] Dashboard distinguishes all physical copies from distinct bibliographic records and status counts
 - [x] Catalog photo-card grid and sortable Inventory table share copy records and ordered Genre, Condition, Location, Status filters
@@ -41,10 +42,11 @@
 - [x] Copy-level Trash, LIFO restore, Clear Trash, explicit recovery retry, protected two-step Purge, and read-only storage verifier
 - [x] Provider-derived title normalization with acronym and short-word handling; manual titles remain unchanged
 - [x] Backup format minimally includes Trash photo files
-- [x] Open Library prefers edition descriptions before notes, excerpts, and linked work descriptions; Google Books scans matching volumes and later ISBN query variants for descriptions without accepting unrelated identifiers
+- [x] Open Library synopsis candidates are excluded; Google Books scans matching volumes and later ISBN query variants for descriptions without accepting unrelated identifiers
 - [x] Full suite after Booktopia integration: `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-booktopia-full-report-final-20261018` — 148 passed; the default pytest temp path is unavailable in this sandbox
 - [x] Booktopia synopsis regression and full suite: 59 focused tests passed; full suite `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-booktopia-synopsis-full` — 149 passed, 1 Tk display test skipped because Tcl/Tk is incomplete
-- [ ] Live Open Library, Google Books, and Booktopia requests could not be checked because DNS resolution is unavailable in this environment; Booktopia's Terms of Business identify third-party copyright in bibliographic data but do not establish permission for automated metadata retrieval. Manual Windows startup/migration/lifecycle acceptance remains pending
+- [x] Latest synopsis policy run: focused provider tests 64 passed; full suite 155 passed with no skips; intake UI tests 18 passed with no skips; compileall and `git diff --check` passed
+- [ ] Live Open Library, Google Books, and Booktopia requests could not be checked because DNS resolution is unavailable in this environment. Indexed Booktopia page text is readable, but no raw HTML was available to verify the current Description-tab-to-panel relationship or confirm the parser against that live structure. Synthetic fixtures do not prove live extraction. Booktopia's Terms of Business identify third-party copyright in bibliographic data but do not establish permission for automated metadata retrieval. Manual Windows startup/migration/lifecycle acceptance remains pending
 - [ ] Windows packaging and frozen-executable verification (no packaging spec or executable exists)
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)
 

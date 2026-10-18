@@ -40,33 +40,31 @@ class _BookPageParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.isbns: set[str] = set()
-        self.descriptions: list[str] = []
-        self.visible_descriptions: list[str] = []
         self.json_ld: list[object] = []
         self.links: list[str] = []
+        self.elements: list[dict] = []
+        self._element_stack: list[dict] = []
         self._script_parts: list[str] | None = None
-        self._description_tags: list[str] = []
-        self._description_parts: list[str] = []
-        self._description_is_visible = False
         self._isbn_tags: list[str] = []
         self._isbn_parts: list[str] = []
 
     def handle_starttag(self, tag, attrs):
         attributes = {key.casefold(): value or "" for key, value in attrs}
+        element = {"tag": tag, "attrs": attributes, "content": []}
+        self.elements.append(element)
+        if self._element_stack:
+            self._element_stack[-1]["content"].append(element)
         if tag not in _VOID_TAGS:
-            if self._description_tags:
-                self._description_tags.append(tag)
+            self._element_stack.append(element)
+        if tag not in _VOID_TAGS:
             if self._isbn_tags:
                 self._isbn_tags.append(tag)
         if tag == "a" and attributes.get("href"):
             self.links.append(attributes["href"].strip())
         if tag == "meta":
             name = attributes.get("name", "").casefold()
-            prop = attributes.get("property", "").casefold()
             itemprop = attributes.get("itemprop", "").casefold()
             value = attributes.get("content", "").strip()
-            if value and (name in {"description", "og:description"} or prop == "og:description"):
-                self.descriptions.append(value)
             if itemprop in {"isbn", "isbn10", "isbn13", "gtin13"} and value:
                 normalized = normalize_isbn(value)
                 if normalized:
@@ -83,14 +81,6 @@ class _BookPageParser(HTMLParser):
             elif tag not in _VOID_TAGS:
                 self._isbn_tags = [tag]
                 self._isbn_parts = []
-        if itemprop == "description":
-            value = attributes.get("content", "").strip()
-            if value:
-                self.descriptions.append(value)
-            elif tag not in _VOID_TAGS:
-                self._description_tags = [tag]
-                self._description_parts = []
-                self._description_is_visible = True
 
     def handle_endtag(self, tag):
         if tag == "script" and self._script_parts is not None:
@@ -100,16 +90,6 @@ class _BookPageParser(HTMLParser):
             except (json.JSONDecodeError, TypeError):
                 pass
             self._script_parts = None
-        if self._description_tags and tag == self._description_tags[-1]:
-            self._description_tags.pop()
-            if not self._description_tags:
-                text = " ".join("".join(self._description_parts).split())
-                if text:
-                    self.descriptions.append(text)
-                    if self._description_is_visible:
-                        self.visible_descriptions.append(text)
-                self._description_parts = []
-                self._description_is_visible = False
         if self._isbn_tags and tag == self._isbn_tags[-1]:
             self._isbn_tags.pop()
             if not self._isbn_tags:
@@ -117,12 +97,16 @@ class _BookPageParser(HTMLParser):
                 if value:
                     self.isbns.add(value)
                 self._isbn_parts = []
+        for index in range(len(self._element_stack) - 1, -1, -1):
+            if self._element_stack[index]["tag"] == tag:
+                del self._element_stack[index:]
+                break
 
     def handle_data(self, data):
+        if self._element_stack:
+            self._element_stack[-1]["content"].append(data)
         if self._script_parts is not None:
             self._script_parts.append(data)
-        if self._description_tags:
-            self._description_parts.append(data)
         if self._isbn_tags:
             self._isbn_parts.append(data)
 
@@ -158,6 +142,107 @@ def _schema_text(value) -> str | None:
             if text:
                 return text
     return None
+
+
+_BIBLIOGRAPHIC_CLAUSE = (
+    r"includes?\s+(?:bibliographical references(?:\s*\([^)]*\))?(?:\s+and\s+index(?:es)?)?|"
+    r"index(?:es)?(?:\s+and\s+bibliographical references(?:\s*\([^)]*\))?)?)"
+)
+_BIBLIOGRAPHIC_NOTE = re.compile(
+    rf"^(?:(?:a\s+[^!?]+\s+book\.\s*)?(?:{_BIBLIOGRAPHIC_CLAUSE})(?:\.\s*{_BIBLIOGRAPHIC_CLAUSE})*\.?)$",
+    re.IGNORECASE,
+)
+_STANDALONE_BOOK_NOTE = re.compile(r"^a\s+[^!?]+\s+book\.?$", re.IGNORECASE)
+_DESCRIPTION_SECTION = re.compile(
+    r"\b(?:about the author|author biography|industry reviews|shipping and returns|"
+    r"frequently asked questions|what is .{1,100} about\?)\b",
+    re.IGNORECASE,
+)
+_RETAIL_COPY = re.compile(
+    r"\b(?:buy\b.{0,300}?\bfrom\s+booktopia\b|"
+    r"get a discounted\b.{0,200}?\bfrom\s+(?:australia['’]s?\s+)?leading online bookstore\b|"
+    r"australia['’]s?\s+leading online bookstore)\b",
+    re.IGNORECASE,
+)
+_RECOMMENDATION = re.compile(
+    r"\b(?:if you enjoyed\b.{0,250}?\byou might like\b|you may also like|you might also like|"
+    r"readers also enjoyed)\b",
+    re.IGNORECASE,
+)
+_UNAVAILABLE_PRODUCT = re.compile(
+    r"\b(?:currently\s+)?unable to source (?:this|the) book\b|"
+    r"\b(?:this\s+)?product is (?:currently\s+)?unavailable\b",
+    re.IGNORECASE,
+)
+
+
+def _clean_synopsis(value: str | None) -> str | None:
+    """Reject known non-synopsis text and trim unrelated sections after a summary."""
+    text = _plain_text(value or "")
+    if not text:
+        return None
+    if _BIBLIOGRAPHIC_NOTE.fullmatch(text) or _STANDALONE_BOOK_NOTE.fullmatch(text):
+        return None
+
+    cutoffs = [match.start() for pattern in (_DESCRIPTION_SECTION, _RETAIL_COPY, _RECOMMENDATION)
+               if (match := pattern.search(text))]
+    if cutoffs:
+        text = text[:min(cutoffs)].strip()
+    if not text or _BIBLIOGRAPHIC_NOTE.fullmatch(text) or _STANDALONE_BOOK_NOTE.fullmatch(text):
+        return None
+    if _RETAIL_COPY.search(text):
+        return None
+    return text
+
+
+def _element_text(element: dict) -> str:
+    if element["tag"] in {"script", "style", "noscript", "template"}:
+        return ""
+    parts = []
+    for child in element["content"]:
+        parts.append(_element_text(child) if isinstance(child, dict) else child)
+    return " ".join(" ".join(parts).split())
+
+
+def _description_panel_text(parser: _BookPageParser) -> list[str]:
+    """Extract text only when the Description tab explicitly identifies its panel."""
+    descriptions = []
+    for tab in parser.elements:
+        attrs = tab["attrs"]
+        tab_id = attrs.get("id", "")
+        if tab_id.casefold() != "pdp-tab-description":
+            continue
+        targets = set(attrs.get("aria-controls", "").split())
+        for key in ("href", "data-target", "data-bs-target"):
+            target = attrs.get(key, "").strip()
+            if target.startswith("#"):
+                targets.add(target[1:])
+        for panel in parser.elements:
+            panel_attrs = panel["attrs"]
+            panel_id = panel_attrs.get("id", "")
+            labelled_by = set(panel_attrs.get("aria-labelledby", "").split())
+            if (panel_id and panel_id in targets) or tab_id in labelled_by:
+                text = _element_text(panel)
+                if text:
+                    descriptions.append(text)
+    return descriptions
+
+
+def _product_is_unavailable(parser: _BookPageParser, matching_nodes: list[dict]) -> bool:
+    page = next((element for element in parser.elements if element["tag"] == "html"), None)
+    if page and _UNAVAILABLE_PRODUCT.search(_element_text(page)):
+        return True
+    for node in matching_nodes:
+        offers = node.get("offers") or []
+        offers = offers if isinstance(offers, list) else [offers]
+        for offer in offers:
+            if not isinstance(offer, dict):
+                continue
+            availability = _schema_text(offer.get("availability")) or ""
+            state = urllib.parse.unquote(availability).rstrip("/").rsplit("/", 1)[-1].casefold()
+            if state in {"outofstock", "discontinued", "soldout"}:
+                return True
+    return False
 
 
 def _schema_year(value) -> int | None:
@@ -260,9 +345,10 @@ def _metadata_from_jsonld(matching_nodes) -> tuple[dict, list[str]]:
                 if value not in (None, ""):
                     values[key] = value
                     break
-        description = _schema_text(node.get("description"))
-        if description:
-            descriptions.append(description)
+        if is_book(node):
+            description = _schema_text(node.get("description"))
+            if description:
+                descriptions.append(description)
     return values, descriptions
 
 
@@ -341,18 +427,23 @@ class BooktopiaProvider(MetadataProvider):
             return MetadataResult("No data", {}, self.name, record_found=False)
 
         values, structured_descriptions = _metadata_from_jsonld(matching_nodes)
-        # Prefer semantic description content rendered in the product page over
-        # a short bibliographic note copied into the structured Book record.
-        description = next((value for value in parser.visible_descriptions if _plain_text(value)), None)
-        if description is None:
-            description = next((value for value in structured_descriptions if _plain_text(value)), None)
-        if description is None:
-            description = next((value for value in parser.descriptions if _plain_text(value)), None)
+        unavailable = _product_is_unavailable(parser, matching_nodes)
+        description_candidates = _description_panel_text(parser) + structured_descriptions
+        description = next(
+            (cleaned for candidate in description_candidates if (cleaned := _clean_synopsis(candidate))),
+            None,
+        )
         if description:
-            values["book_details"] = _plain_text(description)
+            values["book_details"] = description
         if not values:
-            return MetadataResult("No data", {}, self.name, record_found=True)
-        return MetadataResult("Retrieved", values, self.name, record_found=True)
+            return MetadataResult(
+                "No data", {}, self.name,
+                failure_kind="unavailable" if unavailable else None, record_found=True,
+            )
+        return MetadataResult(
+            "Retrieved", values, self.name,
+            failure_kind="unavailable" if unavailable else None, record_found=True,
+        )
 
     def lookup(self, isbn: str) -> MetadataResult:
         isbn = normalize_isbn(isbn) or ""

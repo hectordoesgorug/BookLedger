@@ -163,7 +163,7 @@ def test_open_library_mismatched_returned_identifiers_are_not_classified_as_a_mi
     assert result.record_found is False
 
 
-def test_open_library_extracts_dictionary_notes_excerpts_and_work_descriptions():
+def test_open_library_never_uses_description_notes_excerpts_or_work_synopsis():
     provider = OpenLibraryProvider()
     calls = []
 
@@ -174,109 +174,78 @@ def test_open_library_extracts_dictionary_notes_excerpts_and_work_descriptions()
         return {
             "ISBN:9780306406157": {
                 "identifiers": {"isbn_13": ["9780306406157"]},
-                "title": "Example",
-                "notes": {"type": "/type/text", "value": "Edition-level note."},
+                "title": "Example Edition",
+                "authors": [{"name": "Example Author"}],
+                "publishers": [{"name": "Example Press"}],
+                "publish_date": "2001",
+                "number_of_pages": 321,
+                "description": {"type": "/type/text", "value": "Edition synopsis."},
+                "notes": {"type": "/type/text", "value": "A Peter N. Nevraumont book. Includes index. Includes bibliographical references (p. 186-216) and index."},
+                "excerpts": [{"excerpt": "Excerpt synopsis."}],
                 "works": [{"key": "/works/OL123W"}],
             }
         }
 
     provider._request_json = response
     result = provider.lookup("9780306406157")
-    assert result.values["book_details"] == "Edition-level note."
+    assert result.values["book_details"] is None
+    assert result.values["title"] == "Example Edition"
+    assert result.values["author"] == "Example Author"
+    assert result.values["publisher"] == "Example Press"
+    assert result.values["publication_year"] == 2001
+    assert result.values["page_count"] == 321
     assert len(calls) == 1
 
-    def no_edition_description(url):
-        if url.endswith(".json"):
-            return {"description": "Work-level complete description."}
-        return {
-            "ISBN:9780306406157": {
-                "identifiers": {"isbn_13": ["9780306406157"]},
-                "excerpts": [{"excerpt": "Excerpt description."}],
-                "works": [{"key": "/works/OL123W"}],
-            }
-        }
-
-    provider._request_json = no_edition_description
-    assert provider.lookup("9780306406157").values["book_details"] == "Excerpt description."
-
-    def work_description(url):
-        if url.endswith(".json"):
-            return {"description": {"value": "Work-level complete description."}}
-        return {
-            "ISBN:9780306406157": {
-                "identifiers": {"isbn_13": ["9780306406157"]},
-                "title": "Example",
-                "works": [{"key": "/works/OL123W"}],
-            }
-        }
-
-    provider._request_json = work_description
-    assert provider.lookup("9780306406157").values["book_details"] == "Work-level complete description."
-
-
-def test_open_library_prefers_edition_description_string_and_object_shapes():
+def test_open_library_ignores_each_synopsis_candidate_but_keeps_edition_metadata():
     provider = OpenLibraryProvider()
+    candidate_fields = {
+        "description": "Edition description.",
+        "notes": {"value": "Includes bibliographical references (p. 186-216) and index."},
+        "excerpts": [{"excerpt": "Excerpt text."}],
+        "works": [{"key": "/works/OL123W"}],
+    }
+    for key, value in candidate_fields.items():
+        calls = []
 
-    for description in ("Edition string description.", {"type": "/type/text", "value": "Edition object description."}):
-        provider._request_json = lambda _url, description=description: {
-            "ISBN:9780306406157": {
-                "identifiers": {"isbn_13": ["9780306406157"]},
-                "description": description,
-                "notes": {"value": "Weaker notes fallback."},
-                "excerpts": [{"excerpt": "Weaker excerpt fallback."}],
+        def response(url, key=key, value=value):
+            calls.append(url)
+            if url.endswith(".json"):
+                return {"description": "Linked work description."}
+            return {
+                "ISBN:9780306406157": {
+                    "identifiers": {"isbn_13": ["9780306406157"]},
+                    "title": "Example",
+                    key: value,
+                }
             }
-        }
+
+        provider._request_json = response
         result = provider.lookup("9780306406157")
-        expected = description if isinstance(description, str) else description["value"]
-        assert result.values["book_details"] == expected
+        assert result.values["book_details"] is None
+        assert result.values["title"] == "Example"
+        assert len(calls) == 1
 
 
-def test_open_library_ignores_malformed_description_and_returns_none_when_unusable():
+def test_open_library_evolution_reference_notes_do_not_fill_synopsis():
     provider = OpenLibraryProvider()
-
     provider._request_json = lambda _url: {
-        "ISBN:9780306406157": {
-            "identifiers": {"isbn_13": ["9780306406157"]},
-            "title": "Example",
-            "description": {"value": 42, "unexpected": [None]},
-            "notes": {"type": "/type/text", "value": "Usable notes fallback."},
+        "ISBN:9780716736387": {
+            "identifiers": {"isbn_13": ["9780716736387"]},
+            "title": "The Triumph of Evolution",
+            "notes": [
+                {"value": "A Peter N. Nevraumont book."},
+                {"value": "Includes index."},
+                {"value": "Includes bibliographical references (p. 186-216) and index."},
+            ],
+            "number_of_pages": 224,
         }
     }
-    assert provider.lookup("9780306406157").values["book_details"] == "Usable notes fallback."
 
-    provider._request_json = lambda _url: {
-        "ISBN:9780306406157": {
-            "identifiers": {"isbn_13": ["9780306406157"]},
-            "title": "Example",
-            "description": {"value": 42, "unexpected": [None]},
-            "notes": {"value": "   "},
-            "excerpts": [],
-        }
-    }
-    result = provider.lookup("9780306406157")
+    result = provider.lookup("9780716736387")
+
     assert result.status == "Retrieved"
-    assert result.values["title"] == "Example"
-    assert result.values["book_details"] is None
-
-
-def test_open_library_optional_work_description_failure_keeps_edition_metadata():
-    provider = OpenLibraryProvider()
-
-    def response(url):
-        if url.endswith(".json"):
-            raise TimeoutError("work description timed out")
-        return {
-            "ISBN:9780306406157": {
-                "identifiers": {"isbn_13": ["9780306406157"]},
-                "title": "Example",
-                "works": [{"key": "/works/OL123W"}],
-            }
-        }
-
-    provider._request_json = response
-    result = provider.lookup("9780306406157")
-    assert result.status == "Retrieved"
-    assert result.values["title"] == "Example"
+    assert result.values["title"] == "The Triumph of Evolution"
+    assert result.values["page_count"] == 224
     assert result.values["book_details"] is None
 
 

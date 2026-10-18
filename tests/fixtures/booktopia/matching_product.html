@@ -2,10 +2,15 @@
 <!-- Synthetic parser fixture; not captured from Booktopia. -->
 <html>
   <head>
-    <meta property="og:description" content="A sample description from the product page." />
+    <meta property="og:description" content="Buy Sample Novel from Booktopia. Get a discounted Paperback from Australia's leading online bookstore." />
     <script type="application/ld+json">
       {"@context":"https://schema.org","@type":"Book","isbn":"9780140449136","name":"Sample Novel","description":"<p>A sample <em>description</em> from structured book data.</p>"}
     </script>
   </head>
-  <body><div itemprop="description"><p>Product description with <em>nested</em> markup.</p></div></body>
+  <body>
+    <button id="pdp-tab-description" role="tab" aria-controls="book-description">Description</button>
+    <section id="book-description" role="tabpanel" aria-labelledby="pdp-tab-description">
+      <div itemprop="description"><p>Product description with <em>nested</em> markup.</p></div>
+    </section>
+  </body>
 </html>
