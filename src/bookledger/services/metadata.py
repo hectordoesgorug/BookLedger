@@ -9,11 +9,28 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
-from bookledger.services.isbn import normalize_isbn
+from bookledger.services.isbn import equivalent_isbn, normalize_isbn
 
 
 _SMALL_TITLE_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor", "of", "on", "onto", "or", "over", "the", "to", "up", "with"}
 _TITLE_ACRONYMS = {"api", "dna", "isbn", "nasa", "usa", "uk", "un", "us", "wwii"}
+
+
+def _description_text(value) -> str | None:
+    """Normalize Open Library's string, object, and excerpt description shapes."""
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("value", "description", "excerpt", "text"):
+            result = _description_text(value.get(key))
+            if result:
+                return result
+    if isinstance(value, list):
+        for item in value:
+            result = _description_text(item)
+            if result:
+                return result
+    return None
 
 
 def normalize_provider_title(title: str | None) -> str | None:
@@ -59,7 +76,7 @@ class MetadataResult:
     values: dict
     source: str | None = None
     error: str | None = None
-    failure_kind: str | None = None  # timeout, network, provider, unexpected
+    failure_kind: str | None = None  # timeout, network, provider, unexpected, unverified
     record_found: bool | None = None
     provider_statuses: dict[str, str] = field(default_factory=dict)
     partial: bool = False
@@ -93,6 +110,8 @@ def _provider_outcome(result: MetadataResult) -> str:
             "provider": "HTTP/provider error",
             "unexpected": "Unexpected response error",
         }.get(result.failure_kind, "Unexpected response error")
+    if result.status == "No data" and result.failure_kind == "unverified":
+        return "Results returned · ISBN not confirmed"
     if result.record_found is True and not result.values:
         return "Record found · supported metadata unavailable"
     if result.status == "No data":
@@ -127,31 +146,71 @@ class OpenLibraryProvider(MetadataProvider):
 
     def lookup(self, isbn: str) -> MetadataResult:
         isbn = normalize_isbn(isbn) or ""
-        key = f"ISBN:{isbn}"
-        query = urllib.parse.urlencode({"bibkeys": key, "format": "json", "jscmd": "data"})
+        lookup_isbns = tuple(dict.fromkeys(value for value in (isbn, equivalent_isbn(isbn)) if value))
+        keys = tuple(f"ISBN:{value}" for value in lookup_isbns)
+        query = urllib.parse.urlencode({"bibkeys": ",".join(keys), "format": "json", "jscmd": "data"})
         try:
             payload = self._request_json(f"https://openlibrary.org/api/books?{query}")
         except Exception as exc:
             return self._failed(exc)
-        info = payload.get(key)
-        if not isinstance(info, dict):
-            return MetadataResult("No data", {}, self.name, record_found=False)
-
-        identifiers = info.get("identifiers") or {}
-        returned = {normalize_isbn(value) for values in identifiers.values() for value in (values if isinstance(values, list) else [values])}
-        if returned and isbn not in returned:
+        if not isinstance(payload, dict):
+            return self._failed(ValueError("Open Library returned an unexpected response shape"))
+        info = None
+        saw_unverified_record = False
+        for candidate in keys:
+            candidate_info = payload.get(candidate)
+            if candidate_info is None:
+                continue
+            if not isinstance(candidate_info, dict):
+                return self._failed(ValueError("Open Library returned an unexpected response shape"))
+            identifiers = candidate_info.get("identifiers") or {}
+            returned = {
+                normalize_isbn(value)
+                for values in identifiers.values()
+                for value in (values if isinstance(values, list) else [values])
+            }
+            if not returned or returned.intersection(lookup_isbns):
+                info = candidate_info
+                break
+            saw_unverified_record = True
+        if info is None:
+            if saw_unverified_record:
+                return MetadataResult(
+                    "No data", {}, self.name,
+                    "Open Library returned a record with identifiers that did not match the entered ISBN.",
+                    "unverified", record_found=False,
+                )
             return MetadataResult("No data", {}, self.name, record_found=False)
 
         authors = info.get("authors") or []
         publishers = info.get("publishers") or []
         subjects = info.get("subjects") or []
         published = str(info.get("publish_date") or "")
+        description = _description_text(info.get("description"))
+        if not description:
+            description = _description_text(info.get("notes"))
+        if not description:
+            description = _description_text(info.get("excerpts"))
+        if not description:
+            for work in info.get("works") or []:
+                work_key = work.get("key") if isinstance(work, dict) else None
+                if not isinstance(work_key, str) or not re.fullmatch(r"/works/OL\d+W", work_key):
+                    continue
+                try:
+                    work_info = self._request_json(f"https://openlibrary.org{work_key}.json")
+                except Exception:
+                    # Work descriptions enrich a matched edition but are optional.
+                    continue
+                description = _description_text(work_info.get("description")) if isinstance(work_info, dict) else None
+                if description:
+                    break
+
         values = {
             "title": info.get("title"),
             "author": ", ".join(author.get("name", "") for author in authors if author.get("name")) or None,
             "isbn": isbn,
             "genre": next((subject.get("name") for subject in subjects if subject.get("name")), None),
-            "book_details": info.get("notes"),
+            "book_details": description,
             "publisher": ", ".join(publisher.get("name", "") for publisher in publishers if publisher.get("name")) or None,
             "publication_year": int(published[:4]) if published[:4].isdigit() else None,
             "edition": info.get("edition_name"),
@@ -175,27 +234,86 @@ class GoogleBooksProvider(MetadataProvider):
 
     def lookup(self, isbn: str) -> MetadataResult:
         isbn = normalize_isbn(isbn) or ""
-        params = {"q": f"isbn:{isbn}", "maxResults": 5}
-        if self.api_key:
-            params["key"] = self.api_key
-        query = urllib.parse.urlencode(params)
-        try:
-            payload = self._request_json(f"https://www.googleapis.com/books/v1/volumes?{query}")
-        except Exception as exc:
-            return self._failed(exc)
-        items = payload.get("items") or []
-        info = None
-        for item in items:
-            candidate = item.get("volumeInfo") or {}
-            identifiers = candidate.get("industryIdentifiers") or []
-            if any(normalize_isbn(identifier.get("identifier")) == isbn for identifier in identifiers):
-                info = candidate
+        lookup_isbns = tuple(dict.fromkeys(value for value in (isbn, equivalent_isbn(isbn)) if value))
+        failures: list[Exception] = []
+        saw_unverified_result = False
+        matched_record_found = False
+        matched_values: dict = {}
+        queries = tuple(dict.fromkeys((isbn, *(f"isbn:{value}" for value in lookup_isbns))))
+        for query_term in queries:
+            params = {"q": query_term, "maxResults": 5}
+            if self.api_key:
+                params["key"] = self.api_key
+            query = urllib.parse.urlencode(params)
+            try:
+                payload = self._request_json(f"https://www.googleapis.com/books/v1/volumes?{query}")
+            except Exception as exc:
+                failures.append(exc)
+                continue
+            if not isinstance(payload, dict):
+                failures.append(ValueError("Google Books returned an unexpected response shape"))
+                continue
+            total_items = payload.get("totalItems")
+            if total_items is not None and (not isinstance(total_items, int) or isinstance(total_items, bool) or total_items < 0):
+                failures.append(ValueError("Google Books returned an unexpected response shape"))
+                continue
+            items = payload.get("items") or []
+            if not isinstance(items, list):
+                failures.append(ValueError("Google Books returned an unexpected response shape"))
+                continue
+            if total_items and not items:
+                failures.append(ValueError("Google Books returned an incomplete response"))
+                continue
+            for item in items:
+                if not isinstance(item, dict) or not isinstance(item.get("volumeInfo"), dict):
+                    failures.append(ValueError("Google Books returned an unexpected response shape"))
+                    continue
+                candidate = item["volumeInfo"]
+                identifiers = candidate.get("industryIdentifiers") or []
+                if not isinstance(identifiers, list):
+                    failures.append(ValueError("Google Books returned an unexpected response shape"))
+                    continue
+                if any(not isinstance(identifier, dict) for identifier in identifiers):
+                    failures.append(ValueError("Google Books returned an unexpected response shape"))
+                    continue
+                returned_isbns = {
+                    normalize_isbn(identifier.get("identifier")) for identifier in identifiers
+                }
+                if returned_isbns.intersection(lookup_isbns):
+                    matched_record_found = True
+                    candidate_result = self._result_from_volume_info(candidate, lookup_isbns)
+                    for field, value in candidate_result.values.items():
+                        if matched_values.get(field) in (None, "") and value not in (None, ""):
+                            matched_values[field] = value
+                else:
+                    saw_unverified_result = True
+            # Keep searching query variants when a verified match is sparse, so
+            # a later valid volume can fill fields such as Book Details.
+            if matched_values.get("book_details") not in (None, ""):
                 break
-        if info is None:
-            return MetadataResult("No data", {}, self.name, record_found=False)
+
+        if matched_values:
+            return MetadataResult("Retrieved", matched_values, self.name, record_found=True)
+        if matched_record_found:
+            return MetadataResult("No data", {}, self.name, record_found=True)
+
+        if failures:
+            return self._failed(failures[0])
+        if saw_unverified_result:
+            return MetadataResult(
+                "No data", {}, self.name,
+                "Google Books returned volumes without an identifier matching the entered ISBN.",
+                "unverified", record_found=False,
+            )
+        return MetadataResult("No data", {}, self.name, record_found=False)
+
+    def _result_from_volume_info(self, info: dict, lookup_isbns: tuple[str, ...]) -> MetadataResult:
 
         identifiers = info.get("industryIdentifiers") or []
-        returned_isbn = next((x.get("identifier") for x in identifiers if normalize_isbn(x.get("identifier")) == isbn), isbn)
+        returned_isbn = next((
+            x.get("identifier") for x in identifiers
+            if isinstance(x, dict) and normalize_isbn(x.get("identifier")) in lookup_isbns
+        ), lookup_isbns[0])
         published = str(info.get("publishedDate") or "")
         values = {
             "title": info.get("title"),
@@ -234,6 +352,7 @@ class MetadataLookupService:
     ) -> MetadataResult:
         failures: list[MetadataResult] = []
         primary_failure: MetadataResult | None = None
+        unverified_result: MetadataResult | None = None
         combined: dict = {}
         sources: list[str] = []
         any_record_found = False
@@ -298,6 +417,8 @@ class MetadataLookupService:
                 failures.append(result)
                 if index == 0:
                     primary_failure = result
+            elif result.status == "No data" and result.failure_kind == "unverified":
+                unverified_result = result
 
         if combined:
             partial = bool(failures) or any(combined.get(key) in (None, "") for key in supported)
@@ -322,4 +443,10 @@ class MetadataLookupService:
             failure.provider_statuses = provider_statuses
             return failure
         source = self.providers[-1].name if self.providers else None
+        if unverified_result is not None:
+            return MetadataResult(
+                "No data", {}, unverified_result.source, unverified_result.error,
+                unverified_result.failure_kind, record_found=False,
+                provider_statuses=provider_statuses,
+            )
         return MetadataResult("No data", {}, source, record_found=any_record_found, provider_statuses=provider_statuses)

@@ -9,6 +9,28 @@ def normalize_isbn(value: str | None) -> str | None:
     return cleaned or None
 
 
+def equivalent_isbn(value: str | None) -> str | None:
+    """Return the ISBN-10/ISBN-13 alias when the ISBN has a safe equivalent."""
+    isbn = normalize_isbn(value)
+    if not isbn:
+        return None
+    valid, _message = isbn_check(isbn)
+    if not valid:
+        return None
+    if len(isbn) == 13:
+        if not isbn.startswith("978"):
+            return None
+        body = isbn[3:12]
+        total = sum((10 - index) * int(digit) for index, digit in enumerate(body))
+        check = (11 - total % 11) % 11
+        return body + ("X" if check == 10 else str(check))
+    if len(isbn) == 10:
+        body = "978" + isbn[:9]
+        total = sum(int(digit) * (1 if index % 2 == 0 else 3) for index, digit in enumerate(body))
+        return body + str((10 - total % 10) % 10)
+    return None
+
+
 def isbn_check(value: str | None) -> tuple[bool, str]:
     """Validate ISBN-10 or ISBN-13 check digits. Empty input is valid/optional."""
     isbn = normalize_isbn(value)

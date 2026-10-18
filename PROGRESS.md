@@ -17,7 +17,7 @@
 - [x] Field-specific validation messages below inputs with valid-value clearing and finite positive price validation
 - [x] BookLedger Mobile connection/scan UI simulation, retry rules, and 10-second scan timeout
 - [x] Open Library primary metadata lookup with Google Books fallback and per-provider timeouts
-- [x] Booktopia best-effort description enrichment after Open Library and Google Books, with ISBN checks, bounded HTTPS requests, separate provider status, and saved HTML fixture tests
+- [x] Booktopia description adapter with ISBN checks, bounded HTTPS requests, and saved HTML fixture tests; adapter is not currently included in the application's provider list and requires separate evaluation before activation
 - [x] Service validation rejects non-finite or unrepresentable copy and sale prices and unapproved genres
 - [x] Dashboard distinguishes all physical copies from distinct bibliographic records and status counts
 - [x] Catalog photo-card grid and sortable Inventory table share copy records and ordered Genre, Condition, Location, Status filters
@@ -40,8 +40,9 @@
 - [x] Copy-level Trash, LIFO restore, Clear Trash, explicit recovery retry, protected two-step Purge, and read-only storage verifier
 - [x] Provider-derived title normalization with acronym and short-word handling; manual titles remain unchanged
 - [x] Backup format minimally includes Trash photo files
-- [x] Full Windows test suite: `.venv\Scripts\python.exe -m pytest --basetemp=.pytest-tmp -rs` — 119 passed, 1 skipped; the skipped Tk test hit a Tcl initialization error
-- [ ] Manual Windows startup/migration/lifecycle acceptance test on a copy of user data; live Booktopia request could not be checked because DNS/network access is unavailable in this environment
+- [x] Open Library prefers edition descriptions before notes, excerpts, and linked work descriptions; Google Books scans matching volumes and later ISBN query variants for descriptions without accepting unrelated identifiers
+- [x] Full Windows test suite after metadata regressions: `.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest-tmp-meta-full-final-20261018 -rs` — 139 passed
+- [ ] Live Open Library, Google Books, and Booktopia requests could not be checked because DNS resolution is unavailable in this environment; manual Windows startup/migration/lifecycle acceptance remains pending
 - [ ] Windows packaging and frozen-executable verification (no packaging spec or executable exists)
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)
 

@@ -230,6 +230,24 @@ def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     assert str(widget.refresh_button.cget("state")) == "disabled"
 
 
+def test_unverified_provider_results_do_not_appear_as_a_confirmed_isbn_miss(form):
+    widget, _root, _photo = form
+    isbn = "9780385504201"
+    widget._set("isbn", isbn)
+    widget._active_operation = ("lookup", 47, isbn)
+    widget._finish_lookup(47, isbn, MetadataResult(
+        "No data", {}, "Google Books", "internal details", "unverified",
+        record_found=False,
+        provider_statuses={
+            "Open Library": "No matching record",
+            "Google Books": "Results returned · ISBN not confirmed",
+        },
+    ))
+
+    assert widget.google_books_status.get() == "Results returned · ISBN not confirmed"
+    assert widget.metadata_status.get() == "Results returned, but ISBN could not be confirmed · Google Books"
+
+
 def test_successful_fallback_lookup_reports_primary_provider_failure(form):
     widget, _root, _photo = form
     isbn = "9780306406157"
@@ -254,6 +272,28 @@ def test_successful_fallback_lookup_reports_primary_provider_failure(form):
     assert widget.open_library_status.get() == "Timed out"
     assert widget.google_books_status.get() == "Metadata retrieved · some fields missing"
     assert widget.booktopia_status.get() == "Metadata retrieved"
+
+
+def test_partial_lookup_without_description_reports_book_details_unavailable(form):
+    widget, _root, _photo = form
+    isbn = "9780306406157"
+    widget._set("isbn", isbn)
+    widget._active_operation = ("lookup", 48, isbn)
+
+    widget._finish_lookup(48, isbn, MetadataResult(
+        "Retrieved", {"title": "Example Book", "author": "Example Author"}, "Open Library + Google Books",
+        record_found=True,
+        provider_statuses={
+            "Open Library": "Metadata retrieved · some fields missing",
+            "Google Books": "Metadata retrieved · some fields missing",
+        },
+        partial=True,
+    ))
+
+    assert widget._get("title") == "Example Book"
+    assert widget.metadata_status.get() == (
+        "Partially retrieved · Open Library + Google Books · Book Details unavailable"
+    )
 
 
 def test_edit_form_uses_one_contextual_price_and_keeps_status_out_of_form(form):

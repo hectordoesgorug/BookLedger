@@ -526,9 +526,14 @@ class BookForm(tk.Toplevel):
             self._apply_metadata(result)
         if result.status == "Retrieved" and result.values:
             summary = "Partially retrieved" if result.partial or result.failure_kind else "Metadata retrieved"
-            self.metadata_status.set(f"{summary} · {result.source or 'Metadata Providers'}")
+            detail = ""
+            if result.values.get("book_details") in (None, "") and not self._get("book_details"):
+                detail = " · Book Details unavailable"
+            self.metadata_status.set(f"{summary} · {result.source or 'Metadata Providers'}{detail}")
         elif result.status == "No data":
-            if result.record_found:
+            if result.failure_kind == "unverified":
+                self.metadata_status.set(f"Results returned, but ISBN could not be confirmed · {result.source or 'Metadata Provider'}")
+            elif result.record_found:
                 self.metadata_status.set("Record found, but no usable supported metadata")
             else:
                 self.metadata_status.set(f"No matching ISBN record · {result.source or 'Metadata Providers'}")
