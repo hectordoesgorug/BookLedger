@@ -9,7 +9,10 @@ venv/
 env/
 
 # Local data and backups
-BookLedger_Data/
+BookLedger_Data.migrated/
+data/
+backups/
+assets/
 *.db
 *.sqlite
 *.sqlite3
