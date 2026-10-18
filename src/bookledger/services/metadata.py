@@ -333,9 +333,9 @@ class MetadataLookupService:
             field for descriptor in PROVIDERS_BY_NAME.values() for field in descriptor.supported_fields
             if field != "srp"
         ))
-        # Stop when the main bibliographic fields are available. Edition, format,
-        # synopsis, and page count remain optional enrichment and never force all
-        # sources to run. Unsupported fields are not blockers.
+        # Stop when the main bibliographic fields are available. A missing synopsis
+        # keeps only later synopsis-capable providers eligible; other optional
+        # fields never force every source to run.
         completion_fields = set()
         for provider in self.providers:
             descriptor = PROVIDERS_BY_NAME.get(provider.name)
@@ -352,6 +352,11 @@ class MetadataLookupService:
             if on_provider_status:
                 on_provider_status(name, status)
 
+        def supports_synopsis(candidate: MetadataProvider) -> bool:
+            candidate_descriptor = PROVIDERS_BY_NAME.get(candidate.name)
+            fields = candidate_descriptor.supported_fields if candidate_descriptor else supported
+            return "book_details" in fields
+
         for index, provider in enumerate(self.providers):
             previous = self.providers[index - 1].name if index else None
             initial_status = f"Waiting for {previous}…" if previous else f"Retrieving from {provider.name}…"
@@ -360,9 +365,19 @@ class MetadataLookupService:
             descriptor = PROVIDERS_BY_NAME.get(provider.name)
             fields_for_provider = descriptor.supported_fields if descriptor else supported
             if combined and completion_fields.issubset(combined.keys()):
-                for remaining in self.providers[index:]:
-                    set_provider_status(remaining.name, "Not needed (skipped)")
-                break
+                synopsis_missing = combined.get("book_details") in (None, "")
+                next_synopsis_provider = next((
+                    candidate_index
+                    for candidate_index in range(index, len(self.providers))
+                    if supports_synopsis(self.providers[candidate_index])
+                ), None)
+                if not synopsis_missing or next_synopsis_provider is None:
+                    for remaining in self.providers[index:]:
+                        set_provider_status(remaining.name, "Not needed (skipped)")
+                    break
+                if next_synopsis_provider > index:
+                    set_provider_status(provider.name, "Not needed (skipped)")
+                    continue
             if combined and not any(combined.get(key) in (None, "") for key in fields_for_provider):
                 set_provider_status(provider.name, "Not needed (skipped)")
                 continue

@@ -10,6 +10,7 @@ env/
 
 # Local data and backups
 BookLedger_Data.migrated/
+config.json
 data/
 backups/
 assets/

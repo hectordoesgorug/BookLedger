@@ -81,24 +81,28 @@ def test_read_only_portable_root_saves_to_per_user_fallback(tmp_path, monkeypatc
     assert not portable.exists()
 
 
-def test_disabled_provider_is_never_called(monkeypatch):
+def test_disabled_booktopia_is_not_queried_for_a_missing_synopsis(monkeypatch):
     from bookledger.services.booktopia import BooktopiaProvider
     from bookledger.services.metadata import GoogleBooksProvider, OpenLibraryProvider
 
     called = []
     def fake_lookup(self, _isbn):
         called.append(self.name)
+        if self.name == "Open Library":
+            return MetadataResult("Retrieved", {
+                "title": "Book", "author": "Author", "genre": "Fiction",
+                "publisher": "Press", "publication_year": 2020,
+            }, self.name)
         return MetadataResult("No data", {}, self.name)
 
     for provider_type in (OpenLibraryProvider, GoogleBooksProvider, BooktopiaProvider):
         monkeypatch.setattr(provider_type, "lookup", fake_lookup)
     settings = ProviderSettings.defaults()
-    settings.enabled["google_books"] = False
     settings.enabled["booktopia"] = False
     providers = build_providers(settings)
-    assert "Google Books" not in [provider.name for provider in providers]
+    assert [provider.name for provider in providers] == ["Open Library", "Google Books"]
     MetadataLookupService(providers).lookup("9780306406157")
-    assert called == ["Open Library"]
+    assert called == ["Open Library", "Google Books"]
 
 
 def test_configured_order_controls_lookup_order_and_merges_only_empty_fields():
@@ -142,7 +146,7 @@ def test_reordering_registry_changes_actual_lookup_order(monkeypatch):
     assert result.values["author"] == "Author"
 
 
-def test_lookup_continues_after_failure_and_stops_after_core_metadata_is_complete():
+def test_lookup_continues_after_failure_and_stops_after_synopsis_completion():
     class Stub:
         def __init__(self, name, result, calls):
             self.name, self.result, self.calls = name, result, calls
@@ -159,10 +163,11 @@ def test_lookup_continues_after_failure_and_stops_after_core_metadata_is_complet
     }, "Google Books"), calls)
     third = Stub("Booktopia", MetadataResult("Retrieved", {"book_details": "Optional synopsis"}, "Booktopia"), calls)
     result = MetadataLookupService((first, second, third)).lookup("9780306406157")
-    assert calls == ["Open Library", "Google Books"]
+    assert calls == ["Open Library", "Google Books", "Booktopia"]
     assert result.values["title"] == "A Book"
     assert result.values["page_count"] == 300
-    assert result.failure_kind == "network"
+    assert result.values["book_details"] == "Optional synopsis"
+    assert result.provider_statuses["Open Library"] == "Connection failed"
 
 
 def test_inventory_purge_does_not_remove_root_provider_configuration(tmp_path):

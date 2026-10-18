@@ -293,6 +293,37 @@ def test_booktopia_rejects_retail_copy_but_uses_related_description_panel():
     assert "Booktopia" not in result.values["book_details"]
 
 
+def test_strength_of_the_few_synopsis_merges_after_core_metadata_is_complete(monkeypatch):
+    class StubProvider:
+        def __init__(self, name, result):
+            self.name = name
+            self.result = result
+            self.calls = 0
+
+        def lookup(self, _isbn):
+            self.calls += 1
+            return self.result
+
+    open_library = StubProvider("Open Library", MetadataResult("Retrieved", {
+        "title": "The Strength of the Few", "author": "James Islington", "genre": "Fantasy",
+        "publisher": "Text Publishing", "publication_year": 2025,
+    }, "Open Library"))
+    google_books = StubProvider("Google Books", MetadataResult("No data", {}, "Google Books"))
+    booktopia = BooktopiaProvider()
+    monkeypatch.setattr(booktopia, "lookup", lambda isbn: booktopia._product_result(
+        STRENGTH_URL, _fixture("strength_of_the_few_synthetic.html").decode("utf-8"), isbn
+    ))
+
+    result = MetadataLookupService((open_library, google_books, booktopia)).lookup(STRENGTH_ISBN)
+
+    assert [open_library.calls, google_books.calls] == [1, 1]
+    assert result.values["title"] == "The Strength of the Few"
+    assert result.values["author"] == "James Islington"
+    assert result.values["book_details"] == (
+        "On three worlds, one young man must hide, fight, and discover what threatens them all."
+    )
+
+
 def test_booktopia_rejects_retail_copy_from_meta_and_book_jsonld():
     provider = BooktopiaProvider()
 
@@ -562,7 +593,7 @@ def test_booktopia_runs_last_to_fill_only_a_missing_description():
     assert result.provider_statuses["Booktopia"] == "Metadata retrieved · some fields missing"
 
 
-def test_google_books_is_skipped_when_only_optional_book_details_is_missing():
+def test_google_books_is_queried_when_only_the_synopsis_is_missing():
     class StubProvider:
         def __init__(self, name, values):
             self.name = name
@@ -581,9 +612,8 @@ def test_google_books_is_skipped_when_only_optional_book_details_is_missing():
 
     result = MetadataLookupService((open_library, google_books)).lookup(ISBN)
 
-    assert google_books.calls == 0
-    assert result.provider_statuses["Google Books"] == "Not needed (skipped)"
-    assert "book_details" not in result.values
+    assert google_books.calls == 1
+    assert result.values["book_details"] == "A full synopsis."
     assert result.partial is False
 
 
@@ -602,8 +632,7 @@ def test_booktopia_is_skipped_when_earlier_providers_supply_all_supported_fields
 
     open_library = StubProvider("Open Library", {
         "title": "Novel", "author": "Author", "genre": "Fiction", "book_details": "Existing description",
-        "publisher": "Press", "publication_year": 2020, "edition": "First", "page_count": 100,
-        "format": "Paperback",
+        "publisher": "Press", "publication_year": 2020,
     })
     google_books = StubProvider("Google Books", {})
     booktopia = StubProvider("Booktopia", {"book_details": "Booktopia description"})

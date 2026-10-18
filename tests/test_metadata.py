@@ -617,6 +617,38 @@ def test_google_books_description_enriches_open_library_title_without_overwritin
     assert result.values["book_details"] == "Full description"
 
 
+def test_core_metadata_completion_still_queries_later_synopsis_provider():
+    open_library = StubProvider("Open Library", MetadataResult("Retrieved", {
+        "title": "Nightfall", "author": "Isaac Asimov", "genre": "Science Fiction",
+        "publisher": "Bantam Books", "publication_year": 1991, "page_count": 341,
+    }, "Open Library"))
+    google_books = StubProvider("Google Books", MetadataResult("No data", {}, "Google Books"))
+    booktopia = StubProvider("Booktopia", MetadataResult("Retrieved", {
+        "title": "Different title", "book_details": "Verified synthetic synopsis.",
+    }, "Booktopia", record_found=True))
+
+    result = MetadataLookupService((open_library, google_books, booktopia)).lookup("9780553290998")
+
+    assert [open_library.calls, google_books.calls, booktopia.calls] == [1, 1, 1]
+    assert result.values["title"] == "Nightfall"
+    assert result.values["book_details"] == "Verified synthetic synopsis."
+    assert result.provider_statuses["Booktopia"].startswith("Metadata retrieved")
+
+
+def test_core_completion_skips_later_providers_when_synopsis_is_already_present():
+    open_library = StubProvider("Open Library", MetadataResult("Retrieved", {
+        "title": "Nightfall", "author": "Isaac Asimov", "genre": "Science Fiction",
+        "publisher": "Bantam Books", "publication_year": 1991, "book_details": "Existing synopsis.",
+    }, "Open Library"))
+    google_books = StubProvider("Google Books", MetadataResult("Retrieved", {"book_details": "Other synopsis."}, "Google Books"))
+    booktopia = StubProvider("Booktopia", MetadataResult("Retrieved", {"book_details": "Another synopsis."}, "Booktopia"))
+
+    result = MetadataLookupService((open_library, google_books, booktopia)).lookup("9780553290998")
+
+    assert [open_library.calls, google_books.calls, booktopia.calls] == [1, 0, 0]
+    assert result.values["book_details"] == "Existing synopsis."
+
+
 def test_provider_title_normalization_handles_small_words_punctuation_and_acronyms():
     assert normalize_provider_title("THE ART OF WAR") == "The Art of War"
     assert normalize_provider_title("the great gatsby") == "The Great Gatsby"
