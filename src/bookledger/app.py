@@ -200,7 +200,7 @@ class BookLedgerApp(_WindowBase):
         frame.pack(fill="both", expand=True)
         if inventory:
             ttk.Button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
-            self._make_tree(frame, columns=("code", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
+            self._make_tree(frame, columns=("code", "copy_number", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Copy #", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
             self.tree.bind("<Double-1>", self._on_tree_double_click)
             self.tree.bind("<Button-3>", self._on_inventory_right_click)
             for col in self.tree["columns"]:
@@ -220,7 +220,7 @@ class BookLedgerApp(_WindowBase):
         container = ttk.Frame(parent)
         container.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(container, columns=columns, show="headings", height=height, selectmode="browse")
-        widths = {"code": 110, "title": 240, "author": 180, "genre": 130, "status": 115, "price": 110, "location": 130}
+        widths = {"code": 110, "copy_number": 78, "title": 240, "author": 180, "genre": 130, "status": 115, "price": 110, "location": 130}
         for col, heading in zip(columns, headings):
             self.tree.heading(col, text=heading)
             self.tree.column(col, width=widths.get(col, 130), minwidth=75, stretch=True)
@@ -243,12 +243,12 @@ class BookLedgerApp(_WindowBase):
                 return
             sort_column = getattr(self, "_inventory_sort_column", "title")
             reverse = getattr(self, "_inventory_sort_reverse", False)
-            value_key = {"code": "copy_code", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "display_price_minor", "status": "status"}.get(sort_column, "title")
+            value_key = {"code": "copy_code", "copy_number": "copy_number", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "display_price_minor", "status": "status"}.get(sort_column, "title")
             rows = self._sold_last_sort(rows, lambda row: row[value_key] or "", reverse)
             self._visible_rows = rows
             self.tree.delete(*self.tree.get_children())
             for row in rows:
-                values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
+                values = (row["copy_code"], row["copy_number"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
                 self.tree.insert("", "end", iid=str(row["copy_id"]), values=values)
         else:
             rows = self._sort_catalog_rows(rows)
@@ -298,6 +298,7 @@ class BookLedgerApp(_WindowBase):
             if row["status"] == "Sold":
                 tk.Label(art, text="SOLD", bg="#b42318", fg="white", font=("Segoe UI", 12, "bold"), padx=10, pady=4).place(relx=0.5, rely=0.5, anchor="center")
             ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=165).pack(anchor="w")
+            ttk.Label(card, text=self._physical_copy_label(row), foreground="#596579").pack(anchor="w", pady=(2, 0))
             ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=165).pack(anchor="w", pady=(2, 5))
             ttk.Label(card, text=self.money(row["display_price_minor"]), font=("Segoe UI", 11, "bold")).pack(anchor="w")
             def bind_card(widget, copy_id=row["copy_id"]):
@@ -313,10 +314,10 @@ class BookLedgerApp(_WindowBase):
         else:
             self._inventory_sort_column = column
             self._inventory_sort_reverse = False
-        value_key = {"code": "copy_code", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "display_price_minor", "status": "status"}[column]
+        value_key = {"code": "copy_code", "copy_number": "copy_number", "title": "title", "author": "author", "format": "format", "condition": "condition", "location": "location", "price": "display_price_minor", "status": "status"}[column]
         self._visible_rows = self._sold_last_sort(self._visible_rows, lambda row: row[value_key] or "", self._inventory_sort_reverse)
         for index, row in enumerate(self._visible_rows):
-            values = (row["copy_code"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
+            values = (row["copy_code"], row["copy_number"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
             self.tree.item(str(row["copy_id"]), values=values)
             self.tree.move(str(row["copy_id"]), "", index)
 
@@ -332,6 +333,10 @@ class BookLedgerApp(_WindowBase):
             return image
         gray_overlay = Image.new("RGB", image.size, "#9ca3af")
         return Image.blend(image, gray_overlay, 0.48)
+
+    @staticmethod
+    def _physical_copy_label(row):
+        return f"Copy {row['copy_number']}"
 
     def _sort_catalog_rows(self, rows):
         choice = self.catalog_sort.get()
@@ -585,7 +590,8 @@ class BookLedgerApp(_WindowBase):
             ("Publication Year", row.get("publication_year")), ("Edition", row.get("edition")),
             ("Page Count", row.get("page_count")), ("Book Details", row.get("book_details")),
             ("SRP (reference)", self.money(row["srp_minor"]) if row.get("srp_minor") is not None else None),
-            ("Copy ID", row.get("copy_code")), ("Format", row.get("format")),
+            ("Physical Copy", self._physical_copy_label(row)),
+            ("Internal Copy ID", row.get("copy_id")), ("Copy Code", row.get("copy_code")), ("Format", row.get("format")),
             ("Condition", row.get("condition")), ("Location", row.get("location")),
             ("Status", row.get("status")),
             ("Price", self.money(row["display_price_minor"])),

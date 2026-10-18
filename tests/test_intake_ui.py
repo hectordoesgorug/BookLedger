@@ -73,6 +73,67 @@ def test_field_error_clears_when_value_becomes_valid(form):
     assert widget._errors["title"].cget("text") == ""
 
 
+def test_missing_optional_metadata_displays_no_data_and_saves_as_null(form):
+    widget, _root, photo = form
+    optional = ("publisher", "publication_year", "edition", "page_count", "srp", "book_details")
+    for key in optional:
+        field = widget._widgets[key]
+        displayed = field.get("1.0", "end-1c").strip() if isinstance(field, tk.Text) else field.get().strip()
+        assert displayed == "No Data"
+        assert widget._get(key) == ""
+
+    widget._set("title", "Minimal Book")
+    widget._set("author", "Test Author")
+    widget._set("genre", "Science")
+    widget._set("format", "Paperback")
+    widget._set("condition", "Good")
+    widget._set("price", "500")
+    widget.set_photo(photo)
+    copy_id = widget.service.create_copy(widget._payload())
+
+    with widget.service.db.connect() as conn:
+        row = conn.execute(
+            "SELECT publisher,publication_year,edition,page_count,srp_minor,book_details FROM book_records WHERE id=(SELECT book_id FROM copies WHERE id=?)",
+            (copy_id,),
+        ).fetchone()
+    assert tuple(row) == (None, None, None, None, None, None)
+
+
+def test_srp_is_readonly_but_provider_values_can_be_saved(form):
+    widget, _root, photo = form
+    srp_field = widget._widgets["srp"]
+    assert str(srp_field.cget("state")) == "readonly"
+
+    widget._apply_metadata(MetadataResult("Retrieved", {"srp": "825.25"}, "Google Books"))
+    srp_field.insert(0, "999.00")
+    assert widget._get("srp") == "825.25"
+    widget._set("title", "Reference Price Book")
+    widget._set("author", "Test Author")
+    widget._set("genre", "Science")
+    widget._set("format", "Paperback")
+    widget._set("condition", "Good")
+    widget._set("price", "500")
+    widget.set_photo(photo)
+    copy_id = widget.service.create_copy(widget._payload())
+
+    with widget.service.db.connect() as conn:
+        srp_minor = conn.execute(
+            "SELECT b.srp_minor FROM book_records b JOIN copies c ON c.book_id=b.id WHERE c.id=?",
+            (copy_id,),
+        ).fetchone()[0]
+    assert srp_minor == 82525
+
+
+def test_optional_metadata_placeholder_can_be_replaced_with_manual_value(form):
+    widget, _root, _photo = form
+    widget._clear_placeholder("publisher")
+    widget._widgets["publisher"].insert(0, "Manual Press")
+    widget._restore_placeholder("publisher")
+
+    assert widget._get("publisher") == "Manual Press"
+    assert widget._payload()["publisher"] == "Manual Press"
+
+
 def test_photo_preview_and_manual_metadata_values_are_preserved(form):
     widget, _root, photo = form
     widget._set("title", "Manually Entered Title")
@@ -163,6 +224,23 @@ def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     widget._finish_lookup(45, "9780306406157", MetadataResult("No data", {}, "Google Books"))
     assert widget.mobile_status.get() == "ISBN Not Found"
     assert str(widget.refresh_button.cget("state")) == "disabled"
+
+
+def test_successful_fallback_lookup_reports_primary_provider_failure(form):
+    widget, _root, _photo = form
+    isbn = "9780306406157"
+    widget._set("isbn", isbn)
+    widget._active_operation = ("lookup", 46, isbn)
+
+    widget._finish_lookup(
+        46,
+        isbn,
+        MetadataResult("Retrieved", {"title": "Fallback Title"}, "Google Books", "timed out", "timeout"),
+    )
+
+    assert widget._get("title") == "Fallback Title"
+    assert "Primary lookup timeout" in widget.metadata_status.get()
+    assert "fallback supplied data" in widget.metadata_status.get()
 
 
 def test_edit_form_uses_one_contextual_price_and_keeps_status_out_of_form(form):

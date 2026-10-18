@@ -126,6 +126,15 @@ def test_exact_isbn_duplicate_requires_reusing_record(setup):
     assert [r["copy_number"] for r in service.list_copies()] == [1, 2]
 
 
+def test_copy_numbers_start_independently_for_separate_bibliographic_records(setup):
+    _, _, _, service, payload, _ = setup
+    first = service.create_copy(payload)
+    separate = service.create_copy({**payload, "isbn": "9780140449136", "title": "Separate Book"})
+
+    assert service.get_copy(first)["copy_number"] == 1
+    assert service.get_copy(separate)["copy_number"] == 1
+
+
 def test_different_isbn_does_not_match_as_duplicate(setup):
     _, _, _, service, payload, _ = setup
     service.create_copy(payload)

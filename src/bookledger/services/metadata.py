@@ -194,10 +194,11 @@ class MetadataLookupService:
 
     def lookup(self, isbn: str, *, on_status: Callable[[str], None] | None = None) -> MetadataResult:
         failures: list[MetadataResult] = []
+        primary_failure: MetadataResult | None = None
         combined: dict = {}
         sources: list[str] = []
         supported = ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count", "srp")
-        for provider in self.providers:
+        for index, provider in enumerate(self.providers):
             missing = [key for key in supported if combined.get(key) in (None, "")]
             if combined and not missing:
                 break
@@ -219,8 +220,17 @@ class MetadataLookupService:
                         combined[key] = value
             if result.status == "Lookup failed":
                 failures.append(result)
+                if index == 0:
+                    primary_failure = result
 
         if combined:
+            if primary_failure is not None and len(sources) == 1 and sources[0] != primary_failure.source:
+                # A matching fallback result is a successful lookup even when the
+                # primary provider was unavailable; retain that failure for diagnostics.
+                return MetadataResult(
+                    "Retrieved", combined, " + ".join(dict.fromkeys(sources)),
+                    primary_failure.error, primary_failure.failure_kind,
+                )
             if failures and len(sources) <= 1:
                 failure = failures[0]
                 return MetadataResult("Lookup failed", combined, ", ".join(sources) or failure.source, failure.error, failure.failure_kind)

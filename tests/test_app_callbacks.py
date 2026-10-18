@@ -60,6 +60,47 @@ def test_double_click_rejects_stale_tree_or_mismatched_selection():
     assert opened == []
 
 
+def test_physical_copy_label_uses_record_copy_number_not_internal_id():
+    assert BookLedgerApp._physical_copy_label({"copy_id": 41, "copy_number": 1}) == "Copy 1"
+    assert BookLedgerApp._physical_copy_label({"copy_id": 42, "copy_number": 2}) == "Copy 2"
+
+
+def test_inventory_rows_include_physical_copy_number():
+    class InventoryTree:
+        def __init__(self):
+            self.rows = []
+
+        def winfo_exists(self):
+            return True
+
+        def get_children(self):
+            return tuple(iid for iid, _values in self.rows)
+
+        def delete(self, *_items):
+            self.rows.clear()
+
+        def insert(self, _parent, _index, *, iid, values):
+            self.rows.append((iid, values))
+
+    records = [
+        {"copy_id": 41, "copy_code": "BL-000041", "copy_number": 1, "title": "Shared Title", "author": "Author", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
+        {"copy_id": 42, "copy_code": "BL-000042", "copy_number": 2, "title": "Shared Title", "author": "Author", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
+    ]
+    subject = SimpleNamespace(
+        catalog=SimpleNamespace(list_copies=lambda *_args: records),
+        global_search=SimpleNamespace(get=lambda: ""), status_filter=SimpleNamespace(get=lambda: "All"),
+        genre_filter=SimpleNamespace(get=lambda: "All"), condition_filter=SimpleNamespace(get=lambda: "All"),
+        location_filter=SimpleNamespace(get=lambda: "All"), _catalog_inventory=True,
+        _inventory_sort_column="title", _inventory_sort_reverse=False, tree=InventoryTree(),
+        _sold_last_sort=BookLedgerApp._sold_last_sort, money=BookLedgerApp.money,
+        status_var=SimpleNamespace(set=lambda _text: None),
+    )
+
+    BookLedgerApp._populate_catalog(subject)
+
+    assert [entry[1][1] for entry in subject.tree.rows] == [1, 2]
+
+
 def test_explicit_copy_id_does_not_read_tree_selection(monkeypatch):
     class StaleTree:
         def selection(self):

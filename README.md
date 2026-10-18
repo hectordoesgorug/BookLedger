@@ -60,6 +60,12 @@ The portable root is the source project root in development, or the executable's
 
 In **Settings**, Restore Latest reverses the most recent Trash action (LIFO). Clear Trash requires confirmation and permanently removes trashed copy records, related sales events, and photos not referenced elsewhere. Purge requires a warning confirmation followed by typing `PURGE`; it removes only the managed `data/` contents and retains root-level backups. Verify Database is read-only and reports database, foreign-key, recovery-operation, and photo-tree problems. Retry Storage Recovery is an explicit action for interrupted file operations.
 
+## Deferred storage resilience
+
+Interruption during backup creation or restoration, photo capture or replacement, legacy migration, conflicting legacy/portable data states, and unexpected shutdown between storage-operation steps need additional resilience testing and hardening. These are deferred edge cases, not confirmed failures; normal-operation tests do not establish their safety. Backup/restore and interruption recovery will be addressed in a dedicated future workstream.
+
+An approved follow-up is a separate, explicit orphan-file cleanup action. **Verify Database** must remain read-only; cleanup must recheck both database and pending-operation references, ask for confirmation, and report exactly which files were removed or retained. That cleanup action is outside the current implementation scope.
+
 ## Important
 - Online metadata lookup requires internet access; cataloging does not.
 - BookLedger Mobile is not connected in this build; connection and scanning controls simulate phone events.

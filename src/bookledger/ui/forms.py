@@ -13,6 +13,9 @@ from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
 
+NO_DATA = "No Data"
+OPTIONAL_METADATA_FIELDS = frozenset({"publisher", "publication_year", "edition", "page_count", "srp", "book_details"})
+
 
 class BookForm(tk.Toplevel):
     """Add/edit form with a testable BookLedger Mobile intake simulation."""
@@ -62,6 +65,8 @@ class BookForm(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
         self._build()
+        for key in OPTIONAL_METADATA_FIELDS:
+            self._set(key, None)
         if existing:
             self._populate(existing)
         else:
@@ -121,7 +126,7 @@ class BookForm(tk.Toplevel):
         row = self._field(body, "Publication Year", "publication_year", row)
         row = self._field(body, "Edition", "edition", row)
         row = self._field(body, "Page Count", "page_count", row)
-        row = self._field(body, "SRP (PHP, Reference Only)", "srp", row)
+        row = self._field(body, "SRP (PHP, Reference Only)", "srp", row, read_only=True)
         row = self._multiline_field(body, "Book Details/Synopsis", "book_details", row)
 
         ttk.Label(body, text="Physical Copy", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(18, 8))
@@ -170,7 +175,7 @@ class BookForm(tk.Toplevel):
         self._build_actions(self.right_panel)
         self._update_control_states()
 
-    def _field(self, parent, label, key, row, *, required=False, values=None):
+    def _field(self, parent, label, key, row, *, required=False, values=None, read_only=False):
         field_label = ttk.Label(parent, text=f"{label} *" if required else label)
         field_label.grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
         self._field_labels[key] = field_label
@@ -180,6 +185,8 @@ class BookForm(tk.Toplevel):
                 widget.configure(state="readonly")
         else:
             widget = ttk.Entry(parent, width=34)
+            if read_only:
+                widget.configure(state="readonly")
         widget.grid(row=row, column=1, sticky="ew", pady=4)
         parent.grid_columnconfigure(1, weight=1)
         self._widgets[key] = widget
@@ -187,6 +194,9 @@ class BookForm(tk.Toplevel):
         error.grid(row=row + 1, column=1, sticky="w", pady=(0, 3))
         self._errors[key] = error
         widget.bind("<KeyRelease>", lambda _event, field=key: self._clear_valid_error(field), add="+")
+        if key in OPTIONAL_METADATA_FIELDS and key != "srp":
+            widget.bind("<FocusIn>", lambda _event, field=key: self._clear_placeholder(field), add="+")
+            widget.bind("<FocusOut>", lambda _event, field=key: self._restore_placeholder(field), add="+")
         if isinstance(widget, ttk.Combobox):
             widget.bind("<<ComboboxSelected>>", lambda _event, field=key: self._clear_valid_error(field), add="+")
         return row + 2
@@ -203,6 +213,9 @@ class BookForm(tk.Toplevel):
         self._errors[key] = error
         self._field_labels[key] = field_label
         widget.bind("<KeyRelease>", lambda _event: self._clear_valid_error(key), add="+")
+        if key in OPTIONAL_METADATA_FIELDS:
+            widget.bind("<FocusIn>", lambda _event, field=key: self._clear_placeholder(field), add="+")
+            widget.bind("<FocusOut>", lambda _event, field=key: self._restore_placeholder(field), add="+")
         return row + 2
 
     def _photo_row(self, parent, row):
@@ -263,21 +276,39 @@ class BookForm(tk.Toplevel):
         widget = self._widgets.get(key)
         if widget is None:
             return
+        display_value = NO_DATA if key in OPTIONAL_METADATA_FIELDS and value in (None, "") else ("" if value is None else str(value))
         if isinstance(widget, tk.Text):
             widget.delete("1.0", "end")
-            widget.insert("1.0", value or "")
+            widget.insert("1.0", display_value)
         else:
+            prior_state = str(widget.cget("state"))
             widget.configure(state="normal")
             widget.delete(0, "end")
-            widget.insert(0, "" if value is None else str(value))
-            if isinstance(widget, ttk.Combobox) and key != "genre":
+            widget.insert(0, display_value)
+            if key == "srp" or (isinstance(widget, ttk.Combobox) and key != "genre") or prior_state == "readonly":
                 widget.configure(state="readonly")
 
     def _get(self, key):
         widget = self._widgets[key]
         if isinstance(widget, tk.Text):
-            return widget.get("1.0", "end-1c").strip()
-        return widget.get().strip()
+            value = widget.get("1.0", "end-1c").strip()
+        else:
+            value = widget.get().strip()
+        return "" if key in OPTIONAL_METADATA_FIELDS and value == NO_DATA else value
+
+    def _clear_placeholder(self, key):
+        widget = self._widgets.get(key)
+        if widget is None or key == "srp":
+            return
+        if isinstance(widget, tk.Text):
+            if widget.get("1.0", "end-1c").strip() == NO_DATA:
+                widget.delete("1.0", "end")
+        elif widget.get().strip() == NO_DATA:
+            widget.delete(0, "end")
+
+    def _restore_placeholder(self, key):
+        if key in OPTIONAL_METADATA_FIELDS and key != "srp" and not self._get(key):
+            self._set(key, None)
 
     def _populate(self, row):
         for key in ("title", "author", "isbn", "genre", "publisher", "publication_year", "edition", "page_count", "book_details", "format", "condition", "location"):
@@ -442,6 +473,10 @@ class BookForm(tk.Toplevel):
         if result.values:
             self._apply_metadata(result)
         if result.status == "Retrieved" and result.values:
+            if result.failure_kind:
+                self.metadata_status.set(
+                    f"{self.metadata_status.get()} · Primary lookup {result.failure_kind}; fallback supplied data"
+                )
             self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
         elif result.status == "No data":
             missing = [key.replace("_", " ").title() for key in ("publisher", "publication_year", "edition", "page_count", "book_details", "srp") if not self._get(key)]

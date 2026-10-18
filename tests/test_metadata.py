@@ -105,6 +105,26 @@ def test_lookup_service_falls_back_and_reports_provider_progress():
     ]
 
 
+def test_successful_google_fallback_after_open_library_failure_keeps_failure_diagnostic():
+    primary = StubProvider(
+        "Open Library",
+        MetadataResult("Lookup failed", {}, "Open Library", "connection timed out", "timeout"),
+    )
+    fallback = StubProvider(
+        "Google Books",
+        MetadataResult("Retrieved", {"title": "Fallback Book", "publisher": "Fallback Press"}, "Google Books"),
+    )
+
+    result = MetadataLookupService((primary, fallback)).lookup("9780306406157")
+
+    assert primary.calls == fallback.calls == 1
+    assert result.status == "Retrieved"
+    assert result.values["title"] == "Fallback Book"
+    assert result.source == "Google Books"
+    assert result.error == "connection timed out"
+    assert result.failure_kind == "timeout"
+
+
 def test_lookup_service_fills_partial_metadata_without_replacing_primary_values():
     first = StubProvider("Open Library", MetadataResult("Retrieved", {"title": "Primary title", "author": "Primary author"}, "Open Library"))
     fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Fallback title", "publisher": "Fallback press", "page_count": 140}, "Google Books"))
