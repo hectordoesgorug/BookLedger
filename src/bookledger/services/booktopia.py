@@ -41,11 +41,13 @@ class _BookPageParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.isbns: set[str] = set()
         self.descriptions: list[str] = []
+        self.visible_descriptions: list[str] = []
         self.json_ld: list[object] = []
         self.links: list[str] = []
         self._script_parts: list[str] | None = None
         self._description_tags: list[str] = []
         self._description_parts: list[str] = []
+        self._description_is_visible = False
         self._isbn_tags: list[str] = []
         self._isbn_parts: list[str] = []
 
@@ -63,7 +65,7 @@ class _BookPageParser(HTMLParser):
             prop = attributes.get("property", "").casefold()
             itemprop = attributes.get("itemprop", "").casefold()
             value = attributes.get("content", "").strip()
-            if value and (name in {"description", "og:description"} or prop == "og:description" or itemprop == "description"):
+            if value and (name in {"description", "og:description"} or prop == "og:description"):
                 self.descriptions.append(value)
             if itemprop in {"isbn", "isbn10", "isbn13", "gtin13"} and value:
                 normalized = normalize_isbn(value)
@@ -88,6 +90,7 @@ class _BookPageParser(HTMLParser):
             elif tag not in _VOID_TAGS:
                 self._description_tags = [tag]
                 self._description_parts = []
+                self._description_is_visible = True
 
     def handle_endtag(self, tag):
         if tag == "script" and self._script_parts is not None:
@@ -103,7 +106,10 @@ class _BookPageParser(HTMLParser):
                 text = " ".join("".join(self._description_parts).split())
                 if text:
                     self.descriptions.append(text)
+                    if self._description_is_visible:
+                        self.visible_descriptions.append(text)
                 self._description_parts = []
+                self._description_is_visible = False
         if self._isbn_tags and tag == self._isbn_tags[-1]:
             self._isbn_tags.pop()
             if not self._isbn_tags:
@@ -335,7 +341,11 @@ class BooktopiaProvider(MetadataProvider):
             return MetadataResult("No data", {}, self.name, record_found=False)
 
         values, structured_descriptions = _metadata_from_jsonld(matching_nodes)
-        description = next((value for value in structured_descriptions if _plain_text(value)), None)
+        # Prefer semantic description content rendered in the product page over
+        # a short bibliographic note copied into the structured Book record.
+        description = next((value for value in parser.visible_descriptions if _plain_text(value)), None)
+        if description is None:
+            description = next((value for value in structured_descriptions if _plain_text(value)), None)
         if description is None:
             description = next((value for value in parser.descriptions if _plain_text(value)), None)
         if description:

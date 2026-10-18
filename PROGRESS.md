@@ -18,6 +18,7 @@
 - [x] BookLedger Mobile connection/scan UI simulation, retry rules, and 10-second scan timeout
 - [x] Open Library primary metadata lookup with Google Books fallback and per-provider timeouts
 - [x] Booktopia HTML provider activated after Open Library and Google Books; it follows only matching ISBN search results, verifies product-page ISBN evidence, and merges supported missing metadata and descriptions without replacing earlier values
+- [x] Booktopia prefers matching product-page body content marked `itemprop="description"` over a short schema.org description; synthetic regression covers the precedence, while current live page markup remains unverified because raw HTML retrieval failed
 - [x] Service validation rejects non-finite or unrepresentable copy and sale prices and unapproved genres
 - [x] Dashboard distinguishes all physical copies from distinct bibliographic records and status counts
 - [x] Catalog photo-card grid and sortable Inventory table share copy records and ordered Genre, Condition, Location, Status filters
@@ -42,6 +43,7 @@
 - [x] Backup format minimally includes Trash photo files
 - [x] Open Library prefers edition descriptions before notes, excerpts, and linked work descriptions; Google Books scans matching volumes and later ISBN query variants for descriptions without accepting unrelated identifiers
 - [x] Full suite after Booktopia integration: `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-booktopia-full-report-final-20261018` — 148 passed; the default pytest temp path is unavailable in this sandbox
+- [x] Booktopia synopsis regression and full suite: 59 focused tests passed; full suite `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-booktopia-synopsis-full` — 149 passed, 1 Tk display test skipped because Tcl/Tk is incomplete
 - [ ] Live Open Library, Google Books, and Booktopia requests could not be checked because DNS resolution is unavailable in this environment; Booktopia's Terms of Business identify third-party copyright in bibliographic data but do not establish permission for automated metadata retrieval. Manual Windows startup/migration/lifecycle acceptance remains pending
 - [ ] Windows packaging and frozen-executable verification (no packaging spec or executable exists)
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)

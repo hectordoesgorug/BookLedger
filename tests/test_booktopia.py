@@ -70,7 +70,7 @@ def test_booktopia_follows_redirect_and_extracts_matching_book_description(monke
     assert result.record_found is True
     assert result.values == {
         "title": "Sample Novel",
-        "book_details": "A sample description from structured book data.",
+        "book_details": "Product description with nested markup.",
     }
 
 
@@ -149,6 +149,19 @@ def test_booktopia_extracts_supported_fields_from_matching_book_jsonld(monkeypat
         "format": "Paperback",
         "book_details": "A sample verified synopsis.",
     }
+
+
+def test_booktopia_prefers_semantic_product_description_to_bibliographic_jsonld_note(monkeypatch):
+    provider = BooktopiaProvider()
+    _mock_response(monkeypatch, FakeResponse(_fixture("matching_product_bibliographic_note.html")))
+
+    result = provider.lookup(ISBN)
+
+    assert result.record_found is True
+    assert result.values["book_details"] == (
+        "A desperate student commits a terrible crime in St Petersburg and struggles with its consequences."
+    )
+    assert "bibliographical references" not in result.values["book_details"]
 
 
 def test_booktopia_does_not_accept_matching_url_without_page_isbn_evidence(monkeypatch):
@@ -327,6 +340,30 @@ def test_booktopia_runs_last_to_fill_only_a_missing_description():
     assert ("Booktopia", "Waiting for Google Books…") in statuses
     assert ("Booktopia", "Retrieving from Booktopia…") in statuses
     assert result.provider_statuses["Booktopia"] == "Metadata retrieved · some fields missing"
+
+
+def test_google_books_is_not_skipped_when_book_details_is_the_only_missing_supported_field():
+    class StubProvider:
+        def __init__(self, name, values):
+            self.name = name
+            self.values = values
+            self.calls = 0
+
+        def lookup(self, _isbn):
+            self.calls += 1
+            return MetadataResult("Retrieved", self.values, self.name)
+
+    open_library = StubProvider("Open Library", {
+        "title": "Novel", "author": "Author", "genre": "Fiction", "publisher": "Press",
+        "publication_year": 2020, "page_count": 200,
+    })
+    google_books = StubProvider("Google Books", {"book_details": "A full synopsis."})
+
+    result = MetadataLookupService((open_library, google_books)).lookup(ISBN)
+
+    assert google_books.calls == 1
+    assert result.provider_statuses["Google Books"] != "Not needed (skipped)"
+    assert result.values["book_details"] == "A full synopsis."
 
 
 def test_booktopia_is_skipped_when_earlier_providers_supply_all_supported_fields():
