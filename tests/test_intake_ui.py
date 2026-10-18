@@ -211,7 +211,8 @@ def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     widget._set("title", "Keep My Manual Title")
     widget._active_operation = ("lookup", 44, "9780306406157")
     widget._finish_lookup(44, "9780306406157", MetadataResult("Lookup failed", {}, "Open Library", "timeout", "timeout"))
-    assert widget.mobile_status.get() == "Lookup Failed — Request timed out."
+    assert widget.metadata_status.get().startswith("Metadata unavailable")
+    assert widget.mobile_status.get() == "Idle — Ready"
     assert widget._get("title") == "Keep My Manual Title"
     assert str(widget.refresh_button.cget("state")) == "normal"
 
@@ -221,8 +222,8 @@ def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     assert retry_calls == ["9780306406157"]
 
     widget._active_operation = ("lookup", 45, "9780306406157")
-    widget._finish_lookup(45, "9780306406157", MetadataResult("No data", {}, "Google Books"))
-    assert widget.mobile_status.get() == "ISBN Not Found"
+    widget._finish_lookup(45, "9780306406157", MetadataResult("No data", {}, "Google Books", record_found=False))
+    assert widget.metadata_status.get().startswith("No matching ISBN record")
     assert str(widget.refresh_button.cget("state")) == "disabled"
 
 
@@ -232,15 +233,19 @@ def test_successful_fallback_lookup_reports_primary_provider_failure(form):
     widget._set("isbn", isbn)
     widget._active_operation = ("lookup", 46, isbn)
 
-    widget._finish_lookup(
-        46,
-        isbn,
-        MetadataResult("Retrieved", {"title": "Fallback Title"}, "Google Books", "timed out", "timeout"),
-    )
+    widget._set("title", "My Manual Title")
+    widget._finish_lookup(46, isbn, MetadataResult(
+        "Retrieved", {"title": "Fallback Title", "publisher": "Fallback Press"}, "Google Books",
+        "timed out", "timeout",
+        provider_statuses={"Open Library": "Timed out", "Google Books": "Metadata retrieved · some fields missing"},
+        partial=True,
+    ))
 
-    assert widget._get("title") == "Fallback Title"
-    assert "Primary lookup timeout" in widget.metadata_status.get()
-    assert "fallback supplied data" in widget.metadata_status.get()
+    assert widget._get("title") == "My Manual Title"
+    assert widget._get("publisher") == "Fallback Press"
+    assert widget.metadata_status.get().startswith("Partially retrieved")
+    assert widget.open_library_status.get() == "Timed out"
+    assert widget.google_books_status.get() == "Metadata retrieved · some fields missing"
 
 
 def test_edit_form_uses_one_contextual_price_and_keeps_status_out_of_form(form):
@@ -329,3 +334,35 @@ def test_lookup_does_not_apply_stale_results_or_overlap_requests(form, monkeypat
 
     assert widget._get("isbn") == "9780140449136"
     assert widget._get("title") == "New Manual Title"
+
+
+def test_clear_cancels_lookup_callbacks_and_allows_a_new_lookup(form, monkeypatch):
+    widget, _root, _photo = form
+
+    class DeferredThread:
+        instances = []
+
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+            self.instances.append(self)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr("bookledger.ui.forms.threading.Thread", DeferredThread)
+    monkeypatch.setattr("bookledger.ui.forms.messagebox.askyesno", lambda *_args, **_kwargs: True)
+    widget._set("isbn", "9780306406157")
+    widget._lookup_metadata()
+    old_id = widget._active_operation[1]
+
+    widget._clear()
+    assert widget._active_operation is None
+    assert widget.open_library_status.get() == "Not attempted"
+    widget._set("isbn", "9780140449136")
+    widget._lookup_metadata()
+    new_id = widget._active_operation[1]
+    widget._finish_lookup(old_id, "9780306406157", MetadataResult("Retrieved", {"title": "Old"}, "Open Library"))
+
+    assert new_id != old_id
+    assert widget._get("title") == ""
+    assert widget.metadata_status.get() == "Looking up ISBN…"

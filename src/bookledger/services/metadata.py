@@ -6,7 +6,7 @@ import socket
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
 from bookledger.services.isbn import normalize_isbn
@@ -59,7 +59,10 @@ class MetadataResult:
     values: dict
     source: str | None = None
     error: str | None = None
-    failure_kind: str | None = None  # timeout, network, provider
+    failure_kind: str | None = None  # timeout, network, provider, unexpected
+    record_found: bool | None = None
+    provider_statuses: dict[str, str] = field(default_factory=dict)
+    partial: bool = False
 
 
 def _failure_kind(exc: Exception) -> str:
@@ -74,9 +77,29 @@ def _failure_kind(exc: Exception) -> str:
         if isinstance(reason, (ConnectionError, socket.gaierror, OSError)):
             return "network"
         return "provider"
-    if isinstance(exc, (ConnectionError, socket.gaierror)):
+    if isinstance(exc, (ConnectionError, socket.gaierror, OSError)):
         return "network"
-    return "provider"
+    if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError, KeyError, AttributeError)):
+        return "unexpected"
+    return "unexpected"
+
+
+def _provider_outcome(result: MetadataResult) -> str:
+    """Return a short, user-facing status without exposing provider diagnostics."""
+    if result.status == "Lookup failed":
+        return {
+            "timeout": "Timed out",
+            "network": "Connection failed",
+            "provider": "HTTP/provider error",
+            "unexpected": "Unexpected response error",
+        }.get(result.failure_kind, "Unexpected response error")
+    if result.record_found is True and not result.values:
+        return "Record found · supported metadata unavailable"
+    if result.status == "No data":
+        return "No matching record"
+    if result.values:
+        return "Metadata retrieved · some fields missing" if result.partial else "Metadata retrieved"
+    return "Unexpected response error"
 
 
 class MetadataProvider:
@@ -112,12 +135,12 @@ class OpenLibraryProvider(MetadataProvider):
             return self._failed(exc)
         info = payload.get(key)
         if not isinstance(info, dict):
-            return MetadataResult("No data", {}, self.name)
+            return MetadataResult("No data", {}, self.name, record_found=False)
 
         identifiers = info.get("identifiers") or {}
         returned = {normalize_isbn(value) for values in identifiers.values() for value in (values if isinstance(values, list) else [values])}
         if returned and isbn not in returned:
-            return MetadataResult("No data", {}, self.name)
+            return MetadataResult("No data", {}, self.name, record_found=False)
 
         authors = info.get("authors") or []
         publishers = info.get("publishers") or []
@@ -136,7 +159,10 @@ class OpenLibraryProvider(MetadataProvider):
             "srp": None,
         }
         has_metadata = any(value for key, value in values.items() if key != "isbn")
-        return MetadataResult("Retrieved" if has_metadata else "No data", values if has_metadata else {}, self.name)
+        return MetadataResult(
+            "Retrieved" if has_metadata else "No data",
+            values if has_metadata else {}, self.name, record_found=True,
+        )
 
 
 class GoogleBooksProvider(MetadataProvider):
@@ -166,7 +192,7 @@ class GoogleBooksProvider(MetadataProvider):
                 info = candidate
                 break
         if info is None:
-            return MetadataResult("No data", {}, self.name)
+            return MetadataResult("No data", {}, self.name, record_found=False)
 
         identifiers = info.get("industryIdentifiers") or []
         returned_isbn = next((x.get("identifier") for x in identifiers if normalize_isbn(x.get("identifier")) == isbn), isbn)
@@ -183,7 +209,10 @@ class GoogleBooksProvider(MetadataProvider):
             "srp": None,
         }
         has_metadata = any(value for key, value in values.items() if key != "isbn")
-        return MetadataResult("Retrieved" if has_metadata else "No data", values if has_metadata else {}, self.name)
+        return MetadataResult(
+            "Retrieved" if has_metadata else "No data",
+            values if has_metadata else {}, self.name, record_found=True,
+        )
 
 
 class MetadataLookupService:
@@ -192,24 +221,61 @@ class MetadataLookupService:
     def __init__(self, providers: Iterable[MetadataProvider] | None = None):
         self.providers = tuple(providers) if providers is not None else (OpenLibraryProvider(), GoogleBooksProvider())
 
-    def lookup(self, isbn: str, *, on_status: Callable[[str], None] | None = None) -> MetadataResult:
+    def lookup(
+        self,
+        isbn: str,
+        *,
+        on_status: Callable[[str], None] | None = None,
+        on_provider_status: Callable[[str, str], None] | None = None,
+    ) -> MetadataResult:
         failures: list[MetadataResult] = []
         primary_failure: MetadataResult | None = None
         combined: dict = {}
         sources: list[str] = []
-        supported = ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count", "srp")
+        any_record_found = False
+        # These are the bibliographic fields at least one configured provider can
+        # supply. SRP is intentionally excluded: neither current provider supplies it.
+        supported = ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count")
+        provider_statuses: dict[str, str] = {}
+
+        def set_provider_status(name: str, status: str) -> None:
+            provider_statuses[name] = status
+            if on_provider_status:
+                on_provider_status(name, status)
+
+        for index, provider in enumerate(self.providers):
+            initial_status = f"Waiting for Open Library…" if index else f"Retrieving from {provider.name}…"
+            set_provider_status(provider.name, initial_status)
         for index, provider in enumerate(self.providers):
             missing = [key for key in supported if combined.get(key) in (None, "")]
             if combined and not missing:
+                for skipped in self.providers[index:]:
+                    set_provider_status(skipped.name, "Not needed (skipped)")
                 break
             if on_status:
                 on_status(f"Searching ISBN: {provider.name}")
                 on_status("Fetching Data…")
+            if index:
+                set_provider_status(provider.name, f"Retrieving from {provider.name}…")
             try:
                 result = provider.lookup(isbn)
             except Exception as exc:
                 result = MetadataResult("Lookup failed", {}, provider.name, str(exc), _failure_kind(exc))
+            any_record_found = any_record_found or result.record_found is True
             values = {key: value for key, value in result.values.items() if value not in (None, "")}
+            provider_fields = (
+                ("title", "author", "genre", "book_details", "publisher", "publication_year", "edition", "page_count")
+                if provider.name == "Open Library"
+                else ("title", "author", "genre", "book_details", "publisher", "publication_year", "page_count")
+            )
+            normalized_values = dict(values)
+            if "title" in normalized_values:
+                normalized_values["title"] = normalize_provider_title(str(normalized_values["title"]))
+            provider_partial = bool(normalized_values) and any(normalized_values.get(key) in (None, "") for key in provider_fields)
+            set_provider_status(provider.name, _provider_outcome(
+                MetadataResult(result.status, normalized_values, result.source, result.error, result.failure_kind,
+                               result.record_found, partial=provider_partial)
+            ))
             if "title" in values:
                 values["title"] = normalize_provider_title(str(values["title"]))
             if values:
@@ -224,20 +290,26 @@ class MetadataLookupService:
                     primary_failure = result
 
         if combined:
+            partial = bool(failures) or any(combined.get(key) in (None, "") for key in supported)
             if primary_failure is not None and len(sources) == 1 and sources[0] != primary_failure.source:
                 # A matching fallback result is a successful lookup even when the
                 # primary provider was unavailable; retain that failure for diagnostics.
                 return MetadataResult(
                     "Retrieved", combined, " + ".join(dict.fromkeys(sources)),
                     primary_failure.error, primary_failure.failure_kind,
+                    provider_statuses=provider_statuses, partial=True,
                 )
             if failures and len(sources) <= 1:
                 failure = failures[0]
-                return MetadataResult("Lookup failed", combined, ", ".join(sources) or failure.source, failure.error, failure.failure_kind)
-            return MetadataResult("Retrieved", combined, " + ".join(dict.fromkeys(sources)))
+                return MetadataResult("Retrieved", combined, ", ".join(sources) or failure.source, failure.error, failure.failure_kind,
+                                      provider_statuses=provider_statuses, partial=True)
+            return MetadataResult("Retrieved", combined, " + ".join(dict.fromkeys(sources)),
+                                  provider_statuses=provider_statuses, partial=partial)
         if failures:
             # The first provider is primary; its specific error is the most useful
             # explanation when the fallback also fails or returns no matching record.
-            return failures[0]
+            failure = failures[0]
+            failure.provider_statuses = provider_statuses
+            return failure
         source = self.providers[-1].name if self.providers else None
-        return MetadataResult("No data", {}, source)
+        return MetadataResult("No data", {}, source, record_found=any_record_found, provider_statuses=provider_statuses)

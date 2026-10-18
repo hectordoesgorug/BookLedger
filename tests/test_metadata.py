@@ -105,6 +105,102 @@ def test_lookup_service_falls_back_and_reports_provider_progress():
     ]
 
 
+def test_provider_statuses_keep_primary_success_and_skip_google_books():
+    primary = StubProvider("Open Library", MetadataResult("Retrieved", {
+        "title": "Book", "author": "Author", "genre": "Science", "book_details": "Details",
+        "publisher": "Press", "publication_year": 2020, "edition": "First", "page_count": 100,
+    }, "Open Library"))
+    fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Google title"}, "Google Books"))
+    statuses = []
+
+    result = MetadataLookupService((primary, fallback)).lookup(
+        "9780306406157", on_provider_status=lambda name, status: statuses.append((name, status))
+    )
+
+    assert result.values["title"] == "Book"
+    assert primary.calls == 1
+    assert fallback.calls == 0
+    assert result.provider_statuses == {
+        "Open Library": "Metadata retrieved",
+        "Google Books": "Not needed (skipped)",
+    }
+    assert ("Open Library", "Retrieving from Open Library…") in statuses
+    assert ("Google Books", "Waiting for Open Library…") in statuses
+
+
+def test_provider_statuses_report_no_match_then_google_books_success():
+    primary = StubProvider("Open Library", MetadataResult("No data", {}, "Open Library", record_found=False))
+    fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Fallback"}, "Google Books", record_found=True))
+
+    result = MetadataLookupService((primary, fallback)).lookup("9780306406157")
+
+    assert result.status == "Retrieved"
+    assert result.provider_statuses["Open Library"] == "No matching record"
+    assert result.provider_statuses["Google Books"] == "Metadata retrieved · some fields missing"
+
+
+def test_provider_statuses_report_timeout_and_still_attempt_google_books():
+    primary = StubProvider("Open Library", MetadataResult("Lookup failed", {}, "Open Library", "secret diagnostic", "timeout"))
+    fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Fallback"}, "Google Books"))
+
+    result = MetadataLookupService((primary, fallback)).lookup("9780306406157")
+
+    assert primary.calls == fallback.calls == 1
+    assert result.provider_statuses == {
+        "Open Library": "Timed out",
+        "Google Books": "Metadata retrieved · some fields missing",
+    }
+    assert result.partial is True
+
+
+def test_both_provider_misses_are_reported_without_calling_them_failures():
+    primary = StubProvider("Open Library", MetadataResult("No data", {}, "Open Library", record_found=False))
+    fallback = StubProvider("Google Books", MetadataResult("No data", {}, "Google Books", record_found=False))
+
+    result = MetadataLookupService((primary, fallback)).lookup("9780306406157")
+
+    assert result.status == "No data"
+    assert result.record_found is False
+    assert result.provider_statuses == {"Open Library": "No matching record", "Google Books": "No matching record"}
+
+
+def test_different_provider_errors_have_independent_safe_statuses():
+    primary = StubProvider("Open Library", MetadataResult("Lookup failed", {}, "Open Library", "timeout detail", "timeout"))
+    fallback = StubProvider("Google Books", MetadataResult("Lookup failed", {}, "Google Books", "HTTP 503 detail", "provider"))
+
+    result = MetadataLookupService((primary, fallback)).lookup("9780306406157")
+
+    assert result.status == "Lookup failed"
+    assert result.provider_statuses == {"Open Library": "Timed out", "Google Books": "HTTP/provider error"}
+    assert "detail" not in " ".join(result.provider_statuses.values())
+
+
+def test_matching_record_with_no_usable_fields_is_not_reported_as_isbn_miss():
+    provider = OpenLibraryProvider()
+    provider._request_json = lambda _url: {
+        "ISBN:9780306406157": {"identifiers": {"isbn_13": ["9780306406157"]}}
+    }
+    statuses = []
+    service = MetadataLookupService((provider,))
+
+    result = service.lookup("9780306406157", on_provider_status=lambda name, status: statuses.append((name, status)))
+
+    assert result.status == "No data"
+    assert result.record_found is True
+    assert result.provider_statuses["Open Library"] == "Record found · supported metadata unavailable"
+
+
+def test_unexpected_provider_response_is_not_reported_as_a_miss():
+    provider = OpenLibraryProvider()
+    provider._request_json = lambda _url: (_ for _ in ()).throw(ValueError("malformed provider payload"))
+
+    result = MetadataLookupService((provider,)).lookup("9780306406157")
+
+    assert result.status == "Lookup failed"
+    assert result.failure_kind == "unexpected"
+    assert result.provider_statuses["Open Library"] == "Unexpected response error"
+
+
 def test_successful_google_fallback_after_open_library_failure_keeps_failure_diagnostic():
     primary = StubProvider(
         "Open Library",

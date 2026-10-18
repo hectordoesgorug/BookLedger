@@ -42,6 +42,8 @@ class BookForm(tk.Toplevel):
         self.photo_path = tk.StringVar(value="")
         self.isbn_override = tk.BooleanVar(value=False)
         self.metadata_status = tk.StringVar(value="Manual entry")
+        self.open_library_status = tk.StringVar(value="Not attempted")
+        self.google_books_status = tk.StringVar(value="Not attempted")
         self.mobile_status = tk.StringVar(value="Idle — Ready")
         self.connection_outcome = tk.StringVar(value="Connected — Ready")
         self.mock_scan_isbn = tk.StringVar()
@@ -51,7 +53,7 @@ class BookForm(tk.Toplevel):
         self._field_labels = {}
         self._active_operation = None
         self._operation_serial = 0
-        self._invalidated_operations = set()
+        self._invalidated_operations = set()  # Used by simulated connection/scan callbacks.
         self._photo_image = None
         self._scan_timeout_id = None
         self._connection_ready = False
@@ -137,8 +139,16 @@ class BookForm(tk.Toplevel):
         row = self._field(body, "Price (PHP)", "price", row, required=True)
         row = self._photo_row(body, row)
 
-        self.metadata_label = ttk.Label(body, textvariable=self.metadata_status, foreground="#596579")
-        self.metadata_label.grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 2))
+        self.metadata_status_panel = ttk.Frame(body)
+        self.metadata_status_panel.grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 2))
+        self.metadata_label = ttk.Label(self.metadata_status_panel, textvariable=self.metadata_status, foreground="#334155")
+        self.metadata_label.grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(self.metadata_status_panel, text="Open Library:", foreground="#596579").grid(row=1, column=0, sticky="w", padx=(0, 4))
+        self.open_library_label = ttk.Label(self.metadata_status_panel, textvariable=self.open_library_status, foreground="#596579")
+        self.open_library_label.grid(row=1, column=1, sticky="w")
+        ttk.Label(self.metadata_status_panel, text="Google Books:", foreground="#596579").grid(row=2, column=0, sticky="w", padx=(0, 4))
+        self.google_books_label = ttk.Label(self.metadata_status_panel, textvariable=self.google_books_status, foreground="#596579")
+        self.google_books_label.grid(row=2, column=1, sticky="w")
         row += 1
         ttk.Label(body, text="Fields marked * are required. Metadata lookup is optional.", foreground="#596579").grid(
             row=row, column=0, columnspan=2, sticky="w"
@@ -194,6 +204,8 @@ class BookForm(tk.Toplevel):
         error.grid(row=row + 1, column=1, sticky="w", pady=(0, 3))
         self._errors[key] = error
         widget.bind("<KeyRelease>", lambda _event, field=key: self._clear_valid_error(field), add="+")
+        if key == "isbn":
+            widget.bind("<KeyRelease>", lambda _event: self._isbn_changed(), add="+")
         if key in OPTIONAL_METADATA_FIELDS and key != "srp":
             widget.bind("<FocusIn>", lambda _event, field=key: self._clear_placeholder(field), add="+")
             widget.bind("<FocusOut>", lambda _event, field=key: self._restore_placeholder(field), add="+")
@@ -426,72 +438,98 @@ class BookForm(tk.Toplevel):
         isbn = normalize_isbn(self._get("isbn"))
         if not isbn:
             self.metadata_status.set("Manual entry")
+            self._reset_provider_statuses()
             self.mobile_status.set("Idle — Ready")
             self._update_control_states()
             return
         self._operation_serial += 1
         operation_id = self._operation_serial
         self._active_operation = ("lookup", operation_id, isbn)
-        self.metadata_status.set("Retrieving…")
-        self.mobile_status.set("Searching ISBN: Open Library")
+        self.metadata_status.set("Looking up ISBN…")
+        self.open_library_status.set("Retrieving from Open Library…")
+        self.google_books_status.set("Waiting for Open Library…")
         self._update_control_states()
 
-        def report(status):
-            self._schedule_ui(lambda: self._set_lookup_progress(operation_id, status))
+        def report_provider(provider_name, status):
+            self._schedule_ui(lambda: self._set_lookup_provider_status(operation_id, isbn, provider_name, status))
 
         def work():
             try:
-                result = self.metadata_lookup.lookup(isbn, on_status=report)
+                result = self.metadata_lookup.lookup(isbn, on_provider_status=report_provider)
             except Exception as exc:
-                result = MetadataResult("Lookup failed", {}, "Metadata providers", str(exc), "provider")
+                result = MetadataResult(
+                    "Lookup failed", {}, "Metadata providers", str(exc), "unexpected",
+                    provider_statuses={"Open Library": "Unexpected response error", "Google Books": "Not attempted"},
+                )
             self._schedule_ui(lambda: self._finish_lookup(operation_id, isbn, result))
 
         threading.Thread(target=work, name="BookLedgerMetadataLookup", daemon=True).start()
 
-    def _set_lookup_progress(self, operation_id, status):
-        if not self._active_operation or self._active_operation[1] != operation_id or operation_id in self._invalidated_operations:
+    def _isbn_changed(self):
+        active = self._active_operation
+        if not active or active[0] != "lookup" or normalize_isbn(self._get("isbn")) == active[2]:
             return
-        requested_isbn = self._active_operation[2]
-        if normalize_isbn(self._get("isbn")) == requested_isbn:
-            self.mobile_status.set(status)
+        # A different ISBN starts a different form request. Detach the old
+        # operation immediately so its queued progress and result are ignored.
+        self._active_operation = None
+        self._reset_provider_statuses()
+        self.metadata_status.set("Manual entry")
+        self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
+        self._update_control_states()
+
+    def _set_lookup_provider_status(self, operation_id, requested_isbn, provider_name, status):
+        if not self._active_operation or self._active_operation[1] != operation_id:
+            return
+        if normalize_isbn(self._get("isbn")) != requested_isbn:
+            return
+        target = {
+            "Open Library": self.open_library_status,
+            "Google Books": self.google_books_status,
+        }.get(provider_name)
+        if target is not None:
+            target.set(status)
+
+    def _reset_provider_statuses(self):
+        self.open_library_status.set("Not attempted")
+        self.google_books_status.set("Not attempted")
 
     def _finish_lookup(self, operation_id, requested_isbn, result):
         if not self._active_operation or self._active_operation[1] != operation_id:
             return
-        self._active_operation = None
-        if operation_id in self._invalidated_operations:
-            self._invalidated_operations.discard(operation_id)
-            self._update_control_states()
-            return
         current_isbn = normalize_isbn(self._get("isbn"))
         if current_isbn != requested_isbn:
+            self._active_operation = None
+            self._reset_provider_statuses()
+            self.metadata_status.set("Manual entry")
             self._update_control_states()
-            if self.mobile_status.get() in {"Fetching Data…", "Searching ISBN: Open Library", "Searching ISBN: Google Books"}:
-                self.mobile_status.set("Idle — Ready")
+            self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
             return
+
+        self._reset_provider_statuses()
+        for provider_name, status in result.provider_statuses.items():
+            target = {
+                "Open Library": self.open_library_status,
+                "Google Books": self.google_books_status,
+            }.get(provider_name)
+            if target is not None:
+                target.set(status)
 
         if result.values:
             self._apply_metadata(result)
         if result.status == "Retrieved" and result.values:
-            if result.failure_kind:
-                self.metadata_status.set(
-                    f"{self.metadata_status.get()} · Primary lookup {result.failure_kind}; fallback supplied data"
-                )
-            self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
+            summary = "Partially retrieved" if result.partial or result.failure_kind else "Metadata retrieved"
+            self.metadata_status.set(f"{summary} · {result.source or 'Metadata Providers'}")
         elif result.status == "No data":
-            missing = [key.replace("_", " ").title() for key in ("publisher", "publication_year", "edition", "page_count", "book_details", "srp") if not self._get(key)]
-            self.metadata_status.set(f"No data · {result.source or 'Metadata Providers'}" + (f" · No Data: {', '.join(missing)}" if missing else ""))
+            if result.record_found:
+                self.metadata_status.set("Record found, but no usable supported metadata")
+            else:
+                self.metadata_status.set(f"No matching ISBN record · {result.source or 'Metadata Providers'}")
             self.metadata_source = result.source
-            self.mobile_status.set("ISBN Not Found")
         else:
-            self.metadata_status.set(f"Lookup failed · {result.source or 'Metadata Providers'}")
+            self.metadata_status.set(f"Metadata unavailable · {result.source or 'Metadata Providers'}")
             self.metadata_source = result.source
-            messages = {
-                "timeout": "Lookup Failed — Request timed out.",
-                "network": "Lookup Failed — Network unavailable.",
-                "provider": "Lookup Failed — Provider unavailable.",
-            }
-            self.mobile_status.set(messages.get(result.failure_kind, "Lookup Failed — Provider unavailable."))
+        self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
+        self._active_operation = None
         self._update_control_states()
 
     def _apply_metadata(self, result: MetadataResult):
@@ -573,7 +611,7 @@ class BookForm(tk.Toplevel):
             self._simulate_connection()
         elif status == "Scan Failed":
             self._simulate_scan()
-        elif status.startswith("Lookup Failed —"):
+        elif self.metadata_status.get().startswith("Metadata unavailable"):
             self._lookup_metadata()
 
     def _update_control_states(self):
@@ -585,7 +623,7 @@ class BookForm(tk.Toplevel):
 
     def _refreshable(self):
         status = self.mobile_status.get()
-        return status in {"Connection Failed", "Scan Failed"} or status.startswith("Lookup Failed —")
+        return status in {"Connection Failed", "Scan Failed"} or self.metadata_status.get().startswith("Metadata unavailable")
 
     def _populate_validation(self, errors):
         for key, label in self._errors.items():
@@ -722,7 +760,9 @@ class BookForm(tk.Toplevel):
         if self._active_operation is not None:
             kind, operation_id, _requested_isbn = self._active_operation
             if kind == "lookup":
-                self._invalidated_operations.add(operation_id)
+                # Detach now so Clear can start a fresh lookup immediately.
+                # Any queued callbacks from this operation will fail the ID check.
+                self._active_operation = None
             else:
                 if self._scan_timeout_id:
                     try:
@@ -742,6 +782,7 @@ class BookForm(tk.Toplevel):
         self.mock_scan_isbn.set("")
         self.metadata_source = None
         self.metadata_status.set("Manual entry")
+        self._reset_provider_statuses()
         self._connection_ready = False
         self.mobile_status.set("Idle — Ready")
         self._set("location", DEFAULT_LOCATION)
