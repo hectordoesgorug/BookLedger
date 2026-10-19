@@ -53,3 +53,35 @@ Notes
 -   Continue with the configurable metadata source/provider registry
     independently.
 -   Do not commit or push changes unless explicitly authorized.
+
+Future Enhancements / Backlog
+
+These items are future enhancements and are not part of the current implementation scope.
+
+1.  Add Book and Edit Book Form Scrolling
+    -   Restructure both forms so their contents fit within the application window without requiring scrolling.
+2.  Catalog Card Width
+    -   Fix the outstanding Catalog card-width issue.
+    -   Consider Small, Medium, and Large thumbnail views in a future version.
+3.  Not for Sale Lock Icon
+    -   Add a small lock icon to copies marked Not for Sale.
+4.  Color-Coded Status Indicators
+    -   Apply a consistent green/red color scheme to connection status and book/inventory status indicators.
+5.  Configurable Genres
+    -   Make genre options configurable by the user, following the existing configurable-location approach.
+6.  Book Condition List
+    -   Expand and refine the available book-condition options.
+7.  Aesthetic Icons
+    -   Review and improve the application's icons for a more consistent appearance.
+8.  Basic Text Summarizer
+    -   Add a basic text summarizer for poster summaries.
+9.  About, Tooltips, and Legends
+    -   Add an About section or tab.
+    -   Introduce relevant tooltips.
+    -   Provide legends explaining status meanings and other indicators where helpful.
+10. Bulk Metadata Download
+    -   Allow rapid successive book intake without waiting for metadata retrieval on every entry.
+    -   Support downloading the corresponding metadata in bulk afterward.
+    -   Preserve ISBN-to-book matching and existing metadata-merging safeguards.
+11. Poster Creation
+    -   Explore a canvas-based poster design workspace and designer for creating book-sale posters.

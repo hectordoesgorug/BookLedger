@@ -1034,7 +1034,7 @@ class BookLedgerApp(_WindowBase):
             ("Condition", row.get("condition")), ("Location", row.get("location")),
             ("Status", row.get("status")),
             ("Price", self.money(row["display_price_minor"])),
-            ("Date Sold", row.get("sale_date")), ("Metadata", row.get("metadata_source")),
+            ("Metadata", row.get("metadata_source")),
         )
         text_frame = ttk.Frame(frame)
         text_frame.pack(fill="both", expand=True)
