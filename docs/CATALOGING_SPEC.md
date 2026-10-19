@@ -45,7 +45,12 @@ The Add Book form includes a photo preview and a BookLedger Mobile status area. 
 ## Sales
 Add/Edit presents one Price field. It is editable for unsold copies and locked while Sold. Marking Sold validates the current Price and records that amount and today's local date without asking for separate sale details. The Sales table is an append-only history of price/date events; moving away from Sold leaves history and revenue intact, and a later transition to Sold appends another event. Status reversal does not void revenue or represent a refund. No returns, reservations, or pending-sale status in v1.
 
-The Sales view lists recorded sale events with Copy ID, Title, Author, Date Sold, and Price. It omits current status. Revenue summaries sum all retained sale events, including historical events when a copy's current status later changes.
+The Sale History view lists recorded sale events with Copy ID, Title, Author, Date Sold, and Price. It omits current status and does not edit copies. Revenue summaries sum all retained sale events, including historical events when a copy's current status later changes. Sale History sorting is in-memory and never changes stored records.
+
+## Reports
+Inventory Summary counts active physical copies and distinct bibliographic records. Inventory Valuation sums each active copy's recorded Price across all statuses for Total Library Value; Expected Revenue includes only Available and Listed copies. Sales Revenue sums retained actual sale-event prices, never current copy valuations. Trashed copies and their sales are excluded from ordinary reports.
+
+Monthly Revenue groups completed sale events by their recorded Date Sold. The earliest navigable month is the month of the earliest active bibliographic record's `created_at` date; if no active dated record exists, historical navigation is disabled. Books by Genre counts active physical copies by their assigned genre.
 
 ## Dashboard, Catalog, and Inventory
 Dashboard shows active Total Copies (including Sold), titles with at least one active copy, and one counter for each active copy status. Copies in Trash and their sales events are excluded from ordinary views and revenue.

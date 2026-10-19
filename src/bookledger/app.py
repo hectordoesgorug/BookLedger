@@ -6,6 +6,8 @@ import shutil
 import sys
 import json
 import threading
+from calendar import monthrange
+from datetime import date
 from PIL import Image, ImageTk
 
 from bookledger import __version__
@@ -14,6 +16,7 @@ from bookledger.db.database import Database
 from bookledger.paths import AppPaths
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService
+from bookledger.services.reports import ReportService
 from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService
 from bookledger.provider_registry import PROVIDER_REGISTRY, build_providers
 from bookledger.provider_settings import ProviderSettings, ProviderSettingsStore
@@ -53,6 +56,7 @@ class BookLedgerApp(_WindowBase):
         )
         self.provider_settings = self.provider_settings_store.load()
         self.catalog = CatalogService(self.db, self.paths.data)
+        self.reports = ReportService(self.db)
         self.photos = PhotoService(self.paths.photos, self.paths.trash)
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
         self.verifier = VerificationService(self.db, self.paths.data)
@@ -106,7 +110,7 @@ class BookLedgerApp(_WindowBase):
         ttk.Label(brand, text="Your collection, accounted for", foreground="#64748b", font=("Segoe UI", 9)).pack(anchor="w", pady=(3, 0))
         ttk.Separator(self.sidebar).pack(fill="x", pady=(0, 12))
         self.nav_buttons = {}
-        for name, icon in (("Dashboard", "⌂"), ("Catalog", "▤"), ("Inventory", "▦"), ("Acquisitions", "+"), ("Sales", "↗"), ("Reports", "▥"), ("Settings", "⚙")):
+        for name, icon in (("Dashboard", "⌂"), ("Catalog", "▤"), ("Inventory", "▦"), ("Acquisitions", "+"), ("Sale History", "↗"), ("Reports", "▥"), ("Settings", "⚙")):
             btn = ttk.Button(self.sidebar, text=f"{icon}   {name}", style="Sidebar.TButton", command=lambda n=name: self.show_page(n))
             btn.pack(fill="x", pady=2)
             self.nav_buttons[name] = btn
@@ -147,7 +151,7 @@ class BookLedgerApp(_WindowBase):
             self._build_dashboard()
         elif name == "Acquisitions":
             self._build_acquisitions()
-        elif name == "Sales":
+        elif name in ("Sales", "Sale History"):
             self._build_sales()
         elif name == "Reports":
             self._build_reports()
@@ -366,6 +370,8 @@ class BookLedgerApp(_WindowBase):
         tree = event.widget
         if tree is not getattr(self, "tree", None):
             return "break"
+        if getattr(self, "current_page", None) in ("Sales", "Sale History"):
+            return "break"
         try:
             if not tree.winfo_exists():
                 return "break"
@@ -376,12 +382,7 @@ class BookLedgerApp(_WindowBase):
             # A deferred event can race with page teardown. Ignore only when the
             # originating widget has been destroyed, not arbitrary callback errors.
             return "break"
-        if getattr(self, "current_page", None) == "Sales":
-            copy_id = getattr(self, "_sales_copy_ids", {}).get(clicked_item)
-            if copy_id is None:
-                return "break"
-        else:
-            copy_id = int(clicked_item)
+        copy_id = int(clicked_item)
         self.open_selected_edit(copy_id)
         return "break"
 
@@ -490,35 +491,223 @@ class BookLedgerApp(_WindowBase):
     def _build_sales(self):
         top = ttk.Frame(self.workspace)
         top.pack(fill="x", pady=(0, 12))
-        rows = self.catalog.list_sales()
-        revenue = sum(r["price_minor"] for r in rows)
-        ttk.Label(top, text=f"Completed Sales · Revenue {self.money(revenue)} (actual sale prices)", foreground="#64748b").pack(side="left")
+        self._sales_rows = self.catalog.list_sales()
+        self._sales_sort_column = None
+        self._sales_sort_state = 0
+        revenue = self.reports.sales_revenue()
+        ttk.Label(top, text=f"Sale History · Revenue {self.money(revenue)}", foreground="#64748b", font=("Segoe UI", 12, "bold")).pack(side="left")
         frame = ttk.Frame(self.workspace)
         frame.pack(fill="both", expand=True)
         self._make_tree(frame, columns=("code", "title", "author", "sale_date", "sale_price"), headings=("Copy ID", "Title", "Author", "Date Sold", "Price"), height=18)
-        for row in rows:
-            self.tree.insert("", "end", iid=str(row["sale_id"]), values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["price_minor"])))
-        self._sales_copy_ids = {str(row["sale_id"]): row["copy_id"] for row in rows}
-        self.tree.bind("<Double-1>", self._on_tree_double_click)
-        if not rows:
+        for col, label in zip(self.tree["columns"], ("Copy ID", "Title", "Author", "Date Sold", "Price")):
+            self.tree.heading(col, text=label, command=lambda column=col: self._sort_sales(column))
+        self._render_sales_rows(self._default_sales_order(self._sales_rows))
+        if not self._sales_rows:
             self.status_var.set("No sales recorded yet")
+
+    @staticmethod
+    def _default_sales_order(rows):
+        return sorted(rows, key=lambda row: (int(row["copy_id"]), int(row["sale_id"])))
+
+    @staticmethod
+    def _sales_sort_key(column, row):
+        if column == "code":
+            return str(row["copy_code"]).casefold()
+        if column == "title":
+            return str(row["title"]).casefold()
+        if column == "author":
+            return str(row["author"]).casefold()
+        if column == "sale_date":
+            return str(row["sale_date"])
+        if column == "sale_price":
+            return int(row["price_minor"])
+        raise KeyError(column)
+
+    def _render_sales_rows(self, rows):
+        existing = set(self.tree.get_children())
+        for row in rows:
+            item = str(row["sale_id"])
+            if item not in existing:
+                self.tree.insert("", "end", iid=item, values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["price_minor"])))
+        # One Treeview command reorders the already-loaded rows without rebuilding
+        # the widget or issuing one Tcl round-trip per sale.
+        self.tree.set_children("", *(str(row["sale_id"]) for row in rows))
+
+    def _sort_sales(self, column):
+        if self._sales_sort_column != column:
+            self._sales_sort_column, self._sales_sort_state = column, 1
+            ordered = sorted(self._sales_rows, key=lambda row: self._sales_sort_key(column, row), reverse=True)
+        elif self._sales_sort_state == 1:
+            self._sales_sort_state = 2
+            ordered = sorted(self._sales_rows, key=lambda row: self._sales_sort_key(column, row))
+        else:
+            self._sales_sort_column, self._sales_sort_state = None, 0
+            ordered = self._default_sales_order(self._sales_rows)
+        labels = {"code": "Copy ID", "title": "Title", "author": "Author", "sale_date": "Date Sold", "sale_price": "Price"}
+        for col, label in labels.items():
+            arrow = " ↓" if col == self._sales_sort_column and self._sales_sort_state == 1 else " ↑" if col == self._sales_sort_column else ""
+            self.tree.heading(col, text=label + arrow)
+        self._render_sales_rows(ordered)
 
     def _build_reports(self):
         counts = self.catalog.counts()
-        frame = ttk.LabelFrame(self.workspace, text="Inventory summary", padding=18)
-        frame.pack(fill="x", anchor="n")
+        summary = ttk.LabelFrame(self.workspace, text="Inventory Summary", padding=12)
+        summary.pack(fill="x", anchor="n")
         summary_labels = ("Total copies", "Distinct Titles", *COPY_STATUSES)
         for index, label in enumerate(summary_labels):
-            ttk.Label(frame, text=label, width=20).grid(row=0, column=index, sticky="w", padx=(0, 8))
-            value = counts.get(label, 0)
-            ttk.Label(frame, text=str(value), font=("Segoe UI", 10, "bold"), width=8).grid(row=1, column=index, sticky="w", padx=(0, 8), pady=(4, 0))
-        sales = self.catalog.list_sales()
-        revenue = sum(row["price_minor"] for row in sales)
-        revenue_frame = ttk.LabelFrame(self.workspace, text="Completed sales revenue", padding=16)
-        revenue_frame.pack(fill="x", pady=(12, 0))
-        ttk.Label(revenue_frame, text="Total of actual transaction prices; copy selling prices are not used.").pack(side="left", padx=(0, 12))
-        ttk.Label(revenue_frame, text=self.money(revenue), font=("Segoe UI", 16, "bold")).pack(side="left")
-        ttk.Label(self.workspace, text="Further reports will be added after the core catalog and sales workflows are stable.", foreground="#64748b").pack(anchor="w", pady=18)
+            ttk.Label(summary, text=label, width=18).grid(row=0, column=index, sticky="w", padx=(0, 6))
+            ttk.Label(summary, text=str(counts.get(label, 0)), font=("Segoe UI", 11, "bold")).grid(row=1, column=index, sticky="w", padx=(0, 6), pady=(4, 0))
+            summary.grid_columnconfigure(index, weight=1)
+
+        values = self.reports.inventory_valuation()
+        valuation = ttk.LabelFrame(self.workspace, text="Inventory Valuation", padding=12)
+        valuation.pack(fill="x", pady=(10, 0))
+        for index, (label, key) in enumerate((
+            ("Total Library Value", "total_library_value"),
+            ("Expected Revenue", "expected_revenue"),
+            ("Sales Revenue", "sales_revenue"),
+        )):
+            card = ttk.Frame(valuation)
+            card.grid(row=0, column=index, sticky="ew", padx=(0, 16))
+            ttk.Label(card, text=label, foreground="#64748b").pack(anchor="w")
+            ttk.Label(card, text=self.money(values[key]), font=("Segoe UI", 17, "bold")).pack(anchor="w", pady=(3, 0))
+            valuation.grid_columnconfigure(index, weight=1)
+
+        charts = ttk.Frame(self.workspace)
+        charts.pack(fill="both", expand=True, pady=(10, 0))
+        charts.grid_columnconfigure(0, weight=3, uniform="report-chart")
+        charts.grid_columnconfigure(1, weight=2, uniform="report-chart")
+        charts.grid_rowconfigure(0, weight=1)
+        self._build_monthly_revenue_chart(charts)
+        self._build_genre_chart(charts)
+
+    @staticmethod
+    def _month_shift(value: date, amount: int) -> date:
+        month_index = value.year * 12 + value.month - 1 + amount
+        return date(month_index // 12, month_index % 12 + 1, 1)
+
+    def _build_monthly_revenue_chart(self, parent):
+        panel = ttk.LabelFrame(parent, text="Monthly Revenue", padding=10)
+        panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self._report_today = date.today().replace(day=1)
+        earliest = self.reports.earliest_recorded_book_date()
+        self._report_earliest_month = earliest.replace(day=1) if earliest else None
+        self._report_month = self._report_today
+        if self._report_earliest_month and self._report_earliest_month > self._report_today:
+            self._report_month = self._report_earliest_month
+        nav = ttk.Frame(panel)
+        nav.pack(fill="x", pady=(0, 6))
+        self._report_prev = ttk.Button(nav, text="Previous", command=lambda: self._move_report_month(-1))
+        self._report_prev.pack(side="left")
+        self._report_month_label = ttk.Label(nav, text="", font=("Segoe UI", 13, "bold"), anchor="center")
+        self._report_month_label.pack(side="left", fill="x", expand=True, padx=8)
+        self._report_next = ttk.Button(nav, text="Next", command=lambda: self._move_report_month(1))
+        self._report_next.pack(side="right")
+        self._revenue_empty = ttk.Label(panel, text="No sales data for this month", foreground="#64748b", anchor="center")
+        self._revenue_canvas = tk.Canvas(panel, highlightthickness=0, height=245)
+        self._revenue_canvas.pack(fill="both", expand=True)
+        self._revenue_canvas.bind("<Configure>", lambda _event: self._draw_monthly_revenue())
+        self._update_monthly_revenue()
+
+    def _move_report_month(self, amount):
+        if self._report_earliest_month is None:
+            return
+        target = self._month_shift(self._report_month, amount)
+        if self._report_earliest_month and target < self._report_earliest_month:
+            target = self._report_earliest_month
+        if target > self._report_today:
+            target = self._report_today
+        if target != self._report_month:
+            self._report_month = target
+            self._update_monthly_revenue()
+
+    def _update_monthly_revenue(self):
+        self._report_month_label.configure(text=self._report_month.strftime("%B %Y"))
+        self._report_prev.configure(state="disabled" if self._report_earliest_month is None or self._report_month <= self._report_earliest_month else "normal")
+        self._report_next.configure(state="disabled" if self._report_month >= self._report_today else "normal")
+        self._monthly_revenue = self.reports.monthly_revenue(self._report_month.year, self._report_month.month)
+        if self._monthly_revenue:
+            self._revenue_empty.pack_forget()
+            self._revenue_canvas.pack(fill="both", expand=True)
+            self._draw_monthly_revenue()
+        else:
+            self._revenue_canvas.delete("all")
+            self._revenue_canvas.pack_forget()
+            self._revenue_empty.pack(fill="both", expand=True, pady=25)
+
+    def _draw_monthly_revenue(self):
+        if not getattr(self, "_monthly_revenue", None) or not self._revenue_canvas.winfo_exists():
+            return
+        canvas = self._revenue_canvas
+        width, height = max(canvas.winfo_width(), 300), max(canvas.winfo_height(), 190)
+        canvas.delete("all")
+        left, right, top, bottom = 64, width - 14, 18, height - 42
+        if right <= left or bottom <= top:
+            return
+        days = monthrange(self._report_month.year, self._report_month.month)[1]
+        max_value = max(self._monthly_revenue.values())
+        scale = max_value or 1
+        for tick in range(5):
+            y = bottom - (bottom - top) * tick / 4
+            amount = int(round(scale * tick / 4))
+            canvas.create_line(left, y, right, y, fill="#d7dee7")
+            canvas.create_text(left - 7, y, text=self.money(amount), anchor="e", fill="#596579", font=("Segoe UI", 8))
+        slot = (right - left) / days
+        bar_width = max(2, min(16, slot * .68))
+        for day, value in self._monthly_revenue.items():
+            x = left + (day - .5) * slot
+            y = bottom - (bottom - top) * value / scale
+            canvas.create_rectangle(x - bar_width / 2, y, x + bar_width / 2, bottom, fill="#3b82f6", outline="")
+        for day in sorted(set([1, 5, 10, 15, 20, 25, days])):
+            x = left + (day - .5) * slot
+            canvas.create_text(x, bottom + 15, text=str(day), fill="#596579", font=("Segoe UI", 8))
+        canvas.create_text((left + right) / 2, height - 10, text="Day", fill="#334155", font=("Segoe UI", 9, "bold"))
+        canvas.create_text(12, (top + bottom) / 2, text="Revenue (PHP)", angle=90, fill="#334155", font=("Segoe UI", 9, "bold"))
+
+    def _build_genre_chart(self, parent):
+        panel = ttk.LabelFrame(parent, text="Books by Genre", padding=10)
+        panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        self._genre_rows = self.reports.books_by_genre()
+        if not self._genre_rows:
+            ttk.Label(panel, text="No inventory data", foreground="#64748b", anchor="center").pack(fill="both", expand=True, pady=25)
+            return
+        chart_frame = ttk.Frame(panel)
+        chart_frame.pack(fill="both", expand=True)
+        canvas = tk.Canvas(chart_frame, highlightthickness=0, height=245)
+        scroll = ttk.Scrollbar(chart_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        canvas.bind("<Configure>", lambda _event: self._draw_genre_chart(canvas))
+        self._genre_canvas = canvas
+        self._draw_genre_chart(canvas)
+
+    def _draw_genre_chart(self, canvas):
+        if not self._genre_rows or not canvas.winfo_exists():
+            return
+        width = max(canvas.winfo_width(), 280)
+        label_margin = min(max(max(len(row["genre"]) for row in self._genre_rows) * 7 + 12, 90), width * .55)
+        plot_left, plot_right = label_margin, width - 28
+        row_height, top, axis_height = 36, 18, 30
+        height = top + len(self._genre_rows) * row_height + axis_height
+        canvas.delete("all")
+        max_count = max(row["copy_count"] for row in self._genre_rows)
+        for index, row in enumerate(self._genre_rows):
+            y = top + index * row_height
+            canvas.create_text(plot_left - 8, y + 10, text=row["genre"], width=max(label_margin - 12, 40), justify="right", anchor="e", fill="#334155", font=("Segoe UI", 9))
+            bar_end = plot_left + (plot_right - plot_left) * row["copy_count"] / max_count
+            canvas.create_rectangle(plot_left, y + 2, bar_end, y + 18, fill="#14a085", outline="")
+            canvas.create_text(bar_end + 4, y + 10, text=str(row["copy_count"]), anchor="w", fill="#334155", font=("Segoe UI", 8))
+        canvas.create_line(plot_left, height - axis_height, plot_right, height - axis_height, fill="#64748b")
+        step = max(1, (max_count + 3) // 4)
+        ticks = list(range(0, max_count, step)) + [max_count]
+        for tick in sorted(set(ticks)):
+            x = plot_left + (plot_right - plot_left) * tick / max_count
+            canvas.create_line(x, top, x, height - axis_height, fill="#e2e8f0")
+            canvas.create_text(x, height - axis_height + 9, text=str(tick), fill="#596579", font=("Segoe UI", 8))
+        canvas.create_text((plot_left + plot_right) / 2, height - 5, text="Count", fill="#334155", font=("Segoe UI", 9, "bold"))
+        canvas.create_text(12, top + len(self._genre_rows) * row_height / 2, text="Genre", angle=90, fill="#334155", font=("Segoe UI", 9, "bold"))
+        canvas.configure(scrollregion=(0, 0, width, height))
 
     def _build_settings(self):
         self._build_metadata_sources()
