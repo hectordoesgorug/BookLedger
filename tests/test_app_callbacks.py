@@ -246,24 +246,22 @@ def test_status_menu_prompts_only_for_not_for_sale_or_sold_departures(monkeypatc
 
 
 def test_cancelling_sold_status_change_explains_sale_void_and_preserves_state(monkeypatch):
-    prompts = []
     changes = []
     row = {"copy_code": "BL-000042", "title": "A Book", "status": "Sold"}
     subject = SimpleNamespace(
         catalog=SimpleNamespace(
             get_copy=lambda _copy_id: row,
             status_change_requires_confirmation=app_module.CatalogService.status_change_requires_confirmation,
-            change_status=lambda copy_id, status: changes.append((copy_id, status)),
+            change_status=lambda copy_id, status, **kwargs: changes.append((copy_id, status, kwargs)),
         ),
         status_var=SimpleNamespace(set=lambda _message: None),
         _after_save=lambda _message: None,
+        _ask_sale_void_reason=lambda _row, _status: None,
     )
-    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args, **kwargs: prompts.append(args) or False)
+    monkeypatch.setattr(BookLedgerApp, "_ask_sale_void_reason", lambda *_args: None)
 
     BookLedgerApp._change_copy_status(subject, 42, "Available")
 
-    assert "void this sale" in prompts[0][1]
-    assert "remain visible in Sale History" in prompts[0][1]
     assert changes == []
     assert row["status"] == "Sold"
 
@@ -274,15 +272,36 @@ def test_confirmed_sold_status_change_invokes_atomic_service(monkeypatch):
         catalog=SimpleNamespace(
             get_copy=lambda _copy_id: {"copy_code": "BL-000042", "title": "A Book", "status": "Sold"},
             status_change_requires_confirmation=app_module.CatalogService.status_change_requires_confirmation,
-            change_status=lambda copy_id, status: changes.append((copy_id, status)),
+            change_status=lambda copy_id, status, **kwargs: changes.append((copy_id, status, kwargs)),
         ),
         _after_save=lambda _message: None,
+        _ask_sale_void_reason=lambda _row, _status: "Returned Order",
     )
-    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(BookLedgerApp, "_ask_sale_void_reason", lambda *_args: "Returned Order")
 
     BookLedgerApp._change_copy_status(subject, 42, "Listed")
 
-    assert changes == [(42, "Listed")]
+    assert changes == [(42, "Listed", {"void_reason": "Returned Order"})]
+
+
+def test_view_details_formats_complete_sale_and_void_log_without_fabricating_active_void_data():
+    subject = SimpleNamespace(money=lambda amount: f"PHP {amount}")
+    history = [
+        {"sale_id": 101, "sale_date": "2026-10-19", "price_minor": 12000, "voided_at": "2026-10-20T12:00:00Z", "void_reason": "Cancelled Order"},
+        {"sale_id": 102, "sale_date": "2026-10-21", "price_minor": 15000, "voided_at": None, "void_reason": None},
+    ]
+
+    rendered = BookLedgerApp._sale_history_text(subject, history)
+
+    assert "Sale 1 — Voided" in rendered
+    assert "Transaction ID: 101" in rendered
+    assert "Sale Voided: 2026-10-20T12:00:00Z" in rendered
+    assert "Reason: Cancelled Order" in rendered
+    assert "Original Price: PHP 12000" in rendered
+    assert "Sale 2 — Completed" in rendered
+    assert "Date Sold: 2026-10-21" in rendered
+    assert "Original Price: PHP 15000" in rendered
+    assert "Sale Voided:" not in rendered.split("Sale 2 — Completed", 1)[1]
 
 
 def test_delete_confirmation_moves_selected_copy_to_trash(monkeypatch):

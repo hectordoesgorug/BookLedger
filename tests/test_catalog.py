@@ -163,14 +163,38 @@ def test_sale_reversal_voids_original_and_preserves_history(setup, monkeypatch, 
     assert row["status"] == "Sold"
     assert row["sale_date"] == "2026-10-18"
     assert service.list_sales()[0]["price_minor"] == 50000
-    service.change_status(copy_id, destination)
+    service.change_status(copy_id, destination, void_reason="Cancelled Order")
     row = service.get_copy(copy_id)
     sale = service.list_sales()[0]
     assert row["status"] == destination
     assert sale["price_minor"] == 50000
     assert sale["sale_date"] == "2026-10-18"
     assert sale["voided_at"]
+    assert sale["void_reason"] == "Cancelled Order"
     assert ReportService(service.db).sales_revenue() == 0
+
+
+@pytest.mark.parametrize("reason", ("Marked Sold by Mistake", "Cancelled Order", "Returned Order", "Test"))
+def test_all_predefined_void_reasons_are_persisted(setup, reason):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold")
+    service.change_status(copy_id, "Available", void_reason=reason)
+    sale = service.list_sales()[0]
+    assert sale["void_reason"] == reason
+    assert sale["voided_at"]
+
+
+@pytest.mark.parametrize("reason", (None, "free text", ""))
+def test_missing_or_invalid_void_reason_cannot_change_sale_or_copy(setup, reason):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold")
+    with pytest.raises(ValidationError) as exc:
+        service.change_status(copy_id, "Available", void_reason=reason)
+    assert "valid reason" in exc.value.errors["void_reason"]
+    assert service.get_copy(copy_id)["status"] == "Sold"
+    assert service.list_sales()[0]["voided_at"] is None
 
 
 def test_contextual_price_edits_sale_price_without_overwriting_asking_price(setup):
@@ -184,7 +208,7 @@ def test_contextual_price_edits_sale_price_without_overwriting_asking_price(setu
     assert row["price_minor"] == 50000
     assert row["display_price_minor"] == 50000
     assert service.list_sales()[0]["price_minor"] == 50000
-    service.change_status(copy_id, "Available")
+    service.change_status(copy_id, "Available", void_reason="Returned Order")
     service.update_copy(copy_id, {**payload, "price": "525"})
     row = service.get_copy(copy_id)
     assert row["price_minor"] == row["display_price_minor"] == 52500
@@ -213,7 +237,7 @@ def test_reversed_copy_can_be_sold_again_with_new_price_date_and_active_revenue(
     monkeypatch.setattr(catalog_module, "date", FrozenDate)
     copy_id = service.create_copy(payload)
     service.change_status(copy_id, "Sold")
-    service.change_status(copy_id, "Available")
+    service.change_status(copy_id, "Available", void_reason="Cancelled Order")
     service.update_copy(copy_id, {**payload, "price": "725"})
     service.change_status(copy_id, "Sold")
 
@@ -226,6 +250,24 @@ def test_reversed_copy_can_be_sold_again_with_new_price_date_and_active_revenue(
     assert (new_sale["sale_date"], new_sale["price_minor"]) == ("2026-11-02", 72500)
     assert ReportService(service.db).sales_revenue() == 72500
     assert service.get_copy(copy_id)["status"] == "Sold"
+
+
+def test_copy_details_returns_every_sale_and_void_in_chronological_order(setup):
+    _, _, _, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold")
+    service.change_status(copy_id, "Available", void_reason="Returned Order")
+    service.update_copy(copy_id, {**payload, "price": "725"})
+    service.change_status(copy_id, "Sold")
+    details = service.get_copy_details(copy_id)
+    history = details["sale_history"]
+    assert len(history) == 2
+    assert history[0]["void_reason"] == "Returned Order"
+    assert history[0]["voided_at"]
+    assert history[0]["price_minor"] == 50000
+    assert history[1]["voided_at"] is None
+    assert history[1]["void_reason"] is None
+    assert history[1]["price_minor"] == 72500
 
 
 def test_active_sale_unique_index_prevents_second_active_event(setup):
@@ -249,7 +291,7 @@ def test_failed_status_update_rolls_back_sale_reversal(setup):
         )
 
     with pytest.raises(sqlite3.IntegrityError, match="forced failure"):
-        service.change_status(copy_id, "Available")
+        service.change_status(copy_id, "Available", void_reason="Test")
 
     assert service.get_copy(copy_id)["status"] == "Sold"
     assert service.list_sales()[0]["voided_at"] is None
@@ -324,7 +366,7 @@ def test_all_four_statuses_are_supported(setup):
     copy_id = service.create_copy(payload)
     for status in COPY_STATUSES:
         if status != "Available":
-            service.change_status(copy_id, status)
+            service.change_status(copy_id, status, **({"void_reason": "Test"} if service.get_copy(copy_id)["status"] == "Sold" else {}))
         assert service.get_copy(copy_id)["status"] == status
 
 
@@ -337,7 +379,7 @@ def test_every_distinct_status_transition_is_supported(setup, current, target):
     copy_id = service.create_copy(payload)
     if current != "Available":
         service.change_status(copy_id, current)
-    service.change_status(copy_id, target)
+    service.change_status(copy_id, target, **({"void_reason": "Test"} if current == "Sold" else {}))
     assert service.get_copy(copy_id)["status"] == target
 
 
@@ -398,7 +440,7 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 6
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
         assert migrated.execute("SELECT voided_at FROM sales WHERE id=1").fetchone()[0]
     service.change_status(1, "Sold")
@@ -410,8 +452,10 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
 def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_path):
     path = tmp_path / "v4.sqlite3"
     legacy_schema = SCHEMA.replace("    voided_at TEXT,\n", "").replace(
+        "    void_reason TEXT CHECK(void_reason IS NULL OR void_reason IN (\n        'Marked Sold by Mistake','Cancelled Order','Returned Order','Test'\n    )),\n", ""
+    ).replace(
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy\n    ON sales(copy_id) WHERE voided_at IS NULL;\n", ""
-    ).replace("PRAGMA user_version = 5;", "PRAGMA user_version = 4;")
+    ).replace("PRAGMA user_version = 6;", "PRAGMA user_version = 4;")
     conn = sqlite3.connect(path)
     conn.executescript(legacy_schema)
     conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(1,'Sold','Author','Science')")
@@ -427,7 +471,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
     db = Database(path)
     with db.connect() as migrated:
         rows = migrated.execute("SELECT id,copy_id,price_minor,sale_date,voided_at FROM sales ORDER BY id").fetchall()
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 6
         assert [(row["id"], row["price_minor"], row["sale_date"]) for row in rows] == [
             (10, 15000, "2026-01-01"), (11, 20000, "2026-02-02"), (12, 25000, "2026-03-03")
         ]

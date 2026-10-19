@@ -1,6 +1,8 @@
 from datetime import date
 from types import MethodType, SimpleNamespace
 
+import pytest
+
 from bookledger import app as app_module
 from bookledger.app import BookLedgerApp
 from bookledger.db.database import Database
@@ -106,6 +108,7 @@ class _SortTree:
         self.rows = {}
         self.order = []
         self.headings = {}
+        self.bindings = {}
 
     def get_children(self):
         return tuple(self.order)
@@ -132,6 +135,9 @@ class _SortTree:
     def tag_configure(self, tag, **options):
         self.tags = getattr(self, "tags", {})
         self.tags[tag] = options
+
+    def bind(self, sequence, callback):
+        self.bindings[sequence] = callback
 
 
 def test_voided_sale_rows_use_gray_overstrike_tag_and_preserve_history_values():
@@ -176,6 +182,7 @@ def test_sale_history_build_configures_voided_row_styles_and_keeps_columns(monke
         money=lambda value: f"PHP {value}",
         _make_tree=lambda *_args, **_kwargs: setattr(subject, "tree", tree),
         _default_sales_order=BookLedgerApp._default_sales_order,
+        _on_tree_double_click=BookLedgerApp._on_tree_double_click,
         _render_sales_rows=lambda _rows: None,
         _configure_sale_history_tree_styles=MethodType(BookLedgerApp._configure_sale_history_tree_styles, SimpleNamespace(tree=tree)),
         after_idle=lambda _callback: None,
@@ -273,13 +280,19 @@ def test_sale_history_sort_cycles_descending_ascending_then_copy_id_default():
     assert subject._sales_rows == rows
 
 
-def test_sale_history_double_click_never_opens_edit_book():
+def test_sale_history_double_click_opens_read_only_copy_details_not_edit():
     tree = SimpleNamespace(winfo_exists=lambda: True, identify_row=lambda _y: "10", selection=lambda: ("10",))
     opened = []
-    subject = SimpleNamespace(tree=tree, current_page="Sale History", open_selected_edit=opened.append)
+    subject = SimpleNamespace(
+        tree=tree,
+        current_page="Sale History",
+        _sales_rows=[{"sale_id": 10, "copy_id": 42}],
+        open_selected_edit=lambda copy_id: pytest.fail("Sale History must not open Edit Book"),
+        open_copy_details=opened.append,
+    )
 
     assert BookLedgerApp._on_tree_double_click(subject, SimpleNamespace(widget=tree, y=1)) == "break"
-    assert opened == []
+    assert opened == [42]
 
 
 def test_month_navigation_helper_crosses_year_boundary():

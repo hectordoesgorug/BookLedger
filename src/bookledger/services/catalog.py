@@ -10,6 +10,12 @@ from bookledger.services.photos import PhotoService
 
 REQUIRED_COPY_FIELDS = ("title", "author", "genre", "format", "condition", "price", "photo_path")
 MAX_MONEY_MINOR = 2**63 - 1
+SALE_VOID_REASONS = (
+    "Marked Sold by Mistake",
+    "Cancelled Order",
+    "Returned Order",
+    "Test",
+)
 
 
 class ValidationError(ValueError):
@@ -252,7 +258,7 @@ class CatalogService:
 
     def list_sales(self) -> list[dict]:
         sql = """SELECT s.id AS sale_id,s.copy_id,c.copy_code,b.title,b.author,
-                        s.sale_date,s.price_minor,s.voided_at
+                        s.sale_date,s.price_minor,s.voided_at,s.void_reason
                  FROM sales s JOIN copies c ON c.id=s.copy_id
                  JOIN book_records b ON b.id=c.book_id
                  WHERE NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id)
@@ -264,6 +270,29 @@ class CatalogService:
     def get_copy(self, copy_id: int) -> dict | None:
         rows = self.list_copies()
         return next((r for r in rows if r["copy_id"] == copy_id), None)
+
+    def get_copy_details(self, copy_id: int) -> dict | None:
+        """Return a copy with its complete sale/reversal history."""
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,
+                          c.price_minor,c.price_minor AS display_price_minor,c.status,
+                          b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,
+                          b.page_count,b.book_details,b.srp_minor,b.metadata_source,b.metadata_status,
+                          (SELECT s.sale_date FROM sales s WHERE s.copy_id=c.id ORDER BY s.id DESC LIMIT 1) AS sale_date
+                   FROM copies c JOIN book_records b ON b.id=c.book_id WHERE c.id=?""",
+                (copy_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            copy = dict(row)
+            rows = conn.execute(
+                """SELECT id AS sale_id,sale_date,price_minor,voided_at,void_reason
+                   FROM sales WHERE copy_id=? ORDER BY sale_date,id""",
+                (copy_id,),
+            ).fetchall()
+        copy["sale_history"] = [dict(row) for row in rows]
+        return copy
 
     def update_copy(self, copy_id: int, payload: dict, *, isbn_override: bool = False) -> None:
         errors = self.validate(payload, isbn_override=isbn_override)
@@ -314,7 +343,7 @@ class CatalogService:
             except Exception as exc:
                 raise ValidationError({"photo_path": f"Photo replacement needs recovery: {exc}"}) from exc
 
-    def change_status(self, copy_id: int, status: str) -> None:
+    def change_status(self, copy_id: int, status: str, *, void_reason: str | None = None) -> None:
         if status not in COPY_STATUSES:
             raise ValidationError({"status": "Choose a valid status."})
         with self.db.connect() as conn:
@@ -324,6 +353,8 @@ class CatalogService:
                 raise KeyError(f"Copy {copy_id} was not found")
             if current["status"] == status:
                 raise ValidationError({"status": "This copy already has that status."})
+            if current["status"] == "Sold" and void_reason not in SALE_VOID_REASONS:
+                raise ValidationError({"void_reason": "Choose a valid reason for voiding the sale."})
             if status == "Sold" and (current["price_minor"] is None or current["price_minor"] <= 0):
                 raise ValidationError({"price": "Enter a valid current Price greater than PHP 0 before marking Sold."})
             active_sale = conn.execute(
@@ -336,8 +367,8 @@ class CatalogService:
                 if not active_sale:
                     raise ValidationError({"status": "This Sold copy has no active sale record; its status was not changed."})
                 voided = conn.execute(
-                    "UPDATE sales SET voided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND voided_at IS NULL",
-                    (active_sale["id"],),
+                    "UPDATE sales SET voided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),void_reason=? WHERE id=? AND voided_at IS NULL",
+                    (void_reason, active_sale["id"]),
                 )
                 if voided.rowcount != 1:
                     raise ValidationError({"status": "The active sale changed before it could be reversed; refresh and try again."})

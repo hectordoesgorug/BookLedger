@@ -16,7 +16,7 @@ from bookledger.config import APP_NAME, APPROVED_GENRES, COPY_STATUSES
 from bookledger.db.database import Database
 from bookledger.paths import AppPaths
 from bookledger.services.backups import BackupService
-from bookledger.services.catalog import CatalogService
+from bookledger.services.catalog import CatalogService, SALE_VOID_REASONS
 from bookledger.services.reports import ReportService
 from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService
 from bookledger.provider_registry import PROVIDER_REGISTRY, build_providers
@@ -382,7 +382,16 @@ class BookLedgerApp(_WindowBase):
         tree = event.widget
         if tree is not getattr(self, "tree", None):
             return "break"
-        if getattr(self, "current_page", None) in ("Sales", "Sale History"):
+        if getattr(self, "current_page", None) == "Sale History":
+            try:
+                item = tree.identify_row(event.y)
+                sale = next((row for row in getattr(self, "_sales_rows", ()) if str(row["sale_id"]) == item), None)
+            except (tk.TclError, KeyError):
+                sale = None
+            if sale:
+                self.open_copy_details(int(sale["copy_id"]))
+            return "break"
+        if getattr(self, "current_page", None) == "Sales":
             return "break"
         try:
             if not tree.winfo_exists():
@@ -447,24 +456,65 @@ class BookLedgerApp(_WindowBase):
         current = row["status"]
         if current == target_status:
             return
+        void_reason = None
         if self.catalog.status_change_requires_confirmation(current, target_status):
-            prompt = (
-                f"Changing {row['copy_code']} ({row['title']}) from Sold to {target_status} will void this sale "
-                "and exclude it from revenue figures. Its historical transaction will remain visible in Sale History. Continue?"
-                if current == "Sold" else f"Mark {row['copy_code']} ({row['title']}) as {target_status}?"
-            )
-            if not messagebox.askyesno(
-                "Confirm Status Change",
-                prompt,
-                parent=self,
-            ):
-                return
+            if current == "Sold":
+                void_reason = self._ask_sale_void_reason(row, target_status)
+                if void_reason is None:
+                    return
+            else:
+                prompt = f"Mark {row['copy_code']} ({row['title']}) as {target_status}?"
+                if not messagebox.askyesno("Confirm Status Change", prompt, parent=self):
+                    return
         try:
-            self.catalog.change_status(int(copy_id), target_status)
+            if void_reason is None:
+                self.catalog.change_status(int(copy_id), target_status)
+            else:
+                self.catalog.change_status(int(copy_id), target_status, void_reason=void_reason)
         except (ValueError, KeyError, sqlite3.DatabaseError) as exc:
             messagebox.showerror("Status Change Failed", str(exc), parent=self)
             return
         self._after_save(f"{row['copy_code']} marked {target_status}.")
+
+    def _ask_sale_void_reason(self, row, target_status):
+        dialog = tk.Toplevel(self)
+        dialog.title("Void Sale and Change Status")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        result = {"reason": None}
+        frame = ttk.Frame(dialog, padding=18)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(
+            frame,
+            text=(f"Changing {row['copy_code']} ({row['title']}) from Sold to {target_status} will void this sale, "
+                  "exclude it from revenue calculations, and retain it in Sale History."),
+            wraplength=440,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        ttk.Label(frame, text="Reason for Voiding Sale").pack(anchor="w")
+        reason = tk.StringVar(value="")
+        choices = ttk.Combobox(frame, textvariable=reason, values=SALE_VOID_REASONS, state="readonly", width=38)
+        choices.pack(fill="x", pady=(4, 16))
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x")
+        def cancel():
+            result["reason"] = None
+            dialog.destroy()
+        def confirm():
+            selected = reason.get()
+            if selected in SALE_VOID_REASONS:
+                result["reason"] = selected
+                dialog.destroy()
+        confirm_button = ttk.Button(buttons, text="Confirm", command=confirm)
+        confirm_button.configure(state="disabled")
+        choices.bind("<<ComboboxSelected>>", lambda _event: confirm_button.configure(state="normal" if reason.get() in SALE_VOID_REASONS else "disabled"))
+        ttk.Button(buttons, text="Cancel", command=cancel).pack(side="right")
+        confirm_button.pack(side="right", padx=(0, 8))
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.grab_set()
+        choices.focus_set()
+        self.wait_window(dialog)
+        return result["reason"]
 
     def _confirm_delete(self, copy_id):
         row = self.catalog.get_copy(int(copy_id))
@@ -520,6 +570,7 @@ class BookLedgerApp(_WindowBase):
         for col, label in zip(self.tree["columns"], ("Copy ID", "Title", "Author", "Date Sold", "Price")):
             self.tree.heading(col, text=label, command=lambda column=col: self._sort_sales(column))
         self._render_sales_rows(self._default_sales_order(self._sales_rows))
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
         self.after_idle(self._refresh_sale_strikethroughs)
         if not self._sales_rows:
             self.status_var.set("No sales recorded yet")
@@ -940,18 +991,38 @@ class BookLedgerApp(_WindowBase):
             return
         BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=getattr(self, "metadata_lookup", None), on_saved=lambda: self._after_save("Book updated."), existing=row)
 
+    def _sale_history_text(self, history):
+        if not history:
+            return "No sale transactions recorded.\n"
+        lines = []
+        for number, sale in enumerate(history, start=1):
+            is_voided = bool(sale.get("voided_at"))
+            status = "Voided" if is_voided else "Completed"
+            lines.extend((
+                f"Sale {number} — {status}",
+                f"Transaction ID: {sale['sale_id']}",
+                f"Date Sold: {sale['sale_date']}",
+                f"Original Price: {self.money(sale['price_minor'])}",
+                f"Transaction Status: {status}",
+            ))
+            if is_voided:
+                lines.append(f"Sale Voided: {sale['voided_at']}")
+                lines.append(f"Reason: {sale.get('void_reason') or 'Not recorded (legacy reversal)'}")
+            lines.append("")
+        return "\n".join(lines)
+
     def open_copy_details(self, copy_id):
-        row = self.catalog.get_copy(int(copy_id))
+        row = self.catalog.get_copy_details(int(copy_id))
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")
             return
         dialog = tk.Toplevel(self)
-        dialog.title(f"More Details · {row['copy_code']}")
+        dialog.title(f"View Details · {row['copy_code']}")
         dialog.transient(self)
         dialog.geometry("620x650")
         frame = ttk.Frame(dialog, padding=20)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Book Details", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 12))
+        ttk.Label(frame, text="View Details", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 12))
         fields = (
             ("Title", row.get("title")), ("Author", row.get("author")), ("ISBN", row.get("isbn")),
             ("Genre", row.get("genre")), ("Publisher", row.get("publisher")),
@@ -965,12 +1036,19 @@ class BookLedgerApp(_WindowBase):
             ("Price", self.money(row["display_price_minor"])),
             ("Date Sold", row.get("sale_date")), ("Metadata", row.get("metadata_source")),
         )
-        text = tk.Text(frame, wrap="word", height=24, relief="flat", background=dialog.cget("background"))
+        text_frame = ttk.Frame(frame)
+        text_frame.pack(fill="both", expand=True)
+        text = tk.Text(text_frame, wrap="word", height=24, relief="flat", background=dialog.cget("background"))
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         for label, value in fields:
             if value not in (None, ""):
                 text.insert("end", f"{label}: {value}\n\n")
+        text.insert("end", "Sale History / Void Log\n\n")
+        text.insert("end", self._sale_history_text(row.get("sale_history", ())))
         text.configure(state="disabled")
-        text.pack(fill="both", expand=True)
         ttk.Button(frame, text="Close", command=dialog.destroy).pack(anchor="e", pady=(12, 0))
 
     def manage_locations(self):

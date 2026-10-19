@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS book_records (
@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS sales (
     price_minor INTEGER NOT NULL CHECK(price_minor > 0),
     sale_date TEXT NOT NULL,
     voided_at TEXT,
+    void_reason TEXT CHECK(void_reason IS NULL OR void_reason IN (
+        'Marked Sold by Mistake','Cancelled Order','Returned Order','Test'
+    )),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS ix_sales_copy_id ON sales(copy_id, id);
@@ -87,7 +90,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
 """
 
 
@@ -223,6 +226,19 @@ class Database:
                     conn.execute("PRAGMA user_version = 5")
                     conn.commit()
                     version = 5
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 5:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("""ALTER TABLE sales ADD COLUMN void_reason TEXT
+                        CHECK(void_reason IS NULL OR void_reason IN (
+                            'Marked Sold by Mistake','Cancelled Order','Returned Order','Test'
+                        ))""")
+                    conn.execute("PRAGMA user_version = 6")
+                    conn.commit()
+                    version = 6
                 except Exception:
                     conn.rollback()
                     raise
