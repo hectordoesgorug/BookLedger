@@ -174,6 +174,7 @@ _UNAVAILABLE_PRODUCT = re.compile(
     r"\b(?:this\s+)?product is (?:currently\s+)?unavailable\b",
     re.IGNORECASE,
 )
+_BOOKTOPIA_BYLINE = re.compile(r"\bBy:\s*(.*?)\s+Write\s+A\s+Review\b", re.IGNORECASE)
 
 
 def _clean_synopsis(value: str | None) -> str | None:
@@ -352,6 +353,42 @@ def _metadata_from_jsonld(matching_nodes) -> tuple[dict, list[str]]:
     return values, descriptions
 
 
+def _metadata_from_page(parser: _BookPageParser) -> dict:
+    """Read title and author from standard page semantics when JSON-LD omits them."""
+    values = {}
+    for element in parser.elements:
+        attrs = element["attrs"]
+        tag = element["tag"]
+        if "title" not in values and tag == "h1":
+            title = _schema_text(_element_text(element))
+            if title:
+                values["title"] = title
+        if "author" not in values and tag == "meta":
+            name = attrs.get("name", "").casefold()
+            itemprop = attrs.get("itemprop", "").casefold()
+            if name == "author" or itemprop == "author":
+                author = _schema_text(attrs.get("content"))
+                if author:
+                    values["author"] = author
+        if "author" not in values and attrs.get("itemprop", "").casefold() == "author":
+            author = _schema_text(_element_text(element) or attrs.get("content"))
+            if author:
+                values["author"] = author
+        if len(values) == 2:
+            break
+    if "author" not in values:
+        bylines = []
+        for element in parser.elements:
+            text = _element_text(element)
+            match = _BOOKTOPIA_BYLINE.search(text)
+            if match and (author := _schema_text(match.group(1))):
+                bylines.append((len(text), author))
+        if bylines:
+            # The smallest containing element avoids pulling in unrelated page text.
+            values["author"] = min(bylines, key=lambda candidate: candidate[0])[1]
+    return values
+
+
 def _url_matches_isbn(url: str, requested_isbn: str) -> bool:
     path = urllib.parse.urlparse(url).path
     # Booktopia's direct ISBN route is only a redirect entry point. A product
@@ -452,6 +489,9 @@ class BooktopiaProvider(MetadataProvider):
             return MetadataResult("No data", {}, self.name, record_found=False)
 
         values, structured_descriptions = _metadata_from_jsonld(matching_nodes)
+        for key, value in _metadata_from_page(parser).items():
+            if values.get(key) in (None, ""):
+                values[key] = value
         unavailable = _product_is_unavailable(parser, matching_nodes)
         description_candidates = _description_panel_text(parser) + structured_descriptions
         description = next(

@@ -1,4 +1,5 @@
 import tkinter as tk
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -66,6 +67,26 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     title_error = widget._errors["title"].grid_info()
     assert int(title_error["row"]) > title_row
     assert int(title_error["column"]) == 1
+
+
+def test_lookup_keeps_all_provider_statuses_not_attempted_until_service_reports_progress(form, monkeypatch):
+    widget, _root, _photo = form
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr("bookledger.ui.forms.threading.Thread", DeferredThread)
+    widget._set("isbn", "9780306406157")
+
+    widget._lookup_metadata()
+
+    assert widget.open_library_status.get() == "Not attempted"
+    assert widget.google_books_status.get() == "Not attempted"
+    assert widget.booktopia_status.get() == "Not attempted"
 
 
 def test_field_error_clears_when_value_becomes_valid(form):
@@ -140,6 +161,7 @@ def test_optional_metadata_placeholder_can_be_replaced_with_manual_value(form):
 def test_photo_preview_and_manual_metadata_values_are_preserved(form):
     widget, _root, photo = form
     widget._set("title", "Manually Entered Title")
+    widget._set("author", "Manually Entered Author")
     widget._set("format", "Hardcover")
 
     widget.set_photo(photo)
@@ -150,12 +172,73 @@ def test_photo_preview_and_manual_metadata_values_are_preserved(form):
     assert widget.photo_path.get() == str(photo)
     assert widget.photo_preview.cget("image")
     assert widget._get("title") == "Manually Entered Title"
+    assert widget._get("author") == "Manually Entered Author"
     assert widget._get("format") == "Hardcover"
-    assert widget._get("author") == "Provider Author"
 
     widget._set("format", "")
     widget._apply_metadata(MetadataResult("Retrieved", {"format": "Paperback"}, "Booktopia"))
     assert widget._get("format") == "Paperback"
+
+
+def test_booktopia_title_and_author_populate_empty_add_form_fields(form):
+    widget, _root, _photo = form
+    widget._set("isbn", "9780553290998")
+    widget._active_operation = ("lookup", 49, "9780553290998")
+
+    widget._finish_lookup(49, "9780553290998", MetadataResult("Retrieved", {
+        "title": "Nightfall", "author": "Isaac Asimov", "publication_year": 1991,
+        "book_details": "Synthetic synopsis.",
+    }, "Booktopia", provider_statuses={"Booktopia": "Metadata retrieved"}))
+
+    assert widget._get("title") == "Nightfall"
+    assert widget._get("author") == "Isaac Asimov"
+    assert widget._get("publication_year") == "1991"
+    assert widget._get("book_details") == "Synthetic synopsis."
+
+
+def test_add_form_metadata_mapping_populates_title_and_author_without_tk_root():
+    class Entry:
+        def __init__(self, value=""):
+            self.value = value
+            self.state = "normal"
+
+        def get(self):
+            return self.value
+
+        def cget(self, key):
+            assert key == "state"
+            return self.state
+
+        def configure(self, *, state):
+            self.state = state
+
+        def delete(self, *_args):
+            self.value = ""
+
+        def insert(self, _index, value):
+            self.value = str(value)
+
+    class Status:
+        def set(self, _value):
+            pass
+
+    fields = (
+        "title", "author", "genre", "book_details", "publisher", "publication_year",
+        "edition", "page_count", "format", "srp",
+    )
+    form = SimpleNamespace(
+        _widgets={key: Entry("Manual Title") if key == "title" else Entry() for key in fields},
+        metadata_status=Status(),
+    )
+    form._get = lambda key: BookForm._get(form, key)
+    form._set = lambda key, value: BookForm._set(form, key, value)
+
+    BookForm._apply_metadata(form, MetadataResult("Retrieved", {
+        "title": "Provider Title", "author": "Isaac Asimov",
+    }, "Booktopia"))
+
+    assert form._get("title") == "Manual Title"
+    assert form._get("author") == "Isaac Asimov"
 
 
 def test_connection_failure_refresh_retries_simulated_connection(form):

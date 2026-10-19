@@ -127,6 +127,73 @@ def test_booktopia_search_http_failure_falls_back_to_direct_isbn_redirect(monkey
     }
 
 
+def test_booktopia_semantic_page_metadata_flows_through_orchestration(monkeypatch):
+    provider = BooktopiaProvider()
+    _mock_response(monkeypatch, FakeResponse(
+        _fixture("nightfall_semantic_metadata_synthetic.html"), NIGHTFALL_CANONICAL_URL
+    ))
+
+    result = MetadataLookupService((provider,)).lookup(NIGHTFALL_ISBN)
+
+    assert result.status == "Retrieved"
+    assert result.source == "Booktopia"
+    assert result.values == {
+        "title": "Nightfall",
+        "author": "Isaac Asimov",
+        "publication_year": 1991,
+        "book_details": "A synthetic synopsis matching the reported listing fields.",
+    }
+    assert result.provider_statuses["Booktopia"] == "Product unavailable"
+
+
+def test_booktopia_strength_of_the_few_byline_author_flows_through_orchestration(monkeypatch):
+    provider = BooktopiaProvider()
+    _mock_response(monkeypatch, FakeResponse(
+        _fixture("strength_of_the_few_byline_synthetic.html"), STRENGTH_URL
+    ))
+
+    result = MetadataLookupService((provider,)).lookup(STRENGTH_ISBN)
+
+    assert result.status == "Retrieved"
+    assert result.values["title"] == "The Strength of the Few"
+    assert result.values["author"] == "James Islington"
+    assert result.values["publication_year"] == 2025
+    assert result.values["book_details"] == "The highly anticipated follow-up to The Will of the Many."
+
+
+def test_booktopia_nightfall_byline_author_preserves_unavailable_listing_synopsis(monkeypatch):
+    provider = BooktopiaProvider()
+    _mock_response(monkeypatch, FakeResponse(
+        _fixture("nightfall_byline_synthetic.html"), NIGHTFALL_CANONICAL_URL
+    ))
+
+    result = MetadataLookupService((provider,)).lookup(NIGHTFALL_ISBN)
+
+    assert result.status == "Retrieved"
+    assert result.values["title"] == "Nightfall"
+    assert result.values["author"] == "Isaac Asimov"
+    assert result.values["publication_year"] == 1991
+    assert result.values["book_details"] == "A synthetic unavailable-listing synopsis."
+    assert result.provider_statuses["Booktopia"] == "Product unavailable"
+
+
+def test_booktopia_jsonld_author_takes_precedence_over_visible_byline():
+    provider = BooktopiaProvider()
+    html = """
+      <meta itemprop="isbn" content="9781923058507">
+      <script type="application/ld+json">
+        {"@type":"Book","isbn":"9781923058507","name":"The Strength of the Few",
+         "author":{"@type":"Person","name":"Structured Author"}}
+      </script>
+      <h1>The Strength of the Few</h1>
+      <div>By: Visible Author <button>Write A Review</button></div>
+    """
+
+    result = provider._product_result(STRENGTH_URL, html, STRENGTH_ISBN)
+
+    assert result.values["author"] == "Structured Author"
+
+
 def test_booktopia_direct_isbn_fallback_requires_canonical_redirect(monkeypatch):
     provider = BooktopiaProvider()
     _mock_responses(

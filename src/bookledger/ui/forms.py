@@ -450,9 +450,9 @@ class BookForm(tk.Toplevel):
         operation_id = self._operation_serial
         self._active_operation = ("lookup", operation_id, isbn)
         self.metadata_status.set("Looking up ISBN…")
-        self.open_library_status.set("Retrieving from Open Library…")
-        self.google_books_status.set("Waiting for Open Library…")
-        self.booktopia_status.set("Waiting for Google Books…")
+        # Provider progress comes from the configured lookup chain. Keep every
+        # provider at Not attempted until the service reports it as active.
+        self._reset_provider_statuses()
         self._update_control_states()
 
         def report_provider(provider_name, status):

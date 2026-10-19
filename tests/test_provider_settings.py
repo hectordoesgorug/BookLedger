@@ -105,6 +105,39 @@ def test_disabled_booktopia_is_not_queried_for_a_missing_synopsis(monkeypatch):
     assert called == ["Open Library", "Google Books"]
 
 
+def test_only_enabled_booktopia_is_invoked_or_reported_as_active(monkeypatch):
+    from bookledger.services.booktopia import BooktopiaProvider
+    from bookledger.services.metadata import GoogleBooksProvider, OpenLibraryProvider
+
+    calls = []
+    def fake_lookup(self, _isbn):
+        calls.append(self.name)
+        return MetadataResult("Retrieved", {
+            "title": "A Book", "author": "An Author", "book_details": "Synopsis",
+            "publisher": "Press", "publication_year": 2025, "edition": "First",
+            "page_count": 300, "format": "Paperback",
+        }, self.name)
+
+    for provider_type in (OpenLibraryProvider, GoogleBooksProvider, BooktopiaProvider):
+        monkeypatch.setattr(provider_type, "lookup", fake_lookup)
+
+    settings = ProviderSettings.defaults()
+    settings.order = ["google_books", "booktopia", "open_library"]
+    settings.enabled.update({"open_library": False, "google_books": False, "booktopia": True})
+    providers = build_providers(settings)
+    statuses = []
+    result = MetadataLookupService(providers).lookup(
+        "9780306406157", on_provider_status=lambda name, status: statuses.append((name, status))
+    )
+
+    assert [provider.name for provider in providers] == ["Booktopia"]
+    assert calls == ["Booktopia"]
+    assert result.provider_statuses == {"Booktopia": "Metadata retrieved"}
+    assert statuses
+    assert {name for name, _status in statuses} == {"Booktopia"}
+    assert statuses[0] == ("Booktopia", "Retrieving from Booktopia…")
+
+
 def test_configured_order_controls_lookup_order_and_merges_only_empty_fields():
     class Stub:
         def __init__(self, name, values, calls):
