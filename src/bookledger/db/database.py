@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS book_records (
@@ -76,15 +76,18 @@ CREATE TABLE IF NOT EXISTS sales (
     copy_id INTEGER NOT NULL REFERENCES copies(id) ON DELETE RESTRICT,
     price_minor INTEGER NOT NULL CHECK(price_minor > 0),
     sale_date TEXT NOT NULL,
+    voided_at TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS ix_sales_copy_id ON sales(copy_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy
+    ON sales(copy_id) WHERE voided_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;
 """
 
 
@@ -200,6 +203,29 @@ class Database:
                     raise
                 finally:
                     conn.execute("PRAGMA foreign_keys = ON")
+            if version == 4:
+                # Existing records cannot distinguish a completed sale from a
+                # status reversal. Reconcile the active row against current copy
+                # status while preserving every original sale value and ID.
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("ALTER TABLE sales ADD COLUMN voided_at TEXT")
+                    conn.execute(
+                        """UPDATE sales SET voided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                           WHERE NOT EXISTS (
+                               SELECT 1 FROM copies c WHERE c.id=sales.copy_id AND c.status='Sold'
+                                 AND sales.id=(SELECT MAX(s2.id) FROM sales s2 WHERE s2.copy_id=sales.copy_id)
+                           )"""
+                    )
+                    conn.execute(
+                        "CREATE UNIQUE INDEX ux_sales_one_active_copy ON sales(copy_id) WHERE voided_at IS NULL"
+                    )
+                    conn.execute("PRAGMA user_version = 5")
+                    conn.commit()
+                    version = 5
+                except Exception:
+                    conn.rollback()
+                    raise
             conn.executescript(SCHEMA)
             conn.execute("INSERT INTO app_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
             conn.execute("INSERT OR IGNORE INTO locations(name) VALUES('Not Specified')")

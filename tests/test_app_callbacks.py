@@ -36,6 +36,21 @@ def test_workspace_clear_drops_tree_reference_before_destroying_children():
     assert subject.tree is None
 
 
+def test_legacy_sales_page_name_resolves_to_sale_history():
+    captured = {}
+    subject = SimpleNamespace(
+        current_page=None,
+        page_title=SimpleNamespace(configure=lambda **options: captured.update(options)),
+        _clear_workspace=lambda: None,
+        _build_sales=lambda: captured.setdefault("built", True),
+    )
+
+    BookLedgerApp.show_page(subject, "Sales")
+
+    assert subject.current_page == "Sale History"
+    assert captured == {"text": "Sale History", "built": True}
+
+
 def test_double_click_uses_the_matching_active_tree_row():
     opened = []
     tree = FakeTree(clicked="17", selected=("17",))
@@ -228,6 +243,46 @@ def test_status_menu_prompts_only_for_not_for_sale_or_sold_departures(monkeypatc
     BookLedgerApp._change_copy_status(subject, 42, "Available")
     assert len(prompts) == 1
     assert actions == []
+
+
+def test_cancelling_sold_status_change_explains_sale_void_and_preserves_state(monkeypatch):
+    prompts = []
+    changes = []
+    row = {"copy_code": "BL-000042", "title": "A Book", "status": "Sold"}
+    subject = SimpleNamespace(
+        catalog=SimpleNamespace(
+            get_copy=lambda _copy_id: row,
+            status_change_requires_confirmation=app_module.CatalogService.status_change_requires_confirmation,
+            change_status=lambda copy_id, status: changes.append((copy_id, status)),
+        ),
+        status_var=SimpleNamespace(set=lambda _message: None),
+        _after_save=lambda _message: None,
+    )
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args, **kwargs: prompts.append(args) or False)
+
+    BookLedgerApp._change_copy_status(subject, 42, "Available")
+
+    assert "void this sale" in prompts[0][1]
+    assert "remain visible in Sale History" in prompts[0][1]
+    assert changes == []
+    assert row["status"] == "Sold"
+
+
+def test_confirmed_sold_status_change_invokes_atomic_service(monkeypatch):
+    changes = []
+    subject = SimpleNamespace(
+        catalog=SimpleNamespace(
+            get_copy=lambda _copy_id: {"copy_code": "BL-000042", "title": "A Book", "status": "Sold"},
+            status_change_requires_confirmation=app_module.CatalogService.status_change_requires_confirmation,
+            change_status=lambda copy_id, status: changes.append((copy_id, status)),
+        ),
+        _after_save=lambda _message: None,
+    )
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+
+    BookLedgerApp._change_copy_status(subject, 42, "Listed")
+
+    assert changes == [(42, "Listed")]
 
 
 def test_delete_confirmation_moves_selected_copy_to_trash(monkeypatch):

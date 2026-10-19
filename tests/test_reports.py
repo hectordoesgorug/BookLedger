@@ -1,6 +1,7 @@
 from datetime import date
 from types import MethodType, SimpleNamespace
 
+from bookledger import app as app_module
 from bookledger.app import BookLedgerApp
 from bookledger.db.database import Database
 from bookledger.services.reports import ReportService
@@ -25,7 +26,9 @@ def _report_db(tmp_path):
             (book_ids[0], 1, 10000, "Available"),
             (book_ids[0], 2, 20000, "Listed"),
             (book_ids[0], 3, 30000, "Sold"),
-            (book_ids[1], 1, 40000, "Not for Sale"),
+            (book_ids[0], 4, 40000, "Sold"),
+            (book_ids[0], 5, 50000, "Sold"),
+            (book_ids[1], 1, 60000, "Not for Sale"),
         ]
         copy_ids = []
         for index, (book_id, number, price, status) in enumerate(copies, 1):
@@ -36,8 +39,9 @@ def _report_db(tmp_path):
             )
             copy_ids.append(cursor.lastrowid)
         conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_ids[2], 12500, "2026-10-04"))
-        conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_ids[2], 7500, "2026-10-04"))
-        conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_ids[2], 9000, "2026-11-01"))
+        conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_ids[3], 7500, "2026-10-04"))
+        conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_ids[4], 9000, "2026-11-01"))
+        conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date,voided_at) VALUES(?,?,?,?)", (copy_ids[2], 50000, "2026-10-04", "2026-10-05T00:00:00Z"))
     return db
 
 
@@ -45,7 +49,7 @@ def test_inventory_valuation_uses_physical_copy_prices_and_actual_sale_prices(tm
     reports = ReportService(_report_db(tmp_path))
 
     assert reports.inventory_valuation() == {
-        "total_library_value": 100000,
+        "total_library_value": 210000,
         "expected_revenue": 30000,
         "sales_revenue": 29000,
     }
@@ -59,6 +63,15 @@ def test_monthly_revenue_groups_actual_sales_by_sale_date_and_month(tmp_path):
     assert reports.monthly_revenue(2026, 9) == {}
 
 
+def test_voided_sales_remain_in_history_data_but_do_not_count_as_revenue(tmp_path):
+    db = _report_db(tmp_path)
+    from bookledger.services.catalog import CatalogService
+
+    history = CatalogService(db).list_sales()
+    assert any(row["voided_at"] and row["price_minor"] == 50000 for row in history)
+    assert ReportService(db).sales_revenue() == 29000
+
+
 def test_earliest_recorded_date_ignores_books_without_active_copies(tmp_path):
     reports = ReportService(_report_db(tmp_path))
 
@@ -70,7 +83,7 @@ def test_books_by_genre_counts_physical_copies_in_descending_order(tmp_path):
     reports = ReportService(_report_db(tmp_path))
 
     assert reports.books_by_genre() == [
-        {"genre": "A", "copy_count": 3},
+        {"genre": "A", "copy_count": 5},
         {"genre": "B", "copy_count": 1},
     ]
 
@@ -97,8 +110,10 @@ class _SortTree:
     def get_children(self):
         return tuple(self.order)
 
-    def insert(self, _parent, index, *, iid, values):
+    def insert(self, _parent, index, *, iid, values, tags=()):
         self.rows[iid] = values
+        self.item_tags = getattr(self, "item_tags", {})
+        self.item_tags[iid] = tags
         if index == "end":
             self.order.append(iid)
         else:
@@ -113,6 +128,118 @@ class _SortTree:
 
     def heading(self, column, *, text, command=None):
         self.headings[column] = (text, command)
+
+    def tag_configure(self, tag, **options):
+        self.tags = getattr(self, "tags", {})
+        self.tags[tag] = options
+
+
+def test_voided_sale_rows_use_gray_overstrike_tag_and_preserve_history_values():
+    rows = [
+        {"sale_id": 1, "copy_id": 7, "copy_code": "BL-000007", "title": "History", "author": "Writer", "sale_date": "2026-01-02", "price_minor": 12345, "voided_at": "2026-01-03T00:00:00Z"},
+    ]
+    tree = _SortTree()
+    subject = SimpleNamespace(tree=tree, money=lambda value: f"PHP {value}")
+    BookLedgerApp._configure_sale_history_tree_styles(subject)
+    subject._render_sales_rows = MethodType(BookLedgerApp._render_sales_rows, subject)
+    subject._render_sales_rows(rows)
+
+    assert tree.tags["voided_sale"]["foreground"] == "#858585"
+    assert "overstrike" in tree.tags["voided_sale"]["font"]
+    assert tree.rows["1"] == ("BL-000007", "History", "Writer", "2026-01-02", "PHP 12345")
+    assert tree.item_tags["1"] == ("voided_sale",)
+
+
+def test_sale_history_build_configures_voided_row_styles_and_keeps_columns(monkeypatch):
+    labels = []
+
+    class Widget:
+        def pack(self, **_options):
+            pass
+
+    class Tree(_SortTree):
+        columns = ("code", "title", "author", "sale_date", "sale_price")
+
+        def __getitem__(self, key):
+            assert key == "columns"
+            return self.columns
+
+    tree = Tree()
+    monkeypatch.setattr(app_module.ttk, "Frame", lambda _parent: Widget())
+    monkeypatch.setattr(app_module.ttk, "Label", lambda _parent, **options: labels.append(options) or Widget())
+    subject = SimpleNamespace(
+        workspace=object(),
+        catalog=SimpleNamespace(list_sales=lambda: []),
+        reports=SimpleNamespace(sales_revenue=lambda: 12345),
+        tree=None,
+        status_var=SimpleNamespace(set=lambda _message: None),
+        money=lambda value: f"PHP {value}",
+        _make_tree=lambda *_args, **_kwargs: setattr(subject, "tree", tree),
+        _default_sales_order=BookLedgerApp._default_sales_order,
+        _render_sales_rows=lambda _rows: None,
+        _configure_sale_history_tree_styles=MethodType(BookLedgerApp._configure_sale_history_tree_styles, SimpleNamespace(tree=tree)),
+        after_idle=lambda _callback: None,
+        _refresh_sale_strikethroughs=lambda: None,
+    )
+
+    BookLedgerApp._build_sales(subject)
+
+    assert tree.columns == ("code", "title", "author", "sale_date", "sale_price")
+    assert tree.tags["voided_sale"]["foreground"] == "#858585"
+    assert labels[0]["text"] == "Sale History · Revenue PHP 12345"
+
+
+def test_voided_sale_draws_red_strikethrough_overlay_and_leaves_active_row_normal(monkeypatch):
+    class Canvas:
+        def __init__(self, _parent, **options):
+            self.options = options
+            self.lines = []
+            self.bindings = []
+            captured.append(self)
+
+        def create_line(self, *args, **options):
+            self.lines.append((args, options))
+
+        def place(self, **options):
+            self.placement = options
+
+        def bind(self, sequence, _callback):
+            self.bindings.append(sequence)
+
+        def winfo_exists(self):
+            return True
+
+        def destroy(self):
+            self.destroyed = True
+
+    class Tree:
+        def winfo_exists(self):
+            return True
+
+        def bbox(self, item):
+            return (3, 20, 400, 30) if item == "1" else ()
+
+    captured = []
+    monkeypatch.setattr(app_module.tk, "Canvas", Canvas)
+    monkeypatch.setattr(app_module.ttk, "Style", lambda _parent: SimpleNamespace(lookup=lambda *_args: "#ffffff"))
+    subject = SimpleNamespace(
+        current_page="Sale History",
+        tree=Tree(),
+        tree_container=SimpleNamespace(winfo_exists=lambda: True),
+        _sales_strike_overlays=[],
+        _sales_rows=[
+            {"sale_id": 1, "voided_at": "2026-01-03T00:00:00Z"},
+            {"sale_id": 2, "voided_at": None},
+        ],
+    )
+
+    BookLedgerApp._refresh_sale_strikethroughs(subject)
+
+    assert len(captured) == 1
+    assert captured[0].lines == [((0, 1, 400, 1), {"fill": "#c62828", "width": 1})]
+    assert captured[0].placement == {"x": 3, "y": 35, "width": 400, "height": 2}
+    assert "<Button-1>" in captured[0].bindings
+    assert "<MouseWheel>" in captured[0].bindings
 
 
 def test_sale_history_sort_cycles_descending_ascending_then_copy_id_default():

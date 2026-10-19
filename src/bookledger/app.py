@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import shutil
+import sqlite3
 import sys
 import json
 import threading
@@ -138,10 +139,14 @@ class BookLedgerApp(_WindowBase):
     def _clear_workspace(self):
         # Destroyed page widgets must not remain the active source for a later event.
         self.tree = None
+        self.tree_container = None
+        self._sales_strike_overlays = []
         for child in self.workspace.winfo_children():
             child.destroy()
 
     def show_page(self, name):
+        if name == "Sales":
+            name = "Sale History"
         self.current_page = name
         self.page_title.configure(text=name)
         self._clear_workspace()
@@ -151,7 +156,7 @@ class BookLedgerApp(_WindowBase):
             self._build_dashboard()
         elif name == "Acquisitions":
             self._build_acquisitions()
-        elif name in ("Sales", "Sale History"):
+        elif name == "Sale History":
             self._build_sales()
         elif name == "Reports":
             self._build_reports()
@@ -231,6 +236,7 @@ class BookLedgerApp(_WindowBase):
 
     def _make_tree(self, parent, *, columns, headings, height=15):
         container = ttk.Frame(parent)
+        self.tree_container = container
         container.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(container, columns=columns, show="headings", height=height, selectmode="browse")
         widths = {"code": 110, "copy_number": 78, "title": 240, "author": 180, "genre": 130, "status": 115, "price": 110, "location": 130}
@@ -239,12 +245,18 @@ class BookLedgerApp(_WindowBase):
             self.tree.column(col, width=widths.get(col, 130), minwidth=75, stretch=True)
         ybar = ttk.Scrollbar(container, orient="vertical", command=self.tree.yview)
         xbar = ttk.Scrollbar(container, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        def set_vertical_scroll(first, last):
+            ybar.set(first, last)
+            if getattr(self, "current_page", None) == "Sale History":
+                self.after_idle(self._refresh_sale_strikethroughs)
+        self.tree.configure(yscrollcommand=set_vertical_scroll, xscrollcommand=xbar.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         ybar.grid(row=0, column=1, sticky="ns")
         xbar.grid(row=1, column=0, sticky="ew")
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
+        if getattr(self, "current_page", None) == "Sale History":
+            self.tree.bind("<Configure>", lambda _event: self.after_idle(self._refresh_sale_strikethroughs), add="+")
 
     def _populate_catalog(self):
         rows = self.catalog.list_copies(
@@ -436,15 +448,20 @@ class BookLedgerApp(_WindowBase):
         if current == target_status:
             return
         if self.catalog.status_change_requires_confirmation(current, target_status):
+            prompt = (
+                f"Changing {row['copy_code']} ({row['title']}) from Sold to {target_status} will void this sale "
+                "and exclude it from revenue figures. Its historical transaction will remain visible in Sale History. Continue?"
+                if current == "Sold" else f"Mark {row['copy_code']} ({row['title']}) as {target_status}?"
+            )
             if not messagebox.askyesno(
                 "Confirm Status Change",
-                f"Mark {row['copy_code']} ({row['title']}) as {target_status}?",
+                prompt,
                 parent=self,
             ):
                 return
         try:
             self.catalog.change_status(int(copy_id), target_status)
-        except (ValueError, KeyError) as exc:
+        except (ValueError, KeyError, sqlite3.DatabaseError) as exc:
             messagebox.showerror("Status Change Failed", str(exc), parent=self)
             return
         self._after_save(f"{row['copy_code']} marked {target_status}.")
@@ -499,11 +516,16 @@ class BookLedgerApp(_WindowBase):
         frame = ttk.Frame(self.workspace)
         frame.pack(fill="both", expand=True)
         self._make_tree(frame, columns=("code", "title", "author", "sale_date", "sale_price"), headings=("Copy ID", "Title", "Author", "Date Sold", "Price"), height=18)
+        self._configure_sale_history_tree_styles()
         for col, label in zip(self.tree["columns"], ("Copy ID", "Title", "Author", "Date Sold", "Price")):
             self.tree.heading(col, text=label, command=lambda column=col: self._sort_sales(column))
         self._render_sales_rows(self._default_sales_order(self._sales_rows))
+        self.after_idle(self._refresh_sale_strikethroughs)
         if not self._sales_rows:
             self.status_var.set("No sales recorded yet")
+
+    def _configure_sale_history_tree_styles(self):
+        self.tree.tag_configure("voided_sale", foreground="#858585", font=("Segoe UI", 10, "overstrike"))
 
     @staticmethod
     def _default_sales_order(rows):
@@ -528,10 +550,58 @@ class BookLedgerApp(_WindowBase):
         for row in rows:
             item = str(row["sale_id"])
             if item not in existing:
-                self.tree.insert("", "end", iid=item, values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["price_minor"])))
+                tags = ("voided_sale",) if row.get("voided_at") else ()
+                self.tree.insert("", "end", iid=item, values=(row["copy_code"], row["title"], row["author"], row["sale_date"], self.money(row["price_minor"])), tags=tags)
         # One Treeview command reorders the already-loaded rows without rebuilding
         # the widget or issuing one Tcl round-trip per sale.
         self.tree.set_children("", *(str(row["sale_id"]) for row in rows))
+
+    def _refresh_sale_strikethroughs(self):
+        if getattr(self, "current_page", None) != "Sale History":
+            return
+        tree = getattr(self, "tree", None)
+        container = getattr(self, "tree_container", None)
+        if tree is None or container is None:
+            return
+        try:
+            if not tree.winfo_exists() or not container.winfo_exists():
+                return
+            for overlay in getattr(self, "_sales_strike_overlays", ()):
+                if overlay.winfo_exists():
+                    overlay.destroy()
+        except tk.TclError:
+            return
+        self._sales_strike_overlays = []
+        background = ttk.Style(self).lookup("Treeview", "background") or "#ffffff"
+        for row in getattr(self, "_sales_rows", ()):
+            if not row.get("voided_at"):
+                continue
+            bounds = tree.bbox(str(row["sale_id"]))
+            if not bounds:
+                continue
+            x, y, width, row_height = bounds
+            if width <= 0 or row_height <= 0:
+                continue
+            overlay = tk.Canvas(container, width=width, height=2, background=background, bd=0, highlightthickness=0)
+            overlay.create_line(0, 1, width, 1, fill="#c62828", width=1)
+            overlay.place(x=x, y=y + row_height // 2, width=width, height=2)
+            for sequence in ("<Button-1>", "<ButtonRelease-1>", "<Double-Button-1>", "<Button-3>", "<MouseWheel>"):
+                overlay.bind(sequence, lambda event, seq=sequence: self._forward_tree_overlay_event(event, seq))
+            self._sales_strike_overlays.append(overlay)
+
+    def _forward_tree_overlay_event(self, event, sequence):
+        tree = self.tree
+        if tree is None or not tree.winfo_exists():
+            return "break"
+        options = {
+            "x": event.x_root - tree.winfo_rootx(),
+            "y": event.y_root - tree.winfo_rooty(),
+            "state": event.state,
+        }
+        if sequence == "<MouseWheel>":
+            options["delta"] = event.delta
+        tree.event_generate(sequence, **options)
+        return "break"
 
     def _sort_sales(self, column):
         if self._sales_sort_column != column:

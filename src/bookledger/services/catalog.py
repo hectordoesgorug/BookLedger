@@ -252,7 +252,7 @@ class CatalogService:
 
     def list_sales(self) -> list[dict]:
         sql = """SELECT s.id AS sale_id,s.copy_id,c.copy_code,b.title,b.author,
-                        s.sale_date,s.price_minor
+                        s.sale_date,s.price_minor,s.voided_at
                  FROM sales s JOIN copies c ON c.id=s.copy_id
                  JOIN book_records b ON b.id=c.book_id
                  WHERE NOT EXISTS (SELECT 1 FROM trash_entries t WHERE t.copy_id=c.id)
@@ -326,9 +326,27 @@ class CatalogService:
                 raise ValidationError({"status": "This copy already has that status."})
             if status == "Sold" and (current["price_minor"] is None or current["price_minor"] <= 0):
                 raise ValidationError({"price": "Enter a valid current Price greater than PHP 0 before marking Sold."})
+            active_sale = conn.execute(
+                "SELECT id FROM sales WHERE copy_id=? AND voided_at IS NULL ORDER BY id DESC LIMIT 1",
+                (copy_id,),
+            ).fetchone()
+            if status == "Sold" and active_sale:
+                raise ValidationError({"status": "This copy already has an active sale record."})
+            if current["status"] == "Sold":
+                if not active_sale:
+                    raise ValidationError({"status": "This Sold copy has no active sale record; its status was not changed."})
+                voided = conn.execute(
+                    "UPDATE sales SET voided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND voided_at IS NULL",
+                    (active_sale["id"],),
+                )
+                if voided.rowcount != 1:
+                    raise ValidationError({"status": "The active sale changed before it could be reversed; refresh and try again."})
             conn.execute("UPDATE copies SET status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (status, copy_id))
             if status == "Sold":
-                conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_id, current["price_minor"], date.today().isoformat()))
+                try:
+                    conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_id, current["price_minor"], date.today().isoformat()))
+                except sqlite3.IntegrityError as exc:
+                    raise ValidationError({"status": "This copy already has an active sale record."}) from exc
             conn.commit()
 
     @staticmethod

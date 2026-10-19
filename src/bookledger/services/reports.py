@@ -33,7 +33,8 @@ class ReportService:
         with self.db.connect() as conn:
             value = conn.execute(
                 f"""SELECT COALESCE(SUM(s.price_minor),0) FROM sales s
-                    JOIN copies c ON c.id=s.copy_id WHERE {self._active_copy_predicate()}"""
+                    JOIN copies c ON c.id=s.copy_id WHERE s.voided_at IS NULL
+                      AND {self._active_copy_predicate()}"""
             ).fetchone()[0]
         return int(value)
 
@@ -60,6 +61,7 @@ class ReportService:
                            SUM(s.price_minor) AS revenue
                     FROM sales s JOIN copies c ON c.id=s.copy_id
                     WHERE s.sale_date >= ? AND s.sale_date < ?
+                      AND s.voided_at IS NULL
                       AND {self._active_copy_predicate()}
                     GROUP BY s.sale_date ORDER BY s.sale_date""",
                 (start.isoformat(), end.isoformat()),

@@ -6,12 +6,13 @@ import pytest
 from PIL import Image
 
 from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_LOCATION
-from bookledger.db.database import Database
+from bookledger.db.database import Database, SCHEMA
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services import catalog as catalog_module
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.photos import PhotoService
+from bookledger.services.reports import ReportService
 
 
 @pytest.fixture
@@ -148,7 +149,8 @@ def test_no_isbn_title_author_duplicate_search(setup):
     assert len(service.no_isbn_title_author_matches("test book", "TEST AUTHOR")) == 1
 
 
-def test_sale_record_persists_when_status_changes_away_from_sold(setup, monkeypatch):
+@pytest.mark.parametrize("destination", ("Available", "Listed", "Not for Sale"))
+def test_sale_reversal_voids_original_and_preserves_history(setup, monkeypatch, destination):
     _, _, _, service, payload, _ = setup
     class FrozenDate:
         @classmethod
@@ -161,10 +163,14 @@ def test_sale_record_persists_when_status_changes_away_from_sold(setup, monkeypa
     assert row["status"] == "Sold"
     assert row["sale_date"] == "2026-10-18"
     assert service.list_sales()[0]["price_minor"] == 50000
-    service.change_status(copy_id, "Listed")
+    service.change_status(copy_id, destination)
     row = service.get_copy(copy_id)
-    assert row["status"] == "Listed"
-    assert service.list_sales()[0]["price_minor"] == 50000  # retained as historical information
+    sale = service.list_sales()[0]
+    assert row["status"] == destination
+    assert sale["price_minor"] == 50000
+    assert sale["sale_date"] == "2026-10-18"
+    assert sale["voided_at"]
+    assert ReportService(service.db).sales_revenue() == 0
 
 
 def test_contextual_price_edits_sale_price_without_overwriting_asking_price(setup):
@@ -183,6 +189,7 @@ def test_contextual_price_edits_sale_price_without_overwriting_asking_price(setu
     row = service.get_copy(copy_id)
     assert row["price_minor"] == row["display_price_minor"] == 52500
     assert service.list_sales()[0]["price_minor"] == 50000
+    assert service.list_sales()[0]["voided_at"]
 
 
 def test_edit_payload_cannot_change_copy_status_implicitly(setup):
@@ -192,6 +199,60 @@ def test_edit_payload_cannot_change_copy_status_implicitly(setup):
     service.update_copy(copy_id, {**payload, "status": "Sold", "actual_sale_price": "999", "sale_date": "2026-10-17"})
     assert service.get_copy(copy_id)["status"] == "Listed"
     assert service.list_sales() == []
+
+
+def test_reversed_copy_can_be_sold_again_with_new_price_date_and_active_revenue(setup, monkeypatch):
+    _, _, _, service, payload, _ = setup
+    dates = iter((real_date(2026, 10, 18), real_date(2026, 11, 2)))
+
+    class FrozenDate:
+        @classmethod
+        def today(cls):
+            return next(dates)
+
+    monkeypatch.setattr(catalog_module, "date", FrozenDate)
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold")
+    service.change_status(copy_id, "Available")
+    service.update_copy(copy_id, {**payload, "price": "725"})
+    service.change_status(copy_id, "Sold")
+
+    rows = service.list_sales()
+    assert len(rows) == 2
+    new_sale, original = rows
+    assert original["voided_at"]
+    assert (original["sale_date"], original["price_minor"]) == ("2026-10-18", 50000)
+    assert new_sale["voided_at"] is None
+    assert (new_sale["sale_date"], new_sale["price_minor"]) == ("2026-11-02", 72500)
+    assert ReportService(service.db).sales_revenue() == 72500
+    assert service.get_copy(copy_id)["status"] == "Sold"
+
+
+def test_active_sale_unique_index_prevents_second_active_event(setup):
+    _, _, db, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with db.connect() as conn:
+            conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_id, 40000, "2026-10-19"))
+
+
+def test_failed_status_update_rolls_back_sale_reversal(setup):
+    _, _, db, service, payload, _ = setup
+    copy_id = service.create_copy(payload)
+    service.change_status(copy_id, "Sold")
+    with db.connect() as conn:
+        conn.execute(
+            """CREATE TRIGGER fail_status_update BEFORE UPDATE OF status ON copies
+               WHEN NEW.status='Available' BEGIN SELECT RAISE(ABORT,'forced failure'); END"""
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="forced failure"):
+        service.change_status(copy_id, "Available")
+
+    assert service.get_copy(copy_id)["status"] == "Sold"
+    assert service.list_sales()[0]["voided_at"] is None
 
 
 def test_non_finite_price_is_rejected_before_sold_status_can_be_set(setup):
@@ -337,8 +398,39 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
+        assert migrated.execute("SELECT voided_at FROM sales WHERE id=1").fetchone()[0]
     service.change_status(1, "Sold")
     assert len(service.list_sales()) == 2
     assert service.list_sales()[1]["price_minor"] == 9900
+    assert service.list_sales()[1]["voided_at"]
+
+
+def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_path):
+    path = tmp_path / "v4.sqlite3"
+    legacy_schema = SCHEMA.replace("    voided_at TEXT,\n", "").replace(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy\n    ON sales(copy_id) WHERE voided_at IS NULL;\n", ""
+    ).replace("PRAGMA user_version = 5;", "PRAGMA user_version = 4;")
+    conn = sqlite3.connect(path)
+    conn.executescript(legacy_schema)
+    conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(1,'Sold','Author','Science')")
+    conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(2,'Available','Author','History')")
+    conn.execute("INSERT INTO copies(id,copy_code,book_id,copy_number,format,condition,photo_path,price_minor,status) VALUES(1,'BL-000001',1,1,'Paperback','Good','photos/1.jpg',20000,'Sold')")
+    conn.execute("INSERT INTO copies(id,copy_code,book_id,copy_number,format,condition,photo_path,price_minor,status) VALUES(2,'BL-000002',2,1,'Paperback','Good','photos/2.jpg',30000,'Available')")
+    conn.execute("INSERT INTO sales(id,copy_id,price_minor,sale_date) VALUES(10,1,15000,'2026-01-01')")
+    conn.execute("INSERT INTO sales(id,copy_id,price_minor,sale_date) VALUES(11,1,20000,'2026-02-02')")
+    conn.execute("INSERT INTO sales(id,copy_id,price_minor,sale_date) VALUES(12,2,25000,'2026-03-03')")
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    with db.connect() as migrated:
+        rows = migrated.execute("SELECT id,copy_id,price_minor,sale_date,voided_at FROM sales ORDER BY id").fetchall()
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert [(row["id"], row["price_minor"], row["sale_date"]) for row in rows] == [
+            (10, 15000, "2026-01-01"), (11, 20000, "2026-02-02"), (12, 25000, "2026-03-03")
+        ]
+        assert rows[0]["voided_at"]
+        assert rows[1]["voided_at"] is None
+        assert rows[2]["voided_at"]
