@@ -21,6 +21,7 @@ from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
 from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
+from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog
 
 try:
     import ttkbootstrap as tb
@@ -579,6 +580,7 @@ class BookLedgerApp(_WindowBase):
         controls.pack(fill="x", pady=(6, 0))
         ttk.Button(controls, text="Save Metadata Sources", command=self._save_provider_settings).pack(side="left")
         ttk.Button(controls, text="Restore Defaults", command=self._restore_provider_defaults).pack(side="left", padx=8)
+        ttk.Button(controls, text="ISBN Lookup Test", command=self.open_isbn_lookup_test).pack(side="right")
         warning = self.provider_settings_store.warning or ""
         config_path = self.provider_settings_store.active_path
         self._provider_config_status = tk.StringVar(value=warning or f"Settings file: {config_path}")
@@ -647,6 +649,11 @@ class BookLedgerApp(_WindowBase):
             return str(value or "")
         except (OSError, ValueError, AttributeError):
             return ""
+
+    def open_isbn_lookup_test(self):
+        return MetadataProviderTestDialog(
+            self, google_books_api_key=self._load_google_books_key()
+        )
 
     def open_add_form(self):
         BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup, on_saved=lambda: self._after_save("Book saved."))
