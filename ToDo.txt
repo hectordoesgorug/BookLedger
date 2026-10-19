@@ -34,6 +34,17 @@ Revisit when convenient.
         areas.
     -   Check the current GUI before changing anything; these were
         previously observed items and may already have been addressed.
+4.  Provider Status Test — DEFERRED
+    -   Consider a small diagnostic dialogue in Settings that accepts an
+        ISBN and tests enabled providers in configured order without
+        saving a book or changing inventory.
+    -   Report field-level success, missing data, unsupported fields,
+        ISBN not found, provider error, and timeout, with elapsed time per
+        provider and for the complete lookup.
+    -   Reuse the live adapters and shared result contract. Do not persist
+        ISBNs, returned metadata, or diagnostic payloads in logs.
+    -   Make clear that diagnostics issue live requests and may encounter
+        provider rate limits.
 
 Notes
 

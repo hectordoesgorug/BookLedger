@@ -157,6 +157,46 @@ def test_configured_order_controls_lookup_order_and_merges_only_empty_fields():
     assert result.values["book_details"] == "Synopsis"
 
 
+def test_reversing_configured_order_reverses_conflicting_field_precedence():
+    class Stub:
+        def __init__(self, name, values, calls):
+            self.name, self.values, self.calls = name, values, calls
+
+        def lookup(self, _isbn):
+            self.calls.append(self.name)
+            return MetadataResult("Retrieved", self.values, self.name)
+
+    provider_values = {
+        "Open Library": {
+            "title": "Open Library title", "author": "Open Library author",
+            "genre": "Fiction", "publisher": "Open Library Press",
+            "publication_year": 2020, "edition": "First", "page_count": 100,
+        },
+        "Booktopia": {
+            "title": "Booktopia title", "author": "Booktopia author",
+            "book_details": "Booktopia synopsis", "publisher": "Booktopia Press",
+            "publication_year": 2021, "edition": "Second", "page_count": 120,
+            "format": "Paperback",
+        },
+    }
+
+    for order, expected_source, expected_title in (
+        (("Open Library", "Booktopia"), "Open Library", "Open Library Title"),
+        (("Booktopia", "Open Library"), "Booktopia", "Booktopia Title"),
+    ):
+        calls = []
+        providers = tuple(Stub(name, provider_values[name], calls) for name in order)
+        result = MetadataLookupService(providers).lookup("9781923058507")
+
+        assert calls == list(order)
+        assert result.values["title"] == expected_title
+        assert result.values["author"] == provider_values[expected_source]["author"]
+        assert result.values["publisher"] == provider_values[expected_source]["publisher"]
+        assert result.values["publication_year"] == provider_values[expected_source]["publication_year"]
+        assert result.values["book_details"] == "Booktopia synopsis"
+        assert result.values["genre"] == "Fiction"
+
+
 def test_reordering_registry_changes_actual_lookup_order(monkeypatch):
     from bookledger.services.booktopia import BooktopiaProvider
     from bookledger.services.metadata import GoogleBooksProvider, OpenLibraryProvider
@@ -174,7 +214,7 @@ def test_reordering_registry_changes_actual_lookup_order(monkeypatch):
     settings = ProviderSettings.defaults()
     settings.order = ["booktopia", "google_books", "open_library"]
     result = MetadataLookupService(build_providers(settings)).lookup("9780306406157")
-    assert calls == ["Booktopia", "Google Books"]
+    assert calls == ["Booktopia", "Google Books", "Open Library"]
     assert result.values["title"] == "Book"
     assert result.values["author"] == "Author"
 

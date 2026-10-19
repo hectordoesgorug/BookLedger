@@ -84,7 +84,8 @@ def test_booktopia_follows_redirect_and_extracts_matching_book_description(monke
 
     result = provider.lookup(ISBN)
 
-    assert called == [(SEARCH_URL, 10)]
+    assert [url for url, _timeout in called] == [SEARCH_URL]
+    assert 0 < called[0][1] <= 5
     assert result.status == "Retrieved"
     assert result.record_found is True
     assert result.values == {
@@ -100,7 +101,8 @@ def test_booktopia_uses_verified_canonical_product_body_from_http_redirect(monke
 
     result = provider.lookup(ISBN)
 
-    assert called == [(SEARCH_URL, 10)]
+    assert [url for url, _timeout in called] == [SEARCH_URL]
+    assert 0 < called[0][1] <= 5
     assert result.status == "Retrieved"
     assert result.record_found is True
     assert result.values["book_details"] == "Product description with nested markup."
@@ -116,7 +118,8 @@ def test_booktopia_search_http_failure_falls_back_to_direct_isbn_redirect(monkey
 
     result = provider.lookup(NIGHTFALL_ISBN)
 
-    assert called == [(NIGHTFALL_SEARCH_URL, 10), (NIGHTFALL_DIRECT_URL, 10)]
+    assert [url for url, _timeout in called] == [NIGHTFALL_SEARCH_URL, NIGHTFALL_DIRECT_URL]
+    assert all(0 < timeout <= 5 for _url, timeout in called)
     assert result.status == "Retrieved"
     assert result.record_found is True
     assert result.failure_kind == "unavailable"
@@ -144,6 +147,58 @@ def test_booktopia_semantic_page_metadata_flows_through_orchestration(monkeypatc
         "book_details": "A synthetic synopsis matching the reported listing fields.",
     }
     assert result.provider_statuses["Booktopia"] == "Product unavailable"
+
+
+def test_booktopia_reads_nightfall_product_details_fields_and_propagates_them(monkeypatch):
+    provider = BooktopiaProvider()
+    _mock_response(monkeypatch, FakeResponse(
+        _fixture("nightfall_product_details_synthetic.html"), NIGHTFALL_CANONICAL_URL
+    ))
+
+    result = MetadataLookupService((provider,)).lookup(NIGHTFALL_ISBN)
+
+    assert result.status == "Retrieved"
+    assert result.values == {
+        "title": "Nightfall",
+        "author": "Isaac Asimov",
+        "publication_year": 1991,
+        "book_details": "A synthetic synopsis for the Product Details fallback test.",
+        "publisher": "BANTAM TRADE",
+        "page_count": 352,
+        "format": "Paperback",
+    }
+
+
+def test_booktopia_jsonld_page_count_keeps_precedence_over_product_details(monkeypatch):
+    provider = BooktopiaProvider()
+    html = _fixture("nightfall_product_details_synthetic.html").decode("utf-8")
+    html = html.replace('"datePublished": "1991-08-01",', '"datePublished": "1991-08-01",\n        "numberOfPages": 360,')
+    _mock_response(monkeypatch, FakeResponse(html.encode("utf-8"), NIGHTFALL_CANONICAL_URL))
+
+    result = provider.lookup(NIGHTFALL_ISBN)
+
+    assert result.values["page_count"] == 360
+
+
+def test_booktopia_product_details_do_not_overwrite_prior_provider_page_count(monkeypatch):
+    class OpenLibraryStub:
+        name = "Open Library"
+
+        def lookup(self, _isbn):
+            return MetadataResult("Retrieved", {
+                "title": "Nightfall", "author": "Isaac Asimov", "page_count": 341,
+            }, self.name)
+
+    booktopia = BooktopiaProvider()
+    _mock_response(monkeypatch, FakeResponse(
+        _fixture("nightfall_product_details_synthetic.html"), NIGHTFALL_CANONICAL_URL
+    ))
+
+    result = MetadataLookupService((OpenLibraryStub(), booktopia)).lookup(NIGHTFALL_ISBN)
+
+    assert result.values["page_count"] == 341
+    assert result.values["publisher"] == "BANTAM TRADE"
+    assert result.values["format"] == "Paperback"
 
 
 def test_booktopia_strength_of_the_few_byline_author_flows_through_orchestration(monkeypatch):
@@ -276,7 +331,8 @@ def test_booktopia_follows_only_the_isbn_matching_result_not_the_first_result(mo
 
     result = provider.lookup(ISBN)
 
-    assert called == [(SEARCH_URL, 10), (PRODUCT_URL, 10)]
+    assert [url for url, _timeout in called] == [SEARCH_URL, PRODUCT_URL]
+    assert all(0 < timeout <= 5 for _url, timeout in called)
     assert result.record_found is True
     assert result.values["title"] == "Crime and Punishment"
     assert result.values["book_details"] == "A sample verified synopsis."
@@ -519,7 +575,8 @@ def test_booktopia_search_404_is_reported_as_a_provider_error(monkeypatch):
     )
     result = provider.lookup(ISBN)
 
-    assert called == [(SEARCH_URL, 10), (f"https://booktopia.com.au/book/{ISBN}.html/", 10)]
+    assert [url for url, _timeout in called] == [SEARCH_URL, f"https://booktopia.com.au/book/{ISBN}.html/"]
+    assert all(0 < timeout <= 5 for _url, timeout in called)
     assert result.status == "Lookup failed"
     assert result.failure_kind == "provider"
     assert result.record_found is None
@@ -655,12 +712,12 @@ def test_booktopia_runs_last_to_fill_only_a_missing_description():
         "genre": "Fiction", "book_details": "Description",
     }
     assert booktopia.calls == 1
-    assert ("Booktopia", "Waiting for Google Books…") in statuses
+    assert not any(status.startswith("Waiting") for _name, status in statuses)
     assert ("Booktopia", "Retrieving from Booktopia…") in statuses
     assert result.provider_statuses["Booktopia"] == "Metadata retrieved · some fields missing"
 
 
-def test_google_books_is_queried_when_only_the_synopsis_is_missing():
+def test_google_books_is_queried_for_supported_metadata_still_missing():
     class StubProvider:
         def __init__(self, name, values):
             self.name = name
@@ -673,7 +730,7 @@ def test_google_books_is_queried_when_only_the_synopsis_is_missing():
 
     open_library = StubProvider("Open Library", {
         "title": "Novel", "author": "Author", "genre": "Fiction", "publisher": "Press",
-        "publication_year": 2020, "page_count": 200,
+        "publication_year": 2020, "page_count": 200, "edition": "First",
     })
     google_books = StubProvider("Google Books", {"book_details": "A full synopsis."})
 
@@ -684,7 +741,7 @@ def test_google_books_is_queried_when_only_the_synopsis_is_missing():
     assert result.partial is False
 
 
-def test_booktopia_is_skipped_when_earlier_providers_supply_all_supported_fields():
+def test_booktopia_runs_when_its_unique_format_field_is_missing():
     class StubProvider:
         def __init__(self, name, values):
             self.name = name
@@ -698,7 +755,7 @@ def test_booktopia_is_skipped_when_earlier_providers_supply_all_supported_fields
             return MetadataResult("Retrieved", self.values, self.name)
 
     open_library = StubProvider("Open Library", {
-        "title": "Novel", "author": "Author", "genre": "Fiction", "book_details": "Existing description",
+        "title": "Novel", "author": "Author", "genre": "Fiction",
         "publisher": "Press", "publication_year": 2020,
     })
     google_books = StubProvider("Google Books", {})
@@ -706,9 +763,9 @@ def test_booktopia_is_skipped_when_earlier_providers_supply_all_supported_fields
 
     result = MetadataLookupService((open_library, google_books, booktopia)).lookup(ISBN)
 
-    assert booktopia.calls == 0
-    assert result.values["book_details"] == "Existing description"
-    assert result.provider_statuses["Booktopia"] == "Not needed (skipped)"
+    assert booktopia.calls == 1
+    assert result.values["book_details"] == "Booktopia description"
+    assert result.provider_statuses["Booktopia"] == "Metadata retrieved · some fields missing"
 
 
 def test_booktopia_enriches_missing_metadata_without_replacing_prior_provider_values():

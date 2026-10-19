@@ -1,87 +1,17 @@
 from __future__ import annotations
 
-import json
-import re
-import socket
-import urllib.error
-import urllib.parse
+import time
 import urllib.request
-from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
-from bookledger.services.isbn import equivalent_isbn, normalize_isbn
-
-
-_SMALL_TITLE_WORDS = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "nor", "of", "on", "onto", "or", "over", "the", "to", "up", "with"}
-_TITLE_ACRONYMS = {"api", "dna", "isbn", "nasa", "usa", "uk", "un", "us", "wwii"}
-
-
-def normalize_provider_title(title: str | None) -> str | None:
-    """Apply readable title case to provider titles while preserving common acronyms."""
-    if not title or not str(title).strip():
-        return title
-
-    def normalize_word(word: str, first: bool, after_colon: bool) -> str:
-        parts = re.split(r"([-'’])", word)
-        output = []
-        for part in parts:
-            if part in {"-", "'", "’"}:
-                output.append(part)
-                continue
-            leading = part[: len(part) - len(part.lstrip("([{\"“‘"))]
-            trailing = part[len(part.rstrip(").,!?;:]}\"”’")) :]
-            core = part[len(leading) : len(part) - len(trailing) if trailing else len(part)]
-            key = core.casefold()
-            if key in _TITLE_ACRONYMS:
-                output.append(leading + key.upper() + trailing)
-            elif len(core) > 1 and any(c.isupper() for c in core[1:]) and any(c.islower() for c in core):
-                output.append(part)
-            elif key in _SMALL_TITLE_WORDS and not first and not after_colon:
-                output.append(leading + key + trailing)
-            else:
-                output.append(leading + (core[:1].upper() + core[1:].lower()) + trailing)
-        return "".join(output)
-
-    words = str(title).split()
-    result = []
-    after_colon = False
-    for index, word in enumerate(words):
-        # Punctuation stays attached to each word; a colon starts a new subtitle.
-        normalized = normalize_word(word, index == 0 or after_colon or index == len(words) - 1, after_colon)
-        result.append(normalized)
-        after_colon = ":" in word
-    return " ".join(result)
-
-
-@dataclass
-class MetadataResult:
-    status: str  # Retrieved, No data, Lookup failed, Manual entry
-    values: dict
-    source: str | None = None
-    error: str | None = None
-    failure_kind: str | None = None  # timeout, network, provider, unexpected, unverified, unavailable
-    record_found: bool | None = None
-    provider_statuses: dict[str, str] = field(default_factory=dict)
-    partial: bool = False
-
-
-def _failure_kind(exc: Exception) -> str:
-    if isinstance(exc, (TimeoutError, socket.timeout)):
-        return "timeout"
-    if isinstance(exc, urllib.error.HTTPError):
-        return "provider"
-    if isinstance(exc, urllib.error.URLError):
-        reason = exc.reason
-        if isinstance(reason, (TimeoutError, socket.timeout)):
-            return "timeout"
-        if isinstance(reason, (ConnectionError, socket.gaierror, OSError)):
-            return "network"
-        return "provider"
-    if isinstance(exc, (ConnectionError, socket.gaierror, OSError)):
-        return "network"
-    if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError, KeyError, AttributeError)):
-        return "unexpected"
-    return "unexpected"
+from bookledger.services.metadata_contract import (
+    MetadataProvider,
+    MetadataResult,
+    failure_kind as _failure_kind,
+    normalize_provider_title,
+)
+from bookledger.services.google_books import GoogleBooksProvider
+from bookledger.services.open_library import OpenLibraryProvider
 
 
 def _provider_outcome(result: MetadataResult) -> str:
@@ -106,204 +36,8 @@ def _provider_outcome(result: MetadataResult) -> str:
     return "Unexpected response error"
 
 
-class MetadataProvider:
-    """Provider interface; implementations return normalized bibliographic fields."""
-
-    name = "Provider"
-    timeout = 10
-
-    def lookup(self, isbn: str) -> MetadataResult:
-        raise NotImplementedError
-
-    def _request_json(self, url: str) -> dict:
-        request = urllib.request.Request(url, headers={"User-Agent": "BookLedger/0.1"})
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    def _failed(self, exc: Exception) -> MetadataResult:
-        return MetadataResult("Lookup failed", {}, self.name, str(exc), _failure_kind(exc))
-
-
-class OpenLibraryProvider(MetadataProvider):
-    """Primary ISBN metadata provider using Open Library's Books API."""
-
-    name = "Open Library"
-
-    def lookup(self, isbn: str) -> MetadataResult:
-        isbn = normalize_isbn(isbn) or ""
-        lookup_isbns = tuple(dict.fromkeys(value for value in (isbn, equivalent_isbn(isbn)) if value))
-        keys = tuple(f"ISBN:{value}" for value in lookup_isbns)
-        query = urllib.parse.urlencode({"bibkeys": ",".join(keys), "format": "json", "jscmd": "data"})
-        try:
-            payload = self._request_json(f"https://openlibrary.org/api/books?{query}")
-        except Exception as exc:
-            return self._failed(exc)
-        if not isinstance(payload, dict):
-            return self._failed(ValueError("Open Library returned an unexpected response shape"))
-        info = None
-        saw_unverified_record = False
-        for candidate in keys:
-            candidate_info = payload.get(candidate)
-            if candidate_info is None:
-                continue
-            if not isinstance(candidate_info, dict):
-                return self._failed(ValueError("Open Library returned an unexpected response shape"))
-            identifiers = candidate_info.get("identifiers") or {}
-            returned = {
-                normalize_isbn(value)
-                for values in identifiers.values()
-                for value in (values if isinstance(values, list) else [values])
-            }
-            if not returned or returned.intersection(lookup_isbns):
-                info = candidate_info
-                break
-            saw_unverified_record = True
-        if info is None:
-            if saw_unverified_record:
-                return MetadataResult(
-                    "No data", {}, self.name,
-                    "Open Library returned a record with identifiers that did not match the entered ISBN.",
-                    "unverified", record_found=False,
-                )
-            return MetadataResult("No data", {}, self.name, record_found=False)
-
-        authors = info.get("authors") or []
-        publishers = info.get("publishers") or []
-        subjects = info.get("subjects") or []
-        published = str(info.get("publish_date") or "")
-
-        values = {
-            "title": info.get("title"),
-            "author": ", ".join(author.get("name", "") for author in authors if author.get("name")) or None,
-            "isbn": isbn,
-            "genre": next((subject.get("name") for subject in subjects if subject.get("name")), None),
-            # Open Library's edition notes/descriptions are often bibliographic
-            # notes rather than a useful synopsis. Leave this for later providers.
-            "book_details": None,
-            "publisher": ", ".join(publisher.get("name", "") for publisher in publishers if publisher.get("name")) or None,
-            "publication_year": int(published[:4]) if published[:4].isdigit() else None,
-            "edition": info.get("edition_name"),
-            "page_count": info.get("number_of_pages"),
-            "srp": None,
-        }
-        has_metadata = any(value for key, value in values.items() if key != "isbn")
-        return MetadataResult(
-            "Retrieved" if has_metadata else "No data",
-            values if has_metadata else {}, self.name, record_found=True,
-        )
-
-
-class GoogleBooksProvider(MetadataProvider):
-    """Optional fallback provider with an independent per-request timeout."""
-
-    name = "Google Books"
-
-    def __init__(self, api_key: str | None = None):
-        self.api_key = (api_key or "").strip()
-
-    def lookup(self, isbn: str) -> MetadataResult:
-        isbn = normalize_isbn(isbn) or ""
-        lookup_isbns = tuple(dict.fromkeys(value for value in (isbn, equivalent_isbn(isbn)) if value))
-        failures: list[Exception] = []
-        saw_unverified_result = False
-        matched_record_found = False
-        matched_values: dict = {}
-        queries = tuple(dict.fromkeys((isbn, *(f"isbn:{value}" for value in lookup_isbns))))
-        for query_term in queries:
-            params = {"q": query_term, "maxResults": 5}
-            if self.api_key:
-                params["key"] = self.api_key
-            query = urllib.parse.urlencode(params)
-            try:
-                payload = self._request_json(f"https://www.googleapis.com/books/v1/volumes?{query}")
-            except Exception as exc:
-                failures.append(exc)
-                continue
-            if not isinstance(payload, dict):
-                failures.append(ValueError("Google Books returned an unexpected response shape"))
-                continue
-            total_items = payload.get("totalItems")
-            if total_items is not None and (not isinstance(total_items, int) or isinstance(total_items, bool) or total_items < 0):
-                failures.append(ValueError("Google Books returned an unexpected response shape"))
-                continue
-            items = payload.get("items") or []
-            if not isinstance(items, list):
-                failures.append(ValueError("Google Books returned an unexpected response shape"))
-                continue
-            if total_items and not items:
-                failures.append(ValueError("Google Books returned an incomplete response"))
-                continue
-            for item in items:
-                if not isinstance(item, dict) or not isinstance(item.get("volumeInfo"), dict):
-                    failures.append(ValueError("Google Books returned an unexpected response shape"))
-                    continue
-                candidate = item["volumeInfo"]
-                identifiers = candidate.get("industryIdentifiers") or []
-                if not isinstance(identifiers, list):
-                    failures.append(ValueError("Google Books returned an unexpected response shape"))
-                    continue
-                if any(not isinstance(identifier, dict) for identifier in identifiers):
-                    failures.append(ValueError("Google Books returned an unexpected response shape"))
-                    continue
-                returned_isbns = {
-                    normalize_isbn(identifier.get("identifier")) for identifier in identifiers
-                }
-                if returned_isbns.intersection(lookup_isbns):
-                    matched_record_found = True
-                    candidate_result = self._result_from_volume_info(candidate, lookup_isbns)
-                    for field, value in candidate_result.values.items():
-                        if matched_values.get(field) in (None, "") and value not in (None, ""):
-                            matched_values[field] = value
-                else:
-                    saw_unverified_result = True
-            # Keep searching query variants when a verified match is sparse, so
-            # a later valid volume can fill fields such as Book Details.
-            if matched_values.get("book_details") not in (None, ""):
-                break
-
-        if matched_values:
-            return MetadataResult("Retrieved", matched_values, self.name, record_found=True)
-        if matched_record_found:
-            return MetadataResult("No data", {}, self.name, record_found=True)
-
-        if failures:
-            return self._failed(failures[0])
-        if saw_unverified_result:
-            return MetadataResult(
-                "No data", {}, self.name,
-                "Google Books returned volumes without an identifier matching the entered ISBN.",
-                "unverified", record_found=False,
-            )
-        return MetadataResult("No data", {}, self.name, record_found=False)
-
-    def _result_from_volume_info(self, info: dict, lookup_isbns: tuple[str, ...]) -> MetadataResult:
-
-        identifiers = info.get("industryIdentifiers") or []
-        returned_isbn = next((
-            x.get("identifier") for x in identifiers
-            if isinstance(x, dict) and normalize_isbn(x.get("identifier")) in lookup_isbns
-        ), lookup_isbns[0])
-        published = str(info.get("publishedDate") or "")
-        values = {
-            "title": info.get("title"),
-            "author": ", ".join(info.get("authors") or []) or None,
-            "isbn": returned_isbn,
-            "genre": (info.get("categories") or [None])[0],
-            "book_details": info.get("description"),
-            "publisher": info.get("publisher"),
-            "publication_year": int(published[:4]) if published[:4].isdigit() else None,
-            "page_count": info.get("pageCount"),
-            "srp": None,
-        }
-        has_metadata = any(value for key, value in values.items() if key != "isbn")
-        return MetadataResult(
-            "Retrieved" if has_metadata else "No data",
-            values if has_metadata else {}, self.name, record_found=True,
-        )
-
-
 class MetadataLookupService:
-    """Try replaceable providers in order, giving each its own request timeout."""
+    """Fill metadata from enabled providers in configured order."""
 
     def __init__(self, providers: Iterable[MetadataProvider] | None = None):
         if providers is None:
@@ -320,82 +54,62 @@ class MetadataLookupService:
         on_status: Callable[[str], None] | None = None,
         on_provider_status: Callable[[str, str], None] | None = None,
     ) -> MetadataResult:
+        started = time.monotonic()
         failures: list[MetadataResult] = []
         primary_failure: MetadataResult | None = None
         unverified_result: MetadataResult | None = None
         combined: dict = {}
         sources: list[str] = []
         any_record_found = False
-        # Provider field support lives with the registry descriptors rather than
-        # being duplicated in the lookup loop. SRP is intentionally excluded.
+        # Capabilities live in the registry. This lets the result distinguish a
+        # supported field that remained empty from a field no enabled source can fill.
         from bookledger.provider_registry import PROVIDERS_BY_NAME
-        supported = tuple(dict.fromkeys(
+        all_supported = frozenset(
             field for descriptor in PROVIDERS_BY_NAME.values() for field in descriptor.supported_fields
             if field != "srp"
-        ))
-        # Stop when the main bibliographic fields are available. A missing synopsis
-        # keeps only later synopsis-capable providers eligible; other optional
-        # fields never force every source to run.
-        completion_fields = set()
+        )
+        enabled_supported: set[str] = set()
         for provider in self.providers:
             descriptor = PROVIDERS_BY_NAME.get(provider.name)
             if descriptor:
-                completion_fields.update(descriptor.supported_fields)
+                enabled_supported.update(descriptor.supported_fields)
             else:
-                completion_fields.update(supported)
-        completion_fields.update(("title", "author"))
-        completion_fields.difference_update(("book_details", "page_count", "edition", "format", "isbn", "srp"))
+                enabled_supported.update(all_supported)
         provider_statuses: dict[str, str] = {}
+        provider_durations: dict[str, float] = {}
 
         def set_provider_status(name: str, status: str) -> None:
             provider_statuses[name] = status
             if on_provider_status:
                 on_provider_status(name, status)
 
-        def supports_synopsis(candidate: MetadataProvider) -> bool:
-            candidate_descriptor = PROVIDERS_BY_NAME.get(candidate.name)
-            fields = candidate_descriptor.supported_fields if candidate_descriptor else supported
-            return "book_details" in fields
-
-        for index, provider in enumerate(self.providers):
-            previous = self.providers[index - 1].name if index else None
-            initial_status = f"Waiting for {previous}…" if previous else f"Retrieving from {provider.name}…"
-            set_provider_status(provider.name, initial_status)
         for index, provider in enumerate(self.providers):
             descriptor = PROVIDERS_BY_NAME.get(provider.name)
-            fields_for_provider = descriptor.supported_fields if descriptor else supported
-            if combined and completion_fields.issubset(combined.keys()):
-                synopsis_missing = combined.get("book_details") in (None, "")
-                next_synopsis_provider = next((
-                    candidate_index
-                    for candidate_index in range(index, len(self.providers))
-                    if supports_synopsis(self.providers[candidate_index])
-                ), None)
-                if not synopsis_missing or next_synopsis_provider is None:
-                    for remaining in self.providers[index:]:
-                        set_provider_status(remaining.name, "Not needed (skipped)")
-                    break
-                if next_synopsis_provider > index:
-                    set_provider_status(provider.name, "Not needed (skipped)")
-                    continue
-            if combined and not any(combined.get(key) in (None, "") for key in fields_for_provider):
+            fields_for_provider = frozenset(descriptor.supported_fields) if descriptor else all_supported
+            if not any(combined.get(key) in (None, "") for key in fields_for_provider):
                 set_provider_status(provider.name, "Not needed (skipped)")
                 continue
             if on_status:
                 on_status(f"Searching ISBN: {provider.name}")
                 on_status("Fetching Data…")
-            if index:
-                set_provider_status(provider.name, f"Retrieving from {provider.name}…")
+            set_provider_status(provider.name, f"Retrieving from {provider.name}…")
+            provider_started = time.monotonic()
             try:
                 result = provider.lookup(isbn)
             except Exception as exc:
                 result = MetadataResult("Lookup failed", {}, provider.name, str(exc), _failure_kind(exc))
+            provider_durations[provider.name] = max(
+                result.duration_seconds or time.monotonic() - provider_started, 0.0
+            )
             any_record_found = any_record_found or result.record_found is True
-            values = {key: value for key, value in result.values.items() if value not in (None, "")}
+            values = {
+                key: value for key, value in result.values.items()
+                if value not in (None, "") and (key in fields_for_provider or key == "isbn")
+            }
             normalized_values = dict(values)
             if "title" in normalized_values:
                 normalized_values["title"] = normalize_provider_title(str(normalized_values["title"]))
-            provider_partial = bool(normalized_values) and any(normalized_values.get(key) in (None, "") for key in fields_for_provider)
+            provider_partial = any(normalized_values.get(key) in (None, "") for key in fields_for_provider)
             set_provider_status(provider.name, _provider_outcome(
                 MetadataResult(result.status, normalized_values, result.source, result.error, result.failure_kind,
                                result.record_found, partial=provider_partial)
@@ -403,11 +117,13 @@ class MetadataLookupService:
             if "title" in values:
                 values["title"] = normalize_provider_title(str(values["title"]))
             if values:
-                if result.source:
-                    sources.append(result.source)
+                added_value = False
                 for key, value in values.items():
                     if combined.get(key) in (None, ""):
                         combined[key] = value
+                        added_value = True
+                if added_value and result.source:
+                    sources.append(result.source)
             if result.status == "Lookup failed":
                 failures.append(result)
                 if index == 0:
@@ -416,7 +132,9 @@ class MetadataLookupService:
                 unverified_result = result
 
         if combined:
-            partial = bool(failures) or any(combined.get(key) in (None, "") for key in completion_fields)
+            missing = frozenset(field for field in enabled_supported if combined.get(field) in (None, ""))
+            unsupported = all_supported - enabled_supported
+            partial = bool(failures) or bool(missing)
             if primary_failure is not None and len(sources) == 1 and sources[0] != primary_failure.source:
                 # A matching fallback result is a successful lookup even when the
                 # primary provider was unavailable; retain that failure for diagnostics.
@@ -424,18 +142,32 @@ class MetadataLookupService:
                     "Retrieved", combined, " + ".join(dict.fromkeys(sources)),
                     primary_failure.error, primary_failure.failure_kind,
                     provider_statuses=provider_statuses, partial=True,
+                    supported_fields=frozenset(enabled_supported), missing_fields=missing,
+                    unsupported_fields=unsupported, provider_durations=provider_durations,
+                    duration_seconds=time.monotonic() - started,
                 )
             if failures and len(sources) <= 1:
                 failure = failures[0]
                 return MetadataResult("Retrieved", combined, ", ".join(sources) or failure.source, failure.error, failure.failure_kind,
-                                      provider_statuses=provider_statuses, partial=True)
+                                      provider_statuses=provider_statuses, partial=True,
+                                      supported_fields=frozenset(enabled_supported), missing_fields=missing,
+                                      unsupported_fields=unsupported, provider_durations=provider_durations,
+                                      duration_seconds=time.monotonic() - started)
             return MetadataResult("Retrieved", combined, " + ".join(dict.fromkeys(sources)),
-                                  provider_statuses=provider_statuses, partial=partial)
+                                  provider_statuses=provider_statuses, partial=partial,
+                                  supported_fields=frozenset(enabled_supported), missing_fields=missing,
+                                  unsupported_fields=unsupported, provider_durations=provider_durations,
+                                  duration_seconds=time.monotonic() - started)
         if failures:
             # The first provider is primary; its specific error is the most useful
             # explanation when the fallback also fails or returns no matching record.
             failure = failures[0]
             failure.provider_statuses = provider_statuses
+            failure.supported_fields = frozenset(enabled_supported)
+            failure.missing_fields = frozenset(enabled_supported)
+            failure.unsupported_fields = all_supported - enabled_supported
+            failure.provider_durations = provider_durations
+            failure.duration_seconds = time.monotonic() - started
             return failure
         source = self.providers[-1].name if self.providers else None
         if unverified_result is not None:
@@ -443,5 +175,11 @@ class MetadataLookupService:
                 "No data", {}, unverified_result.source, unverified_result.error,
                 unverified_result.failure_kind, record_found=False,
                 provider_statuses=provider_statuses,
+                supported_fields=frozenset(enabled_supported), missing_fields=frozenset(enabled_supported),
+                unsupported_fields=all_supported - enabled_supported, provider_durations=provider_durations,
+                duration_seconds=time.monotonic() - started,
             )
-        return MetadataResult("No data", {}, source, record_found=any_record_found, provider_statuses=provider_statuses)
+        return MetadataResult("No data", {}, source, record_found=any_record_found, provider_statuses=provider_statuses,
+                              supported_fields=frozenset(enabled_supported), missing_fields=frozenset(enabled_supported),
+                              unsupported_fields=all_supported - enabled_supported, provider_durations=provider_durations,
+                              duration_seconds=time.monotonic() - started)

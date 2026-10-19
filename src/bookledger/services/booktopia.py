@@ -8,7 +8,7 @@ import urllib.request
 from html.parser import HTMLParser
 
 from bookledger.services.isbn import equivalent_isbn, isbn_check, normalize_isbn
-from bookledger.services.metadata import MetadataProvider, MetadataResult
+from bookledger.services.metadata_contract import MetadataProvider, MetadataResult, provider_lookup
 
 
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -19,10 +19,18 @@ _SUPPORTED_FORMATS = {"Paperback", "Hardcover", "Mass Market Paperback", "Board 
 
 
 class _BooktopiaRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, remaining_timeout=None):
+        super().__init__()
+        self.remaining_timeout = remaining_timeout
+
     def redirect_request(self, request, file_pointer, code, message, headers, new_url):
         destination = urllib.parse.urlparse(urllib.parse.urljoin(request.full_url, new_url))
         if destination.scheme != "https" or (destination.hostname or "").casefold() not in _ALLOWED_HOSTS:
             raise ValueError("Booktopia redirected outside its website")
+        if self.remaining_timeout is not None:
+            # urllib reuses the original request timeout for redirects. Shrink
+            # that timeout to the provider's remaining budget before it follows.
+            request.timeout = min(request.timeout, self.remaining_timeout())
         return super().redirect_request(request, file_pointer, code, message, headers, new_url)
 
 
@@ -389,6 +397,51 @@ def _metadata_from_page(parser: _BookPageParser) -> dict:
     return values
 
 
+_PRODUCT_DETAIL_LABELS = (
+    "ISBN-10", "ISBN", "Series", "Published", "Format", "Language",
+    "Number of Pages", "Audience", "For Ages", "For Grades", "Publisher",
+    "Country of Publication", "Dimensions (cm)", "Weight (kg)",
+)
+
+
+def _metadata_from_product_details(parser: _BookPageParser) -> dict:
+    """Read a few exact Product Details labels from visible, verified page text.
+
+    This intentionally uses labels rather than a Booktopia CSS selector: the
+    adapter only has the returned HTML and must not depend on tab implementation.
+    JSON-LD remains authoritative because callers merge these values only when
+    the structured field is absent.
+    """
+    page = next((element for element in parser.elements if element["tag"] == "html"), None)
+    if not page:
+        return {}
+    text = " ".join(_element_text(page).split())
+    labels = "|".join(re.escape(label) for label in _PRODUCT_DETAIL_LABELS)
+    result = {}
+
+    def labelled_value(label: str) -> str | None:
+        match = re.search(
+            rf"(?<![\w]){re.escape(label)}\s*:\s*(.*?)(?=\s+(?:{labels})\s*:|$)",
+            text,
+            re.IGNORECASE,
+        )
+        value = " ".join(match.group(1).split()).strip(" .;,") if match else ""
+        return value or None
+
+    published = labelled_value("Published")
+    if year := _schema_year(published):
+        result["publication_year"] = year
+    if publisher := labelled_value("Publisher"):
+        result["publisher"] = publisher
+    if page_count := labelled_value("Number of Pages"):
+        match = re.fullmatch(r"\s*(\d{1,5})(?:\s+pages?)?\s*", page_count, re.IGNORECASE)
+        if match and (number := _schema_page_count(match.group(1))):
+            result["page_count"] = number
+    if book_format := _schema_format(labelled_value("Format")):
+        result["format"] = book_format
+    return result
+
+
 def _url_matches_isbn(url: str, requested_isbn: str) -> bool:
     path = urllib.parse.urlparse(url).path
     # Booktopia's direct ISBN route is only a redirect entry point. A product
@@ -422,8 +475,8 @@ class BooktopiaProvider(MetadataProvider):
     name = "Booktopia"
 
     def _open(self, request):
-        opener = urllib.request.build_opener(_BooktopiaRedirectHandler())
-        return opener.open(request, timeout=self.timeout)
+        opener = urllib.request.build_opener(_BooktopiaRedirectHandler(self._request_timeout))
+        return opener.open(request, timeout=self._request_timeout())
 
     def _read_page(self, url: str) -> tuple[str, str, urllib.error.HTTPError | None]:
         request = urllib.request.Request(url, headers={"User-Agent": "BookLedger/0.1", "Accept": "text/html"})
@@ -492,6 +545,9 @@ class BooktopiaProvider(MetadataProvider):
         for key, value in _metadata_from_page(parser).items():
             if values.get(key) in (None, ""):
                 values[key] = value
+        for key, value in _metadata_from_product_details(parser).items():
+            if values.get(key) in (None, ""):
+                values[key] = value
         unavailable = _product_is_unavailable(parser, matching_nodes)
         description_candidates = _description_panel_text(parser) + structured_descriptions
         description = next(
@@ -548,8 +604,11 @@ class BooktopiaProvider(MetadataProvider):
         result = self._lookup_direct_isbn_page(isbn)
         if result.record_found is True and result.values:
             return result
+        if result.failure_kind == "timeout":
+            return result
         return self._failed(search_error)
 
+    @provider_lookup
     def lookup(self, isbn: str) -> MetadataResult:
         isbn = normalize_isbn(isbn) or ""
         valid, _message = isbn_check(isbn)
@@ -605,6 +664,8 @@ class BooktopiaProvider(MetadataProvider):
                 failures.append(self._failed(exc))
                 continue
             except Exception as exc:
+                if self._failed(exc).failure_kind == "timeout":
+                    return self._failed(exc)
                 failures.append(self._failed(exc))
                 continue
             if result.values:

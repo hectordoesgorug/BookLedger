@@ -432,13 +432,55 @@ def test_matching_record_without_usable_metadata_is_a_miss():
     assert result.values == {}
 
 
-def test_each_metadata_provider_uses_its_own_ten_second_request_timeout():
+def test_each_metadata_provider_uses_a_five_second_request_timeout():
     response = MagicMock()
     response.__enter__.return_value.read.return_value = b"{}"
     for provider in (OpenLibraryProvider(), GoogleBooksProvider()):
         with patch("bookledger.services.metadata.urllib.request.urlopen", return_value=response) as urlopen:
             provider._request_json("https://example.test/lookup")
-        assert urlopen.call_args.kwargs["timeout"] == 10
+        assert urlopen.call_args.kwargs["timeout"] == 5
+
+
+def test_google_books_shares_one_five_second_budget_across_query_variants(monkeypatch):
+    provider = GoogleBooksProvider()
+    clock = iter((0.0, 0.0, 1.0, 2.0, 3.0))
+    monkeypatch.setattr("bookledger.services.metadata.time.monotonic", lambda: next(clock))
+    timeouts = []
+
+    def empty_response(_url):
+        timeouts.append(provider._request_timeout())
+        return {"items": []}
+
+    provider._request_json = empty_response
+    result = provider.lookup("9780306406157")
+
+    assert timeouts == [5.0, 4.0, 3.0]
+    assert result.duration_seconds == 3.0
+
+
+def test_provider_result_that_finishes_after_budget_is_reported_as_timeout(monkeypatch):
+    provider = OpenLibraryProvider()
+    provider._request_json = lambda _url: {}
+    clock = iter((0.0, 5.1))
+    monkeypatch.setattr("bookledger.services.metadata.time.monotonic", lambda: next(clock))
+
+    result = provider.lookup("9780306406157")
+
+    assert result.status == "Lookup failed"
+    assert result.failure_kind == "timeout"
+    assert result.duration_seconds == 5.1
+
+
+def test_google_books_http_429_remains_a_provider_error():
+    provider = GoogleBooksProvider()
+    provider._request_json = lambda _url: (_ for _ in ()).throw(
+        urllib.error.HTTPError("https://example.test", 429, "rate limited", {}, None)
+    )
+
+    result = provider.lookup("9780306406157")
+
+    assert result.status == "Lookup failed"
+    assert result.failure_kind == "provider"
 
 
 def test_lookup_service_falls_back_and_reports_provider_progress():
@@ -458,12 +500,14 @@ def test_lookup_service_falls_back_and_reports_provider_progress():
     ]
 
 
-def test_provider_statuses_keep_primary_success_and_skip_google_books():
+def test_provider_statuses_keep_primary_success_and_query_unique_google_fields():
     primary = StubProvider("Open Library", MetadataResult("Retrieved", {
-        "title": "Book", "author": "Author", "genre": "Science", "book_details": "Details",
+        "title": "Book", "author": "Author", "genre": "Science",
         "publisher": "Press", "publication_year": 2020, "edition": "First", "page_count": 100,
     }, "Open Library"))
-    fallback = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Google title"}, "Google Books"))
+    fallback = StubProvider("Google Books", MetadataResult("Retrieved", {
+        "title": "Google title", "book_details": "Google synopsis",
+    }, "Google Books"))
     statuses = []
 
     result = MetadataLookupService((primary, fallback)).lookup(
@@ -471,14 +515,16 @@ def test_provider_statuses_keep_primary_success_and_skip_google_books():
     )
 
     assert result.values["title"] == "Book"
+    assert result.values["book_details"] == "Google synopsis"
     assert primary.calls == 1
-    assert fallback.calls == 0
+    assert fallback.calls == 1
     assert result.provider_statuses == {
         "Open Library": "Metadata retrieved",
-        "Google Books": "Not needed (skipped)",
+        "Google Books": "Metadata retrieved · some fields missing",
     }
     assert ("Open Library", "Retrieving from Open Library…") in statuses
-    assert ("Google Books", "Waiting for Open Library…") in statuses
+    assert ("Google Books", "Retrieving from Google Books…") in statuses
+    assert not any(status.startswith("Waiting") for _name, status in statuses)
 
 
 def test_provider_statuses_report_no_match_then_google_books_success():
@@ -504,6 +550,38 @@ def test_provider_statuses_report_timeout_and_still_attempt_google_books():
         "Google Books": "Metadata retrieved · some fields missing",
     }
     assert result.partial is True
+
+
+def test_http_error_keeps_prior_metadata_and_later_provider_fills_missing_fields():
+    primary = StubProvider("Open Library", MetadataResult("Retrieved", {
+        "title": "The Strength of the Few", "author": "James Islington",
+        "genre": "Fantasy", "publisher": "Open Library Press",
+        "publication_year": 2025, "edition": "First", "page_count": 720,
+    }, "Open Library"))
+    rate_limited = StubProvider("Google Books", MetadataResult(
+        "Lookup failed", {}, "Google Books", "HTTP 429 rate limited", "provider"
+    ))
+    fallback = StubProvider("Booktopia", MetadataResult("Retrieved", {
+        "title": "Conflicting Booktopia title", "publisher": "Conflicting Booktopia Press",
+        "book_details": "Verified synopsis", "format": "Paperback",
+    }, "Booktopia"))
+    statuses = []
+
+    result = MetadataLookupService((primary, rate_limited, fallback)).lookup(
+        "9781923058507", on_provider_status=lambda name, status: statuses.append((name, status))
+    )
+
+    assert (primary.calls, rate_limited.calls, fallback.calls) == (1, 1, 1)
+    assert result.values["title"] == "The Strength of the Few"
+    assert result.values["publisher"] == "Open Library Press"
+    assert result.values["book_details"] == "Verified synopsis"
+    assert result.values["format"] == "Paperback"
+    assert result.provider_statuses["Google Books"] == "HTTP/provider error"
+    assert result.status == "Retrieved"
+    assert result.partial is True
+    assert [name for name, status in statuses if status.startswith("Retrieving")] == [
+        "Open Library", "Google Books", "Booktopia",
+    ]
 
 
 def test_both_provider_misses_are_reported_without_calling_them_failures():
@@ -635,18 +713,35 @@ def test_core_metadata_completion_still_queries_later_synopsis_provider():
     assert result.provider_statuses["Booktopia"].startswith("Metadata retrieved")
 
 
-def test_core_completion_skips_later_providers_when_synopsis_is_already_present():
+def test_synopsis_does_not_skip_providers_that_can_fill_other_supported_fields():
     open_library = StubProvider("Open Library", MetadataResult("Retrieved", {
         "title": "Nightfall", "author": "Isaac Asimov", "genre": "Science Fiction",
-        "publisher": "Bantam Books", "publication_year": 1991, "book_details": "Existing synopsis.",
+        "publisher": "Bantam Books", "publication_year": 1991,
     }, "Open Library"))
     google_books = StubProvider("Google Books", MetadataResult("Retrieved", {"book_details": "Other synopsis."}, "Google Books"))
     booktopia = StubProvider("Booktopia", MetadataResult("Retrieved", {"book_details": "Another synopsis."}, "Booktopia"))
 
     result = MetadataLookupService((open_library, google_books, booktopia)).lookup("9780553290998")
 
-    assert [open_library.calls, google_books.calls, booktopia.calls] == [1, 0, 0]
-    assert result.values["book_details"] == "Existing synopsis."
+    assert [open_library.calls, google_books.calls, booktopia.calls] == [1, 1, 1]
+    assert result.values["book_details"] == "Other synopsis."
+    assert result.provider_statuses["Google Books"] == "Metadata retrieved · some fields missing"
+    assert result.provider_statuses["Booktopia"] == "Metadata retrieved · some fields missing"
+
+
+def test_aggregate_result_distinguishes_supported_missing_and_unsupported_fields():
+    provider = StubProvider("Booktopia", MetadataResult(
+        "Retrieved", {"title": "Nightfall", "book_details": "A synopsis."}, "Booktopia"
+    ))
+
+    result = MetadataLookupService((provider,)).lookup("9780553290998")
+
+    assert "author" in result.supported_fields
+    assert "author" in result.missing_fields
+    assert "genre" in result.unsupported_fields
+    assert "book_details" not in result.missing_fields
+    assert result.provider_durations["Booktopia"] >= 0
+    assert result.duration_seconds >= result.provider_durations["Booktopia"]
 
 
 def test_provider_title_normalization_handles_small_words_punctuation_and_acronyms():

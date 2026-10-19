@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from bookledger.services.metadata import GoogleBooksProvider, MetadataProvider, OpenLibraryProvider
+from bookledger.services.google_books import GoogleBooksProvider
+from bookledger.services.metadata_contract import MetadataProvider
+from bookledger.services.open_library import OpenLibraryProvider
 from bookledger.services.booktopia import BooktopiaProvider
 
 
