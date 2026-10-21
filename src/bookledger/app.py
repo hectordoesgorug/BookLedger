@@ -831,8 +831,38 @@ class BookLedgerApp(_WindowBase):
         canvas.configure(scrollregion=(0, 0, width, height))
 
     def _build_settings(self):
-        self._build_metadata_sources()
-        panel = ttk.LabelFrame(self.workspace, text="Portable data and backups", padding=18)
+        notebook = ttk.Notebook(self.workspace)
+        notebook.pack(fill="both", expand=True)
+        self.settings_notebook = notebook
+        tabs = {}
+        for name in (
+            "Mobile App Setup",
+            "Metadata Sources",
+            "API Management",
+            "Storage and Backup",
+            "Preferences",
+        ):
+            tab = ttk.Frame(notebook, padding=16)
+            notebook.add(tab, text=name)
+            tabs[name] = tab
+
+        self._build_mobile_app_setup(tabs["Mobile App Setup"])
+        self._build_metadata_sources(tabs["Metadata Sources"])
+        self._build_api_management(tabs["API Management"])
+        self._build_storage_settings(tabs["Storage and Backup"])
+        self._build_preferences(tabs["Preferences"])
+
+    def _build_mobile_app_setup(self, parent):
+        panel = ttk.LabelFrame(parent, text="Mobile App Setup", padding=18)
+        panel.pack(fill="x", anchor="n")
+        ttk.Label(
+            panel,
+            text="Mobile app setup is reserved for future development. No mobile functionality is currently available.",
+            wraplength=900,
+        ).pack(anchor="w")
+
+    def _build_storage_settings(self, parent):
+        panel = ttk.LabelFrame(parent, text="Portable data and backups", padding=18)
         panel.pack(fill="x", anchor="n")
         ttk.Label(panel, text=f"Data folder: {self.paths.data}", wraplength=850).pack(anchor="w", pady=(0, 8))
         ttk.Label(panel, text=f"Database: {self.paths.database}", wraplength=850).pack(anchor="w", pady=(0, 12))
@@ -849,18 +879,35 @@ class BookLedgerApp(_WindowBase):
         ttk.Button(trash_row, text="Clear Trash…", state="normal" if count else "disabled", command=self.clear_trash).pack(side="left", padx=8)
         ttk.Button(trash_row, text="Purge Data…", command=self.purge_data).pack(side="left", padx=8)
         ttk.Button(trash_row, text="Retry Storage Recovery", command=self.retry_storage_recovery).pack(side="left", padx=8)
-        ttk.Button(row, text="Manage Locations…", command=self.manage_locations).pack(side="left", padx=8)
-        ttk.Button(row, text="Google Books API", command=self.google_books_settings).pack(side="left", padx=8)
-        genres = ttk.LabelFrame(self.workspace, text="Approved genres", padding=16)
-        genres.pack(fill="x", pady=16)
+
+    def _build_preferences(self, parent):
+        locations = ttk.LabelFrame(parent, text="Locations", padding=16)
+        locations.pack(fill="x", anchor="n")
+        ttk.Button(locations, text="Manage Locations…", command=self.manage_locations).pack(anchor="w")
+
+        genres = ttk.LabelFrame(parent, text="Approved genres", padding=16)
+        genres.pack(fill="x", pady=(14, 0), anchor="n")
         ttk.Label(genres, text=" · ".join(APPROVED_GENRES), wraplength=900).pack(anchor="w")
         ttk.Label(genres, text="Genre options are controlled by the v1 approved list. Unknown provider categories must be recategorized before saving.", foreground="#64748b", wraplength=900).pack(anchor="w", pady=(8, 0))
-        companion = ttk.LabelFrame(self.workspace, text="Android companion (planned)", padding=16)
-        companion.pack(fill="x")
-        ttk.Label(companion, text="The desktop data model is being designed for future local Wi-Fi pairing and photo/ISBN transfer. Pairing will be implemented after desktop stabilization.", wraplength=900).pack(anchor="w")
 
-    def _build_metadata_sources(self):
-        panel = ttk.LabelFrame(self.workspace, text="Metadata Sources", padding=16)
+    def _build_api_management(self, parent):
+        google_books = ttk.LabelFrame(parent, text="Google Books API", padding=16)
+        google_books.pack(fill="x", anchor="n")
+        ttk.Label(
+            google_books,
+            text="Google Books works without an API key for this integration. An optional key can be configured and tested here.",
+            wraplength=900,
+        ).pack(anchor="w", pady=(0, 10))
+        ttk.Button(google_books, text="Google Books API", command=self.google_books_settings).pack(anchor="w")
+
+        planned = ttk.LabelFrame(parent, text="Planned API integrations", padding=16)
+        planned.pack(fill="x", pady=(14, 0), anchor="n")
+        for name in ("ISBNdb", "BigBook", "Hardcover"):
+            ttk.Label(planned, text=f"{name} — API configuration unavailable until integration is implemented.", wraplength=900).pack(anchor="w", pady=2)
+
+    def _build_metadata_sources(self, parent=None):
+        parent = self.workspace if parent is None else parent
+        panel = ttk.LabelFrame(parent, text="Metadata Sources", padding=16)
         panel.pack(fill="x", anchor="n", pady=(0, 14))
         ttk.Label(panel, text="Enabled sources are searched from top to bottom. Drag a source by its handle to change priority.", wraplength=900).pack(anchor="w")
         self._provider_rows = {}
@@ -895,6 +942,11 @@ class BookLedgerApp(_WindowBase):
         config_path = self.provider_settings_store.active_path
         self._provider_config_status = tk.StringVar(value=warning or f"Settings file: {config_path}")
         ttk.Label(panel, textvariable=self._provider_config_status, foreground="#64748b", wraplength=900).pack(anchor="w", pady=(8, 0))
+
+        planned = ttk.LabelFrame(parent, text="Planned metadata integrations", padding=16)
+        planned.pack(fill="x", anchor="n")
+        for name in ("ISBNdb", "WorldCat", "Internet Archive", "BigBook", "Hardcover", "Goodreads"):
+            ttk.Label(planned, text=f"{name} — planned; not integrated.", wraplength=900).pack(anchor="w", pady=2)
 
     def _provider_drag_start(self, event, provider_id):
         self._provider_drag_id = provider_id

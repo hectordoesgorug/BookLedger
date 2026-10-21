@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import replace
+from pathlib import Path
 import re
 from types import SimpleNamespace
 from tkinter import ttk
@@ -104,6 +105,114 @@ def test_settings_exposes_button_that_opens_the_diagnostic(tk_root, monkeypatch)
 
     assert opened == ["opened"]
     assert all(value is False for value in harness.provider_settings.enabled.values())
+
+
+def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctional(tk_root):
+    class SettingsHarness:
+        _build_settings = BookLedgerApp._build_settings
+        _build_mobile_app_setup = BookLedgerApp._build_mobile_app_setup
+        _build_metadata_sources = BookLedgerApp._build_metadata_sources
+        _build_api_management = BookLedgerApp._build_api_management
+        _build_storage_settings = BookLedgerApp._build_storage_settings
+        _build_preferences = BookLedgerApp._build_preferences
+        _provider_drag_start = BookLedgerApp._provider_drag_start
+        _provider_drag_motion = BookLedgerApp._provider_drag_motion
+        _provider_drag_end = BookLedgerApp._provider_drag_end
+        _reorder_provider_rows = BookLedgerApp._reorder_provider_rows
+
+    harness = SettingsHarness()
+    harness.workspace = ttk.Frame(tk_root)
+    harness.workspace.pack(fill="both", expand=True)
+    harness.paths = SimpleNamespace(data=Path("portable-data"), database=Path("portable-data/bookledger.sqlite3"))
+    harness.lifecycle = SimpleNamespace(trash_count=lambda: 1)
+    harness.provider_settings = SimpleNamespace(
+        enabled={descriptor.id: True for descriptor in PROVIDER_REGISTRY},
+        order=[descriptor.id for descriptor in PROVIDER_REGISTRY],
+    )
+    harness.provider_settings_store = SimpleNamespace(warning=None, active_path="config.json")
+    actions = []
+    for name in (
+        "create_backup", "verify_database", "restore_backup", "restore_latest", "clear_trash",
+        "purge_data", "retry_storage_recovery", "manage_locations", "google_books_settings",
+        "open_isbn_lookup_test", "_save_provider_settings", "_restore_provider_defaults",
+    ):
+        setattr(harness, name, lambda action=name: actions.append(action))
+    harness._open_path = lambda path: actions.append(("open_path", path))
+
+    harness._build_settings()
+    tk_root.geometry("1280x800")
+    tk_root.deiconify()
+    tk_root.update()
+    notebook = harness.settings_notebook
+    assert notebook.winfo_width() >= 1000
+    assert notebook.winfo_height() >= 600
+    expected_tabs = (
+        "Mobile App Setup", "Metadata Sources", "API Management", "Storage and Backup", "Preferences",
+    )
+    assert tuple(notebook.tab(index, "text") for index in range(len(expected_tabs))) == expected_tabs
+    assert {descriptor.name for descriptor in PROVIDER_REGISTRY} == {
+        "Open Library", "Google Books", "Booktopia",
+    }
+
+    def tab_widgets(index):
+        return tuple(_walk_widgets(notebook.nametowidget(notebook.tabs()[index])))
+
+    def texts(index):
+        return tuple(str(widget.cget("text")) for widget in tab_widgets(index) if "text" in widget.keys())
+
+    assert "reserved for future development" in " ".join(texts(0))
+    metadata_text = " ".join(texts(1))
+    for name in ("Open Library", "Google Books", "Booktopia", "ISBNdb", "WorldCat", "Internet Archive", "BigBook", "Hardcover", "Goodreads", "ISBN Lookup Test"):
+        assert name in metadata_text
+    api_text = " ".join(texts(2))
+    for name in ("Google Books API", "ISBNdb", "BigBook", "Hardcover", "unavailable until integration"):
+        assert name in api_text
+    storage_text = " ".join(texts(3))
+    for name in ("Data folder:", "Database:", "Back Up Now", "Open Data Folder", "Verify Database", "Restore Backup…", "Restore Latest", "Clear Trash…", "Purge Data…", "Retry Storage Recovery"):
+        assert name in storage_text
+    assert "Manage Locations…" not in storage_text and "Google Books API" not in storage_text
+    preferences_text = " ".join(texts(4))
+    assert "Manage Locations…" in preferences_text
+    assert "Approved genres" in preferences_text
+
+    # Merely changing tabs does not invoke any Settings operation.
+    for index in range(len(expected_tabs)):
+        notebook.select(index)
+        tk_root.update_idletasks()
+    assert actions == []
+
+    buttons_by_tab = tuple(
+        [widget for widget in tab_widgets(index) if isinstance(widget, ttk.Button)]
+        for index in range(len(expected_tabs))
+    )
+    assert [button.cget("text") for button in buttons_by_tab[2]] == ["Google Books API"]
+    assert [button.cget("text") for button in buttons_by_tab[1]] == [
+        "Save Metadata Sources", "Restore Defaults", "ISBN Lookup Test",
+    ]
+
+    def invoke(tab_index, label):
+        button = next(widget for widget in buttons_by_tab[tab_index] if widget.cget("text") == label)
+        button.invoke()
+
+    invoke(1, "ISBN Lookup Test")
+    invoke(1, "Save Metadata Sources")
+    invoke(1, "Restore Defaults")
+    invoke(2, "Google Books API")
+    invoke(3, "Back Up Now")
+    invoke(3, "Open Data Folder")
+    invoke(3, "Verify Database")
+    invoke(3, "Restore Backup…")
+    invoke(3, "Restore Latest")
+    invoke(3, "Clear Trash…")
+    invoke(3, "Purge Data…")
+    invoke(3, "Retry Storage Recovery")
+    invoke(4, "Manage Locations…")
+    assert [action for action in actions if isinstance(action, str)] == [
+        "open_isbn_lookup_test", "_save_provider_settings", "_restore_provider_defaults",
+        "google_books_settings", "create_backup", "verify_database", "restore_backup",
+        "restore_latest", "clear_trash", "purge_data", "retry_storage_recovery", "manage_locations",
+    ]
+    assert actions[5] == ("open_path", Path("portable-data"))
 
 
 def test_app_opens_diagnostic_with_existing_api_key_without_saving_settings(monkeypatch):
