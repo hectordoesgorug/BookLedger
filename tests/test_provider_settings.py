@@ -245,7 +245,7 @@ def test_lookup_continues_after_failure_and_stops_after_synopsis_completion():
 
 def test_inventory_purge_does_not_remove_root_provider_configuration(tmp_path):
     paths = AppPaths(tmp_path)
-    paths.prepare(migrate_profile_config=False)
+    paths.prepare()
     config = paths.provider_config
     config.write_text('{"version": 1}', encoding="utf-8")
     from bookledger.db.database import Database

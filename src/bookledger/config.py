@@ -21,6 +21,16 @@ APPROVED_GENRES = (
     "Miscellaneous",
 )
 
+# Initial values for the configurable Format list. Existing assignments are
+# retained as compatibility entries when this list is first persisted.
+DEFAULT_FORMATS = (
+    "Paperback",
+    "Hardcover",
+    "Mass Market Paperback",
+    "Board Book",
+    "Other",
+)
+
 COPY_STATUSES = ("Available", "Not for Sale", "Listed", "Sold")
 DEFAULT_LOCATION = "Not Specified"
 CURRENCY = "PHP"

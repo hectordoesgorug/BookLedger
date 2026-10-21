@@ -5,7 +5,7 @@ from datetime import date as real_date
 import pytest
 from PIL import Image
 
-from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_LOCATION
+from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.db.database import Database, SCHEMA
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService, ValidationError
@@ -416,6 +416,80 @@ def test_location_registry_canonicalizes_and_protects_referenced_values(setup):
     service.update_copy(other_copy_id, {**payload, "location": DEFAULT_LOCATION})
     service.delete_location("Front Room")
     assert "Front Room" not in service.list_locations()
+
+
+def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(setup):
+    _, _, db, service, _payload, _photo = setup
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO book_records(title,author,genre) VALUES('Legacy Genre Book','Writer','Legacy Genre')"
+        )
+        book_id = conn.execute("SELECT id FROM book_records WHERE title='Legacy Genre Book'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO copies(book_id,copy_number,format,condition,photo_path,price_minor) VALUES(?,1,'Legacy Format','Good','photos/legacy.jpg',10000)",
+            (book_id,),
+        )
+
+    genres = service.list_genres()
+    formats = service.list_formats()
+    assert genres[:len(APPROVED_GENRES)] == APPROVED_GENRES
+    assert genres[-1] == "Legacy Genre"
+    assert formats[:len(DEFAULT_FORMATS)] == DEFAULT_FORMATS
+    assert formats[-1] == "Legacy Format"
+    assert CatalogService(db).list_genres() == genres
+    assert CatalogService(db).list_formats() == formats
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+
+
+def test_genre_and_format_rename_migrate_assignments_atomically_and_allow_unassigned_delete(setup):
+    _, _, db, service, payload, _photo = setup
+    first = service.create_copy(payload)
+    book_id = service.duplicate_by_isbn(payload["isbn"])["id"]
+    second = service.create_copy({**payload, "location": DEFAULT_LOCATION}, existing_book_id=book_id)
+    before = {row["copy_id"]: row for row in service.list_copies()}
+
+    assert service.rename_genre("Science", "Natural Science") == "Natural Science"
+    assert service.rename_format("Paperback", "Softcover") == "Softcover"
+    after = {row["copy_id"]: row for row in service.list_copies()}
+    assert set(after) == {first, second}
+    for copy_id in (first, second):
+        assert after[copy_id]["genre"] == "Natural Science"
+        assert after[copy_id]["format"] == "Softcover"
+        for field in ("copy_code", "title", "author", "photo_path", "price_minor", "condition", "status"):
+            assert after[copy_id][field] == before[copy_id][field]
+    assert service.value_assignment_count("genre", "Natural Science") == 1
+    assert service.value_assignment_count("format", "Softcover") == 2
+    with pytest.raises(ValidationError):
+        service.delete_genre("Natural Science")
+    with pytest.raises(ValidationError):
+        service.delete_format("Softcover")
+
+    service.delete_genre("History")
+    service.delete_format("Other")
+    assert "History" not in service.list_genres()
+    assert "Other" not in service.list_formats()
+
+
+def test_genre_and_format_lists_reject_blank_duplicate_and_unsupported_values(setup):
+    _, _, _, service, payload, _photo = setup
+    with pytest.raises(ValidationError):
+        service.add_genre("  ")
+    with pytest.raises(ValidationError):
+        service.add_genre(" science ")
+    with pytest.raises(ValidationError):
+        service.rename_genre("Science", "Fiction")
+    with pytest.raises(ValidationError):
+        service.rename_format("Paperback", "Hardcover")
+    with pytest.raises(ValidationError) as exc:
+        service.create_copy({**payload, "format": "Ebook"})
+    assert "format" in exc.value.errors
+
+    service.add_genre("Speculative")
+    service.add_format("Ebook")
+    assert service.validate({**payload, "genre": "Speculative", "format": "Ebook"}) == {}
+    with pytest.raises(ValidationError):
+        service.rename_format("Paperback", "  ")
 
 
 def test_v1_database_migrates_existing_locations_and_data(tmp_path):

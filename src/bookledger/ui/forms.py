@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from bookledger.config import APPROVED_GENRES, DEFAULT_LOCATION
+from bookledger.config import APPROVED_GENRES, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
@@ -124,7 +124,9 @@ class BookForm(tk.Toplevel):
             text="Override ISBN Validation",
             variable=self.isbn_override,
         ).pack(side="left", padx=(10, 0))
-        row = self._field(body, "Genre", "genre", row, required=True, values=APPROVED_GENRES)
+        genre_values = self.service.list_genres() if hasattr(self.service, "list_genres") else APPROVED_GENRES
+        format_values = self.service.list_formats() if hasattr(self.service, "list_formats") else DEFAULT_FORMATS
+        row = self._field(body, "Genre", "genre", row, required=True, values=genre_values)
         row = self._field(body, "Publisher/Imprint", "publisher", row)
         row = self._field(body, "Publication Year", "publication_year", row)
         row = self._field(body, "Edition", "edition", row)
@@ -134,7 +136,7 @@ class BookForm(tk.Toplevel):
 
         ttk.Label(body, text="Physical Copy", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(18, 8))
         row += 1
-        row = self._field(body, "Format", "format", row, required=True, values=("Paperback", "Hardcover", "Mass Market Paperback", "Board Book", "Other"))
+        row = self._field(body, "Format", "format", row, required=True, values=format_values)
         row = self._field(body, "Condition", "condition", row, required=True, values=("Like New", "Very Good", "Good", "Acceptable", "Poor"))
         row = self._field(body, "Location", "location", row, values=self.service.list_locations())
         row = self._field(body, "Price (PHP)", "price", row, required=True)

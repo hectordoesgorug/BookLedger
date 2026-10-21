@@ -33,6 +33,10 @@ def tk_root():
         root.withdraw()
     except tk.TclError as exc:
         pytest.skip(f"Tk UI tests require a display: {exc}")
+    ttk_library = Path(str(root.tk.call("info", "library"))) / "ttk"
+    if not (ttk_library / "sizegrip.tcl").is_file():
+        root.destroy()
+        pytest.skip("Tk UI tests require the complete Tcl/Tk library; ttk/sizegrip.tcl is missing")
     yield root
     try:
         root.destroy()
@@ -76,37 +80,6 @@ def _walk_widgets(widget):
         yield from _walk_widgets(child)
 
 
-def test_settings_exposes_button_that_opens_the_diagnostic(tk_root, monkeypatch):
-    class SettingsHarness:
-        _build_metadata_sources = BookLedgerApp._build_metadata_sources
-        _provider_drag_start = BookLedgerApp._provider_drag_start
-        _provider_drag_motion = BookLedgerApp._provider_drag_motion
-        _provider_drag_end = BookLedgerApp._provider_drag_end
-        _reorder_provider_rows = BookLedgerApp._reorder_provider_rows
-
-    opened = []
-    harness = SettingsHarness()
-    harness.workspace = ttk.Frame(tk_root)
-    harness.provider_settings = SimpleNamespace(
-        enabled={descriptor.id: False for descriptor in PROVIDER_REGISTRY},
-        order=[descriptor.id for descriptor in PROVIDER_REGISTRY],
-    )
-    harness.provider_settings_store = SimpleNamespace(warning=None, active_path="config.json")
-    harness.open_isbn_lookup_test = lambda: opened.append("opened")
-    harness._save_provider_settings = lambda: None
-    harness._restore_provider_defaults = lambda: None
-
-    BookLedgerApp._build_metadata_sources(harness)
-    button = next(
-        child for child in _walk_widgets(harness.workspace)
-        if isinstance(child, ttk.Button) and child.cget("text") == "ISBN Lookup Test"
-    )
-    button.invoke()
-
-    assert opened == ["opened"]
-    assert all(value is False for value in harness.provider_settings.enabled.values())
-
-
 def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctional(tk_root):
     class SettingsHarness:
         _build_settings = BookLedgerApp._build_settings
@@ -115,16 +88,39 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
         _build_api_management = BookLedgerApp._build_api_management
         _build_storage_settings = BookLedgerApp._build_storage_settings
         _build_preferences = BookLedgerApp._build_preferences
+        _build_poster_setup = BookLedgerApp._build_poster_setup
+        _build_value_list_editor = BookLedgerApp._build_value_list_editor
+        _show_hover_tooltip = BookLedgerApp._show_hover_tooltip
+        _hide_hover_tooltip = BookLedgerApp._hide_hover_tooltip
         _provider_drag_start = BookLedgerApp._provider_drag_start
         _provider_drag_motion = BookLedgerApp._provider_drag_motion
         _provider_drag_end = BookLedgerApp._provider_drag_end
         _reorder_provider_rows = BookLedgerApp._reorder_provider_rows
+        _load_google_books_key = BookLedgerApp._load_google_books_key
 
     harness = SettingsHarness()
     harness.workspace = ttk.Frame(tk_root)
     harness.workspace.pack(fill="both", expand=True)
-    harness.paths = SimpleNamespace(data=Path("portable-data"), database=Path("portable-data/bookledger.sqlite3"))
+    harness.paths = SimpleNamespace(
+        root=Path("portable-data"), google_books_config=Path("portable-data/assets/google_books.json")
+    )
     harness.lifecycle = SimpleNamespace(trash_count=lambda: 1)
+    harness.catalog = SimpleNamespace(
+        list_genres=lambda: ("Science", "Fiction"),
+        list_formats=lambda: ("Paperback", "Hardcover"),
+        list_locations=lambda: ("Shelf", "Storage"),
+        value_assignment_count=lambda kind, value: int(kind == "genre" and value == "Science"),
+        location_assignment_count=lambda _value: 0,
+        add_genre=lambda value: value,
+        rename_genre=lambda old, new: new,
+        delete_genre=lambda _value: None,
+        add_format=lambda value: value,
+        rename_format=lambda old, new: new,
+        delete_format=lambda _value: None,
+        add_location=lambda value: value,
+        rename_location=lambda old, new: new,
+        delete_location=lambda _value: None,
+    )
     harness.provider_settings = SimpleNamespace(
         enabled={descriptor.id: True for descriptor in PROVIDER_REGISTRY},
         order=[descriptor.id for descriptor in PROVIDER_REGISTRY],
@@ -133,11 +129,16 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     actions = []
     for name in (
         "create_backup", "verify_database", "restore_backup", "restore_latest", "clear_trash",
-        "purge_data", "retry_storage_recovery", "manage_locations", "google_books_settings",
-        "open_isbn_lookup_test", "_save_provider_settings", "_restore_provider_defaults",
+        "purge_data", "retry_storage_recovery", "export_inventory_csv", "view_log", "clear_log",
+        "_toggle_logging", "_save_provider_settings", "_restore_provider_defaults",
+        "_save_google_books_key", "_remove_google_books_key", "_test_google_books_lookup",
     ):
         setattr(harness, name, lambda action=name: actions.append(action))
-    harness._open_path = lambda path: actions.append(("open_path", path))
+    harness._show_api_help = lambda provider: actions.append(("help", provider))
+    harness._logging_enabled = False
+    harness._logging_warning = ""
+    harness._configuration_warnings = ()
+    harness._load_google_books_key = lambda: ""
 
     harness._build_settings()
     tk_root.geometry("1280x800")
@@ -147,7 +148,7 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     assert notebook.winfo_width() >= 1000
     assert notebook.winfo_height() >= 600
     expected_tabs = (
-        "Mobile App Setup", "Metadata Sources", "API Management", "Storage and Backup", "Preferences",
+        "Mobile App Setup", "Metadata Sources", "API Management", "Storage and Backup", "Poster Setup", "Preferences",
     )
     assert tuple(notebook.tab(index, "text") for index in range(len(expected_tabs))) == expected_tabs
     assert {descriptor.name for descriptor in PROVIDER_REGISTRY} == {
@@ -160,20 +161,41 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     def texts(index):
         return tuple(str(widget.cget("text")) for widget in tab_widgets(index) if "text" in widget.keys())
 
-    assert "reserved for future development" in " ".join(texts(0))
+    mobile_text = " ".join(texts(0))
+    assert "reserved for future development" in mobile_text
+    assert not [widget for widget in tab_widgets(0) if isinstance(widget, ttk.Button)]
     metadata_text = " ".join(texts(1))
     for name in ("Open Library", "Google Books", "Booktopia", "ISBNdb", "WorldCat", "Internet Archive", "BigBook", "Hardcover", "Goodreads", "ISBN Lookup Test"):
         assert name in metadata_text
     api_text = " ".join(texts(2))
-    for name in ("Google Books API", "ISBNdb", "BigBook", "Hardcover", "unavailable until integration"):
+    for name in ("Google Books API key", "ISBNdb", "BigBook", "Hardcover", "unavailable until integrated"):
         assert name in api_text
     storage_text = " ".join(texts(3))
-    for name in ("Data folder:", "Database:", "Back Up Now", "Open Data Folder", "Verify Database", "Restore Backup…", "Restore Latest", "Clear Trash…", "Purge Data…", "Retry Storage Recovery"):
+    for name in ("Back Up Now", "Export to CSV…", "Verify Database", "Restore Backup…", "Undo Delete", "Clear Trash…", "Purge Data…", "Retry Recovery", "View Log", "Clear Log…", "Enable Logging"):
         assert name in storage_text
-    assert "Manage Locations…" not in storage_text and "Google Books API" not in storage_text
-    preferences_text = " ".join(texts(4))
-    assert "Manage Locations…" in preferences_text
-    assert "Approved genres" in preferences_text
+    assert "Data folder:" not in storage_text and "Database:" not in storage_text and "Open Data Folder" not in storage_text
+    assert "Google Books API key" not in storage_text
+    poster_text = " ".join(texts(4))
+    assert "reserved for future development" in poster_text
+    preferences_text = " ".join(texts(5))
+    assert all(name in preferences_text for name in ("Genre", "Format", "Location", "Themes", "Preview", "Apply"))
+    assert "Manage Locations" not in preferences_text
+    assert "not available yet" in preferences_text
+    preference_widgets = tab_widgets(5)
+    science_row = next(
+        widget for widget in preference_widgets
+        if isinstance(widget, ttk.Label) and widget.cget("text") == "Science"
+    ).master
+    delete_button = next(
+        widget for widget in science_row.winfo_children()
+        if isinstance(widget, ttk.Button) and widget.cget("text") == "Delete"
+    )
+    info_label = next(
+        widget for widget in science_row.winfo_children()
+        if isinstance(widget, ttk.Label) and widget.cget("text") == "ⓘ"
+    )
+    assert delete_button.instate(("disabled",))
+    assert info_label.bind("<Enter>")
 
     # Merely changing tabs does not invoke any Settings operation.
     for index in range(len(expected_tabs)):
@@ -185,34 +207,44 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
         [widget for widget in tab_widgets(index) if isinstance(widget, ttk.Button)]
         for index in range(len(expected_tabs))
     )
-    assert [button.cget("text") for button in buttons_by_tab[2]] == ["Google Books API"]
-    assert [button.cget("text") for button in buttons_by_tab[1]] == [
-        "Save Metadata Sources", "Restore Defaults", "ISBN Lookup Test",
-    ]
+    metadata_buttons = [button.cget("text") for button in buttons_by_tab[1]]
+    assert metadata_buttons == ["Save Metadata Sources", "Restore Defaults", "Test", "Clear"]
+    api_buttons = [button.cget("text") for button in buttons_by_tab[2]]
+    assert api_buttons == ["Show", "Test Lookup", "Save", "Remove", "?", "?", "?", "?"]
+    assert buttons_by_tab[0] == []
+    assert buttons_by_tab[3][0].cget("text") == "Back Up Now"
+    assert buttons_by_tab[3][0].cget("style") == ""
+    assert buttons_by_tab[4] == []
+    assert next(button for button in buttons_by_tab[3] if button.cget("text") == "View Log").instate(("disabled",))
+    assert next(button for button in buttons_by_tab[3] if button.cget("text") == "Clear Log…").instate(("disabled",))
 
     def invoke(tab_index, label):
         button = next(widget for widget in buttons_by_tab[tab_index] if widget.cget("text") == label)
         button.invoke()
 
-    invoke(1, "ISBN Lookup Test")
     invoke(1, "Save Metadata Sources")
     invoke(1, "Restore Defaults")
-    invoke(2, "Google Books API")
+    invoke(2, "Save")
+    invoke(2, "Remove")
+    invoke(2, "Test Lookup")
+    invoke(2, "?")
     invoke(3, "Back Up Now")
-    invoke(3, "Open Data Folder")
+    invoke(3, "Export to CSV…")
     invoke(3, "Verify Database")
     invoke(3, "Restore Backup…")
-    invoke(3, "Restore Latest")
+    invoke(3, "Undo Delete")
     invoke(3, "Clear Trash…")
     invoke(3, "Purge Data…")
-    invoke(3, "Retry Storage Recovery")
-    invoke(4, "Manage Locations…")
+    invoke(3, "Retry Recovery")
+    invoke(3, "View Log")
+    invoke(3, "Clear Log…")
     assert [action for action in actions if isinstance(action, str)] == [
-        "open_isbn_lookup_test", "_save_provider_settings", "_restore_provider_defaults",
-        "google_books_settings", "create_backup", "verify_database", "restore_backup",
-        "restore_latest", "clear_trash", "purge_data", "retry_storage_recovery", "manage_locations",
+        "_save_provider_settings", "_restore_provider_defaults", "_save_google_books_key",
+        "_remove_google_books_key", "_test_google_books_lookup", "create_backup", "export_inventory_csv",
+        "verify_database", "restore_backup", "restore_latest", "clear_trash", "purge_data",
+        "retry_storage_recovery",
     ]
-    assert actions[5] == ("open_path", Path("portable-data"))
+    assert ("help", "Google Books") in actions
 
 
 def test_app_opens_diagnostic_with_existing_api_key_without_saving_settings(monkeypatch):
@@ -229,6 +261,36 @@ def test_app_opens_diagnostic_with_existing_api_key_without_saving_settings(monk
 
     assert result == "dialog"
     assert calls == [(subject, "existing-key")]
+
+
+def test_google_books_test_lookup_does_not_save_the_draft_key(monkeypatch):
+    calls = []
+    result = SimpleNamespace(status="No data", failure_kind=None, error="must not surface")
+
+    class Provider:
+        def __init__(self, api_key):
+            calls.append(("provider", api_key))
+
+        def lookup(self, isbn):
+            calls.append(("lookup", isbn))
+            return result
+
+    monkeypatch.setattr(app_module, "GoogleBooksProvider", Provider)
+    monkeypatch.setattr(app_module.threading, "Thread", ImmediateThread)
+    subject = SimpleNamespace(
+        google_books_key_var=SimpleNamespace(get=lambda: "draft-key"),
+        google_books_api_status=SimpleNamespace(set=lambda value: calls.append(("status", value))),
+        _save_google_books_key=lambda: (_ for _ in ()).throw(AssertionError("test must not save credentials")),
+        winfo_exists=lambda: True,
+        after=lambda _delay, callback: callback(),
+    )
+
+    BookLedgerApp._test_google_books_lookup(subject)
+
+    assert ("provider", "draft-key") in calls
+    assert ("lookup", "9780306406157") in calls
+    assert any("metadata lookup succeeded" in value for kind, value in calls if kind == "status")
+    assert all("must not surface" not in value for kind, value in calls if kind == "status")
 
 
 def test_dialog_lists_registered_providers_even_when_normal_lookup_disables_them(dialog):

@@ -6,6 +6,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from bookledger.config_store import AppConfigStore
 from bookledger.provider_registry import DEFAULT_PROVIDER_IDS, PROVIDERS_BY_ID
 
 
@@ -62,13 +63,27 @@ class ProviderSettings:
 class ProviderSettingsStore:
     """Versioned provider configuration with a per-user fallback for read-only roots."""
 
-    def __init__(self, portable_path: Path, fallback_path: Path):
+    def __init__(self, portable_path: Path, fallback_path: Path, *, config_store: AppConfigStore | None = None):
         self.portable_path = Path(portable_path)
         self.fallback_path = Path(fallback_path)
+        self.config_store = config_store
         self.warning: str | None = None
         self.active_path = self.portable_path
 
     def load(self) -> ProviderSettings:
+        if self.config_store is not None:
+            document = self.config_store.load_document()
+            self.active_path = self.config_store.active_path
+            self.warning = self.config_store.warning
+            settings_document = {
+                "version": document.get("version", CONFIG_VERSION),
+                "metadata_providers": document.get("metadata_providers", {}),
+            }
+            try:
+                return ProviderSettings.from_document(settings_document)
+            except ValueError as exc:
+                self.warning = f"Provider settings are invalid and safe defaults are active: {exc}"
+                return ProviderSettings.defaults()
         prior_warning = None
         for path in (self.portable_path, self.fallback_path):
             if not path.is_file():
@@ -91,6 +106,11 @@ class ProviderSettingsStore:
         return ProviderSettings.defaults()
 
     def save(self, settings: ProviderSettings) -> Path:
+        if self.config_store is not None:
+            path = self.config_store.update_document(lambda existing: settings.to_document(existing))
+            self.active_path = path
+            self.warning = self.config_store.warning
+            return path
         path = self.active_path
         existing = {}
         if path.exists():

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sqlite3
@@ -71,7 +70,7 @@ class AppPaths:
     def legacy_data(self) -> Path:
         return self.root / "BookLedger_Data"
 
-    def prepare(self, *, migrate_profile_config: bool = True) -> None:
+    def prepare(self) -> None:
         """Migrate legacy files before the application can create a fresh database."""
         legacy_db = self.legacy_data / "bookledger.sqlite3"
         if self.database.exists() and legacy_db.exists():
@@ -82,18 +81,6 @@ class AppPaths:
             folder.mkdir(parents=True, exist_ok=True)
         if legacy_db.exists():
             self._migrate_legacy(legacy_db)
-        profile_config = self._profile_google_books_config() if migrate_profile_config else None
-        if profile_config and profile_config.is_file():
-            if self.google_books_config.exists():
-                try:
-                    profile_key = json.loads(profile_config.read_text(encoding="utf-8")).get("api_key", "")
-                    portable_key = json.loads(self.google_books_config.read_text(encoding="utf-8")).get("api_key", "")
-                except (OSError, ValueError, AttributeError) as exc:
-                    raise RuntimeError("Both profile and portable Google Books settings exist but could not be compared safely.") from exc
-                if profile_key != portable_key:
-                    raise RuntimeError("Profile and portable Google Books settings differ. Resolve the settings conflict before starting.")
-            else:
-                shutil.copy2(profile_config, self.google_books_config)
         # Prove the selected writable root is writable now, with a managed probe.
         probe = self.data / ".write-test"
         try:
@@ -106,19 +93,6 @@ class AppPaths:
     def _profile_google_books_config() -> Path | None:
         local_app_data = os.environ.get("LOCALAPPDATA")
         return Path(local_app_data) / "BookLedger" / "google_books.json" if local_app_data else None
-
-    def finalize_profile_config_migration(self) -> None:
-        """Remove the legacy profile copy only after its value is portable and valid."""
-        profile_config = self._profile_google_books_config()
-        if not profile_config or not profile_config.is_file() or not self.google_books_config.is_file():
-            return
-        try:
-            profile_value = json.loads(profile_config.read_text(encoding="utf-8"))
-            portable_value = json.loads(self.google_books_config.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return
-        if profile_value.get("api_key", "") == portable_value.get("api_key", ""):
-            profile_config.unlink()
 
     def _migrate_legacy(self, legacy_db: Path) -> None:
         """Copy and validate the old tree; keep it intact as a recovery source."""
@@ -139,10 +113,6 @@ class AppPaths:
                 origin = self.legacy_data / name
                 if origin.exists():
                     shutil.copytree(origin, temp_root / name, dirs_exist_ok=True)
-            profile_config = self._profile_google_books_config()
-            if profile_config and profile_config.is_file() and not (temp_root / "assets" / "google_books.json").exists():
-                (temp_root / "assets").mkdir(exist_ok=True)
-                shutil.copy2(profile_config, temp_root / "assets" / "google_books.json")
             check = sqlite3.connect(staged_db)
             try:
                 result = check.execute("PRAGMA integrity_check").fetchone()

@@ -65,11 +65,11 @@ def elapsed_color(elapsed_seconds: float) -> str:
     return TIME_FAST_COLOR if elapsed_seconds <= 3.0 else TIME_SLOW_COLOR
 
 
-class MetadataProviderTestDialog(tk.Toplevel):
-    """Run one registered metadata adapter without saving or merging a book."""
+class _MetadataProviderTestView:
+    """Shared UI and behavior for embedded and standalone diagnostic views."""
 
-    def __init__(self, parent, *, google_books_api_key: str = "", providers=None):
-        super().__init__(parent)
+    def _initialize_test_view(self, parent, *, google_books_api_key="", providers=None, embedded=False):
+        self._embedded = embedded
         self._providers = tuple(
             descriptor for descriptor in (providers if providers is not None else PROVIDER_REGISTRY)
         )
@@ -85,19 +85,12 @@ class MetadataProviderTestDialog(tk.Toplevel):
         self._field_status_vars: dict[str, tk.StringVar] = {}
         self._field_status_labels = {}
 
-        self.title("ISBN Lookup Test")
-        self.geometry("500x560")
-        self.minsize(420, 500)
-        self.transient(parent)
-        self.grab_set()
-
         self.isbn_var = tk.StringVar(value="")
         self.provider_var = tk.StringVar(value=self._providers[0].name if self._providers else "")
         self.overall_status_var = tk.StringVar(value="Ready")
         self.fetch_time_var = tk.StringVar(value="—")
         self.validation_var = tk.StringVar(value="")
         self._build()
-        self.protocol("WM_DELETE_WINDOW", self._request_close)
         self.bind("<Return>", self._block_enter_submission)
         self.bind("<KP_Enter>", self._block_enter_submission)
         self.bind("<Destroy>", self._on_destroy, add="+")
@@ -152,8 +145,10 @@ class MetadataProviderTestDialog(tk.Toplevel):
         self.test_button.pack(side="left")
         self.clear_button = ttk.Button(controls, text="Clear", command=self.clear)
         self.clear_button.pack(side="left", padx=(8, 0))
-        self.close_button = ttk.Button(controls, text="Close", command=self._request_close)
-        self.close_button.pack(side="right")
+        self.close_button = None
+        if not self._embedded:
+            self.close_button = ttk.Button(controls, text="Close", command=self._request_close)
+            self.close_button.pack(side="right")
 
     def _block_enter_submission(self, _event=None):
         # Tests are started only by the explicit button, preventing duplicate
@@ -184,7 +179,8 @@ class MetadataProviderTestDialog(tk.Toplevel):
         self._busy = busy
         self.test_button.configure(state="disabled" if busy else "normal")
         self.clear_button.configure(state="disabled" if busy else "normal")
-        self.close_button.configure(state="disabled" if busy else "normal")
+        if self.close_button is not None:
+            self.close_button.configure(state="disabled" if busy else "normal")
         self.isbn_entry.configure(state="disabled" if busy else "normal")
         self.provider_combo.configure(state="disabled" if busy else "readonly")
 
@@ -310,7 +306,10 @@ class MetadataProviderTestDialog(tk.Toplevel):
 
     def _request_close(self):
         if not self._busy and not self._destroyed:
-            self.destroy()
+            if self._embedded:
+                self.clear()
+            else:
+                self.destroy()
 
     def _on_destroy(self, event):
         if event.widget is not self:
@@ -324,3 +323,35 @@ class MetadataProviderTestDialog(tk.Toplevel):
             except tk.TclError:
                 pass
             self._poll_after_id = None
+
+
+class MetadataProviderTestPanel(ttk.Frame, _MetadataProviderTestView):
+    """Embedded ISBN lookup diagnostic that never saves or merges a book."""
+
+    def __init__(self, parent, *, google_books_api_key: str = "", providers=None):
+        ttk.Frame.__init__(self, parent)
+        self._initialize_test_view(
+            parent,
+            google_books_api_key=google_books_api_key,
+            providers=providers,
+            embedded=True,
+        )
+
+
+class MetadataProviderTestDialog(tk.Toplevel, _MetadataProviderTestView):
+    """Standalone wrapper retained for existing callers of the diagnostic."""
+
+    def __init__(self, parent, *, google_books_api_key: str = "", providers=None):
+        tk.Toplevel.__init__(self, parent)
+        self.title("ISBN Lookup Test")
+        self.geometry("500x560")
+        self.minsize(420, 500)
+        self.transient(parent)
+        self.grab_set()
+        self._initialize_test_view(
+            parent,
+            google_books_api_key=google_books_api_key,
+            providers=providers,
+            embedded=False,
+        )
+        self.protocol("WM_DELETE_WINDOW", self._request_close)

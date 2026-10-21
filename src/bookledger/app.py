@@ -1,20 +1,25 @@
 from __future__ import annotations
+import csv
+import logging
+import os
+import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import shutil
 import sqlite3
 import sys
-import json
 import threading
+from decimal import Decimal
 from calendar import monthrange
 from datetime import date
 from PIL import Image, ImageTk
 
 from bookledger import __version__
-from bookledger.config import APP_NAME, APPROVED_GENRES, COPY_STATUSES
+from bookledger.config import APP_NAME, COPY_STATUSES
 from bookledger.db.database import Database
 from bookledger.paths import AppPaths
+from bookledger.config_store import AppConfigStore
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService, SALE_VOID_REASONS
 from bookledger.services.reports import ReportService
@@ -25,7 +30,7 @@ from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
 from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
-from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog
+from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
 
 try:
     import ttkbootstrap as tb
@@ -51,12 +56,28 @@ class BookLedgerApp(_WindowBase):
             if not migration_report.ok:
                 raise RuntimeError(f"Portable migration verification failed; legacy data was preserved.\n{migration_report.message}")
             self.paths.finalize_legacy_migration()
-        self.paths.finalize_profile_config_migration()
-        self.provider_settings_store = ProviderSettingsStore(
+        self.config_store = AppConfigStore(
             self.paths.provider_config, self.paths.provider_config_fallback()
         )
+        self._configuration_warnings = self.config_store.migrate_legacy_settings(
+            self.db,
+            self.paths.google_books_config,
+            self.paths._profile_google_books_config(),
+        )
+        self.provider_settings_store = ProviderSettingsStore(
+            self.paths.provider_config,
+            self.paths.provider_config_fallback(),
+            config_store=self.config_store,
+        )
         self.provider_settings = self.provider_settings_store.load()
-        self.catalog = CatalogService(self.db, self.paths.data)
+        if self._configuration_warnings and not self.provider_settings_store.warning:
+            self.provider_settings_store.warning = " ".join(self._configuration_warnings)
+        self.catalog = CatalogService(self.db, self.paths.data, config_store=self.config_store)
+        self._optional_logger = logging.getLogger("bookledger.optional_diagnostics")
+        self._logging_enabled = self._read_logging_enabled()
+        self._logging_warning = self._configure_optional_logging(self._logging_enabled) if self._logging_enabled else ""
+        if self._logging_enabled and not self._logging_warning:
+            self._optional_logger.info("application_started")
         self.reports = ReportService(self.db)
         self.photos = PhotoService(self.paths.photos, self.paths.trash)
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
@@ -203,7 +224,7 @@ class BookLedgerApp(_WindowBase):
         self.status_filter = tk.StringVar(value="All")
         locations = self.catalog.list_locations()
         filter_specs = (
-            ("Genre", self.genre_filter, ("All",) + APPROVED_GENRES, 20),
+            ("Genre", self.genre_filter, ("All",) + self.catalog.list_genres(), 20),
             ("Condition", self.condition_filter, ("All", "Like New", "Very Good", "Good", "Acceptable", "Poor"), 13),
             ("Location", self.location_filter, ("All",) + locations, 14),
             ("Status", self.status_filter, ("All",) + COPY_STATUSES, 13),
@@ -840,9 +861,10 @@ class BookLedgerApp(_WindowBase):
             "Metadata Sources",
             "API Management",
             "Storage and Backup",
+            "Poster Setup",
             "Preferences",
         ):
-            tab = ttk.Frame(notebook, padding=16)
+            tab = ttk.Frame(notebook, padding=12)
             notebook.add(tab, text=name)
             tabs[name] = tab
 
@@ -850,66 +872,24 @@ class BookLedgerApp(_WindowBase):
         self._build_metadata_sources(tabs["Metadata Sources"])
         self._build_api_management(tabs["API Management"])
         self._build_storage_settings(tabs["Storage and Backup"])
+        self._build_poster_setup(tabs["Poster Setup"])
         self._build_preferences(tabs["Preferences"])
 
     def _build_mobile_app_setup(self, parent):
-        panel = ttk.LabelFrame(parent, text="Mobile App Setup", padding=18)
-        panel.pack(fill="x", anchor="n")
         ttk.Label(
-            panel,
-            text="Mobile app setup is reserved for future development. No mobile functionality is currently available.",
-            wraplength=900,
-        ).pack(anchor="w")
+            parent,
+            text="Mobile app setup is reserved for future development.",
+            foreground="#64748b",
+        ).pack(anchor="nw")
 
-    def _build_storage_settings(self, parent):
-        panel = ttk.LabelFrame(parent, text="Portable data and backups", padding=18)
-        panel.pack(fill="x", anchor="n")
-        ttk.Label(panel, text=f"Data folder: {self.paths.data}", wraplength=850).pack(anchor="w", pady=(0, 8))
-        ttk.Label(panel, text=f"Database: {self.paths.database}", wraplength=850).pack(anchor="w", pady=(0, 12))
-        row = ttk.Frame(panel)
-        row.pack(anchor="w")
-        ttk.Button(row, text="Back Up Now", style="Primary.TButton", command=self.create_backup).pack(side="left", padx=(0, 8))
-        ttk.Button(row, text="Open Data Folder", command=lambda: self._open_path(self.paths.data)).pack(side="left", padx=8)
-        ttk.Button(row, text="Verify Database", command=self.verify_database).pack(side="left", padx=8)
-        ttk.Button(row, text="Restore Backup…", command=self.restore_backup).pack(side="left", padx=8)
-        trash_row = ttk.Frame(panel)
-        trash_row.pack(anchor="w", pady=(10, 0))
-        count = self.lifecycle.trash_count()
-        ttk.Button(trash_row, text="Restore Latest", state="normal" if count else "disabled", command=self.restore_latest).pack(side="left", padx=(0, 8))
-        ttk.Button(trash_row, text="Clear Trash…", state="normal" if count else "disabled", command=self.clear_trash).pack(side="left", padx=8)
-        ttk.Button(trash_row, text="Purge Data…", command=self.purge_data).pack(side="left", padx=8)
-        ttk.Button(trash_row, text="Retry Storage Recovery", command=self.retry_storage_recovery).pack(side="left", padx=8)
+    def _build_metadata_sources(self, parent):
+        parent.columnconfigure(0, weight=3, uniform="metadata")
+        parent.columnconfigure(1, weight=2, uniform="metadata")
+        parent.rowconfigure(0, weight=1)
 
-    def _build_preferences(self, parent):
-        locations = ttk.LabelFrame(parent, text="Locations", padding=16)
-        locations.pack(fill="x", anchor="n")
-        ttk.Button(locations, text="Manage Locations…", command=self.manage_locations).pack(anchor="w")
-
-        genres = ttk.LabelFrame(parent, text="Approved genres", padding=16)
-        genres.pack(fill="x", pady=(14, 0), anchor="n")
-        ttk.Label(genres, text=" · ".join(APPROVED_GENRES), wraplength=900).pack(anchor="w")
-        ttk.Label(genres, text="Genre options are controlled by the v1 approved list. Unknown provider categories must be recategorized before saving.", foreground="#64748b", wraplength=900).pack(anchor="w", pady=(8, 0))
-
-    def _build_api_management(self, parent):
-        google_books = ttk.LabelFrame(parent, text="Google Books API", padding=16)
-        google_books.pack(fill="x", anchor="n")
-        ttk.Label(
-            google_books,
-            text="Google Books works without an API key for this integration. An optional key can be configured and tested here.",
-            wraplength=900,
-        ).pack(anchor="w", pady=(0, 10))
-        ttk.Button(google_books, text="Google Books API", command=self.google_books_settings).pack(anchor="w")
-
-        planned = ttk.LabelFrame(parent, text="Planned API integrations", padding=16)
-        planned.pack(fill="x", pady=(14, 0), anchor="n")
-        for name in ("ISBNdb", "BigBook", "Hardcover"):
-            ttk.Label(planned, text=f"{name} — API configuration unavailable until integration is implemented.", wraplength=900).pack(anchor="w", pady=2)
-
-    def _build_metadata_sources(self, parent=None):
-        parent = self.workspace if parent is None else parent
-        panel = ttk.LabelFrame(parent, text="Metadata Sources", padding=16)
-        panel.pack(fill="x", anchor="n", pady=(0, 14))
-        ttk.Label(panel, text="Enabled sources are searched from top to bottom. Drag a source by its handle to change priority.", wraplength=900).pack(anchor="w")
+        panel = ttk.LabelFrame(parent, text="Metadata Sources", padding=12)
+        panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        ttk.Label(panel, text="Enabled sources are searched from top to bottom. Drag a source by its handle to change priority.", wraplength=560).pack(anchor="w")
         self._provider_rows = {}
         self._provider_variables = {}
         rows = ttk.Frame(panel)
@@ -937,16 +917,264 @@ class BookLedgerApp(_WindowBase):
         controls.pack(fill="x", pady=(6, 0))
         ttk.Button(controls, text="Save Metadata Sources", command=self._save_provider_settings).pack(side="left")
         ttk.Button(controls, text="Restore Defaults", command=self._restore_provider_defaults).pack(side="left", padx=8)
-        ttk.Button(controls, text="ISBN Lookup Test", command=self.open_isbn_lookup_test).pack(side="right")
         warning = self.provider_settings_store.warning or ""
         config_path = self.provider_settings_store.active_path
         self._provider_config_status = tk.StringVar(value=warning or f"Settings file: {config_path}")
-        ttk.Label(panel, textvariable=self._provider_config_status, foreground="#64748b", wraplength=900).pack(anchor="w", pady=(8, 0))
+        ttk.Label(panel, textvariable=self._provider_config_status, foreground="#64748b", wraplength=560).pack(anchor="w", pady=(8, 0))
 
         planned = ttk.LabelFrame(parent, text="Planned metadata integrations", padding=16)
-        planned.pack(fill="x", anchor="n")
+        planned.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
         for name in ("ISBNdb", "WorldCat", "Internet Archive", "BigBook", "Hardcover", "Goodreads"):
-            ttk.Label(planned, text=f"{name} — planned; not integrated.", wraplength=900).pack(anchor="w", pady=2)
+            ttk.Label(planned, text=f"{name} — planned; not integrated.", wraplength=560).pack(anchor="w", pady=2)
+
+        diagnostic = ttk.LabelFrame(parent, text="ISBN Lookup Test", padding=10)
+        diagnostic.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        ttk.Label(
+            diagnostic,
+            text="Test one provider's metadata retrieval capability to diagnose missing metadata or provider failures.",
+            wraplength=390,
+        ).pack(anchor="w", pady=(0, 6))
+        self._provider_test_panel = MetadataProviderTestPanel(
+            diagnostic, google_books_api_key=self._load_google_books_key()
+        )
+        self._provider_test_panel.pack(fill="both", expand=True)
+
+    def _build_api_management(self, parent):
+        parent.columnconfigure(1, weight=1)
+        google = ttk.LabelFrame(parent, text="Google Books", padding=12)
+        google.pack(fill="x", anchor="n")
+        ttk.Label(
+            google,
+            text="The optional key identifies BookLedger for public Google Books lookups. Test Lookup runs a sample ISBN metadata request.",
+            wraplength=920,
+        ).grid(row=0, column=0, columnspan=7, sticky="w", pady=(0, 8))
+        ttk.Label(google, text="Google Books API key").grid(row=1, column=0, sticky="w", padx=(0, 8))
+        self.google_books_key_var = tk.StringVar(value=self._load_google_books_key())
+        self.google_books_key_entry = ttk.Entry(google, textvariable=self.google_books_key_var, show="•", width=28)
+        self.google_books_key_entry.grid(row=1, column=1, sticky="ew", padx=(0, 6))
+        self.google_books_show_var = tk.BooleanVar(value=False)
+
+        def toggle_key_visibility():
+            visible = self.google_books_show_var.get()
+            self.google_books_key_entry.configure(show="" if visible else "•")
+            show_button.configure(text="Hide" if visible else "Show")
+
+        show_button = ttk.Button(google, text="Show", command=lambda: (self.google_books_show_var.set(not self.google_books_show_var.get()), toggle_key_visibility()))
+        show_button.grid(row=1, column=2, padx=3)
+        ttk.Button(google, text="Test Lookup", command=self._test_google_books_lookup).grid(row=1, column=3, padx=3)
+        ttk.Button(google, text="Save", command=self._save_google_books_key).grid(row=1, column=4, padx=3)
+        ttk.Button(google, text="Remove", command=self._remove_google_books_key).grid(row=1, column=5, padx=3)
+        ttk.Button(google, text="?", width=3, command=lambda: self._show_api_help("Google Books")).grid(row=1, column=6, padx=(3, 0))
+        configuration_messages = list(self._configuration_warnings)
+        if self.provider_settings_store.warning and self.provider_settings_store.warning not in configuration_messages:
+            configuration_messages.insert(0, self.provider_settings_store.warning)
+        config_warning = " ".join(configuration_messages)
+        self.google_books_api_status = tk.StringVar(
+            value=config_warning or "API key is optional; saved keys remain masked."
+        )
+        ttk.Label(google, textvariable=self.google_books_api_status, foreground="#64748b", wraplength=920).grid(row=2, column=0, columnspan=7, sticky="w", pady=(8, 0))
+
+        planned = ttk.LabelFrame(parent, text="Planned API integrations", padding=12)
+        planned.pack(fill="x", anchor="n", pady=(12, 0))
+        for row, name in enumerate(("ISBNdb", "BigBook", "Hardcover")):
+            ttk.Label(planned, text=name, width=18).grid(row=row, column=0, sticky="w", pady=3)
+            ttk.Label(planned, text="Planned · API configuration unavailable until integrated.").grid(row=row, column=1, sticky="w", pady=3)
+            ttk.Button(planned, text="?", width=3, command=lambda provider=name: self._show_api_help(provider)).grid(row=row, column=2, padx=(8, 0))
+
+    def _show_api_help(self, provider):
+        if provider == "Google Books":
+            messagebox.showinfo(
+                "Google Books API Help",
+                "BookLedger uses the Google Books API to retrieve public book metadata. An API key identifies the application and is optional for the current integration. Google explains API keys and credentials here:\n\nhttps://developers.google.com/books/docs/v1/using",
+                parent=self,
+            )
+        else:
+            messagebox.showinfo(
+                f"{provider} Help",
+                f"{provider} is planned but is not integrated. BookLedger cannot configure credentials or connect to this provider yet.",
+                parent=self,
+            )
+
+    def _build_storage_settings(self, parent):
+        parent.columnconfigure((0, 1, 2), weight=1, uniform="storage")
+        backups = ttk.LabelFrame(parent, text="Backup and verification", padding=12)
+        backups.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        ttk.Button(backups, text="Back Up Now", command=self.create_backup).pack(fill="x", pady=3)
+        ttk.Button(backups, text="Restore Backup…", command=self.restore_backup).pack(fill="x", pady=3)
+        ttk.Button(backups, text="Export to CSV…", command=self.export_inventory_csv).pack(fill="x", pady=3)
+        ttk.Button(backups, text="Verify Database", command=self.verify_database).pack(fill="x", pady=3)
+
+        recovery = ttk.LabelFrame(parent, text="Copy and storage recovery", padding=12)
+        recovery.grid(row=0, column=1, sticky="nsew", padx=6)
+        count = self.lifecycle.trash_count()
+        ttk.Button(recovery, text="Undo Delete", state="normal" if count else "disabled", command=self.restore_latest).pack(fill="x", pady=3)
+        ttk.Button(recovery, text="Retry Recovery", command=self.retry_storage_recovery).pack(fill="x", pady=3)
+        ttk.Button(recovery, text="Clear Trash…", state="normal" if count else "disabled", command=self.clear_trash).pack(fill="x", pady=3)
+        ttk.Button(recovery, text="Purge Data…", command=self.purge_data).pack(fill="x", pady=3)
+
+        logging_panel = ttk.LabelFrame(parent, text="Diagnostic log", padding=12)
+        logging_panel.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
+        self.logging_var = tk.BooleanVar(value=self._logging_enabled)
+        self.view_log_button = ttk.Button(logging_panel, text="View Log", command=self.view_log, state="normal" if self._logging_enabled else "disabled")
+        self.view_log_button.pack(fill="x", pady=3)
+        self.clear_log_button = ttk.Button(logging_panel, text="Clear Log…", command=self.clear_log, state="normal" if self._logging_enabled else "disabled")
+        self.clear_log_button.pack(fill="x", pady=3)
+        ttk.Checkbutton(logging_panel, text="Enable Logging", variable=self.logging_var, command=self._toggle_logging).pack(anchor="w", pady=(8, 3))
+        self.logging_status_var = tk.StringVar(value=self._logging_warning or ("Logging is enabled." if self._logging_enabled else "Logging is off."))
+        ttk.Label(logging_panel, textvariable=self.logging_status_var, foreground="#64748b", wraplength=220).pack(anchor="w", pady=(4, 0))
+
+    def _build_poster_setup(self, parent):
+        ttk.Label(parent, text="Poster setup is reserved for future development.", foreground="#64748b").pack(anchor="nw")
+
+    def _build_preferences(self, parent):
+        parent.columnconfigure((0, 1), weight=1, uniform="preferences")
+        parent.rowconfigure((0, 1), weight=1, uniform="preferences_rows")
+        self._build_value_list_editor(
+            parent, "Genre", "genre", self.catalog.list_genres,
+            lambda value: self.catalog.value_assignment_count("genre", value),
+            self.catalog.add_genre, self.catalog.rename_genre, self.catalog.delete_genre,
+            row=0, column=0,
+        )
+        self._build_value_list_editor(
+            parent, "Format", "format", self.catalog.list_formats,
+            lambda value: self.catalog.value_assignment_count("format", value),
+            self.catalog.add_format, self.catalog.rename_format, self.catalog.delete_format,
+            row=0, column=1,
+        )
+        self._build_value_list_editor(
+            parent, "Location", "location", self.catalog.list_locations,
+            self.catalog.location_assignment_count,
+            self.catalog.add_location, self.catalog.rename_location, self.catalog.delete_location,
+            row=1, column=0,
+        )
+        themes = ttk.LabelFrame(parent, text="Themes", padding=12)
+        themes.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        ttk.Label(themes, text="Theme selection is not available yet.", foreground="#64748b").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(themes, text="Themes:").grid(row=1, column=0, sticky="w", padx=(0, 6))
+        ttk.Combobox(themes, values=("Unavailable",), state="disabled", width=22).grid(row=1, column=1, sticky="ew")
+        ttk.Button(themes, text="Preview", state="disabled").grid(row=2, column=0, pady=(10, 0), sticky="w")
+        ttk.Button(themes, text="Apply", state="disabled").grid(row=2, column=1, pady=(10, 0), sticky="w")
+
+    def _build_value_list_editor(self, parent, title, kind, list_values, assignment_count, add_value, rename_value, delete_value, *, row, column):
+        panel = ttk.LabelFrame(parent, text=title, padding=10)
+        panel.grid(row=row, column=column, sticky="nsew", padx=(0, 6) if column == 0 else (6, 0), pady=(0, 6) if row == 0 else (6, 0))
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(0, weight=1)
+        list_frame = ttk.Frame(panel)
+        list_frame.grid(row=0, column=0, sticky="nsew")
+        list_frame.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(list_frame, height=166, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        rows = ttk.Frame(canvas)
+        rows.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        window_id = canvas.create_window((0, 0), window=rows, anchor="nw")
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window_id, width=event.width))
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        list_frame.columnconfigure(0, weight=1)
+
+        status_var = tk.StringVar(value="")
+        ttk.Label(panel, textvariable=status_var, foreground="#64748b", wraplength=420).grid(row=1, column=0, sticky="w", pady=(5, 4))
+        add_row = ttk.Frame(panel)
+        add_row.grid(row=2, column=0, sticky="ew")
+        add_entry = ttk.Entry(add_row)
+        add_entry.pack(side="left", fill="x", expand=True)
+
+        def refresh():
+            for child in rows.winfo_children():
+                child.destroy()
+            for index, value in enumerate(list_values()):
+                item = ttk.Frame(rows)
+                item.grid(row=index, column=0, sticky="ew", pady=1)
+                item.columnconfigure(0, weight=1)
+                name_label = ttk.Label(item, text=value, anchor="w")
+                name_label.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+                count = assignment_count(value)
+                rename_button = ttk.Button(item, text="Rename", width=8)
+                delete_button = ttk.Button(
+                    item, text="Delete", width=7,
+                    state="disabled" if count else "normal",
+                    command=lambda name=value: delete(name),
+                )
+                rename_button.grid(row=0, column=1, padx=2)
+                delete_button.grid(row=0, column=2, padx=2)
+                if count:
+                    explanation = f"Cannot delete this {kind} because one or more books are assigned to it. Rename it to migrate the assignments, or update those books first."
+                    info = ttk.Label(item, text="ⓘ", foreground="#64748b", cursor="question_arrow")
+                    info.grid(row=0, column=3, padx=(4, 0))
+                    info.bind("<Enter>", lambda event, message=explanation: self._show_hover_tooltip(event, message))
+                    info.bind("<Leave>", self._hide_hover_tooltip)
+                    delete_button.bind("<Enter>", lambda event, message=explanation: self._show_hover_tooltip(event, message))
+                    delete_button.bind("<Leave>", self._hide_hover_tooltip)
+
+                def begin_rename(old_value=value, row_widget=item, label_widget=name_label, button=rename_button):
+                    label_widget.grid_remove()
+                    button.grid_remove()
+                    edit = ttk.Entry(row_widget)
+                    edit.insert(0, old_value)
+                    edit.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+
+                    def save_rename():
+                        try:
+                            replacement = rename_value(old_value, edit.get())
+                        except (ValueError, OSError, sqlite3.Error) as exc:
+                            status_var.set(str(exc))
+                            return
+                        status_var.set(f"{title} saved.")
+                        refresh()
+
+                    ttk.Button(row_widget, text="Save", width=7, command=save_rename).grid(row=0, column=1, padx=2)
+                    ttk.Button(row_widget, text="Cancel", width=7, command=refresh).grid(row=0, column=2, padx=2)
+                    edit.focus_set()
+                    edit.selection_range(0, "end")
+
+                rename_button.configure(command=begin_rename)
+            canvas.yview_moveto(0)
+
+        def add():
+            try:
+                value = add_value(add_entry.get())
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                status_var.set(str(exc))
+                return
+            add_entry.delete(0, "end")
+            status_var.set(f"{title} added.")
+            refresh()
+            canvas.yview_moveto(1.0)
+
+        def delete(value):
+            try:
+                delete_value(value)
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                status_var.set(str(exc))
+                refresh()
+                return
+            status_var.set(f"{title} deleted.")
+            refresh()
+
+        ttk.Button(add_row, text="Add New", command=add).pack(side="left", padx=(6, 0))
+        refresh()
+
+    def _show_hover_tooltip(self, event, message):
+        self._hide_hover_tooltip()
+        try:
+            tip = tk.Toplevel(self)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{event.x_root + 12}+{event.y_root + 12}")
+            ttk.Label(tip, text=message, wraplength=340, padding=8, relief="solid").pack()
+            self._hover_tooltip = tip
+        except tk.TclError:
+            self._hover_tooltip = None
+
+    def _hide_hover_tooltip(self, _event=None):
+        tip = getattr(self, "_hover_tooltip", None)
+        if tip is not None:
+            try:
+                tip.destroy()
+            except tk.TclError:
+                pass
+            self._hover_tooltip = None
 
     def _provider_drag_start(self, event, provider_id):
         self._provider_drag_id = provider_id
@@ -1007,10 +1235,82 @@ class BookLedgerApp(_WindowBase):
 
     def _load_google_books_key(self):
         try:
-            value = json.loads(self.paths.google_books_config.read_text(encoding="utf-8")).get("api_key", "")
-            return str(value or "")
+            value = self.config_store.get(("api_keys", "google_books"), "")
+            return value if isinstance(value, str) else ""
         except (OSError, ValueError, AttributeError):
             return ""
+
+    def _apply_google_books_key(self, api_key):
+        self.metadata_lookup = MetadataLookupService(
+            build_providers(self.provider_settings, api_key)
+        )
+        panel = getattr(self, "_provider_test_panel", None)
+        if panel is not None:
+            panel._google_books_api_key = api_key
+
+    def _save_google_books_key(self):
+        try:
+            api_key = self.google_books_key_var.get().strip()
+            self.config_store.set(("api_keys", "google_books"), api_key)
+            self._apply_google_books_key(api_key)
+        except (OSError, ValueError) as exc:
+            self.google_books_api_status.set(f"Could not save Google Books settings: {exc}")
+            return False
+        self.google_books_api_status.set("Google Books API settings saved.")
+        return True
+
+    def _remove_google_books_key(self):
+        if not messagebox.askyesno(
+            "Remove Google Books API key?",
+            "Remove the saved Google Books API key from BookLedger? Other Google Books settings will be kept.",
+            parent=self,
+        ):
+            return
+        try:
+            existed = self.config_store.get(("api_keys", "google_books"), None) is not None
+            if existed:
+                self.config_store.remove(("api_keys", "google_books"))
+            self.google_books_key_var.set("")
+            self._apply_google_books_key("")
+        except (OSError, ValueError) as exc:
+            self.google_books_api_status.set(f"Could not remove Google Books API key: {exc}")
+            return
+        self.google_books_api_status.set(
+            "Saved Google Books API key removed." if existed else "No saved Google Books API key was present."
+        )
+
+    def _test_google_books_lookup(self):
+        api_key = self.google_books_key_var.get().strip()
+        self.google_books_api_status.set("Testing a sample Google Books metadata lookup…")
+
+        def worker():
+            try:
+                result = GoogleBooksProvider(api_key).lookup("9780306406157")
+                succeeded = result.status != "Lookup failed"
+                error = result.failure_kind or "provider error"
+            except Exception as exc:
+                succeeded = False
+                error = type(exc).__name__
+
+            def complete():
+                try:
+                    if self.winfo_exists():
+                        self.google_books_api_status.set(
+                            "Sample metadata lookup succeeded." if succeeded
+                            else f"Sample metadata lookup failed: {error or 'provider error'}"
+                        )
+                except tk.TclError:
+                    pass
+
+            try:
+                self.after(0, complete)
+            except tk.TclError:
+                pass
+
+        try:
+            threading.Thread(target=worker, name="BookLedgerGoogleBooksTest", daemon=True).start()
+        except Exception as exc:
+            self.google_books_api_status.set(f"Could not start Google Books lookup: {type(exc).__name__}")
 
     def open_isbn_lookup_test(self):
         return MetadataProviderTestDialog(
@@ -1103,131 +1403,163 @@ class BookLedgerApp(_WindowBase):
         text.configure(state="disabled")
         ttk.Button(frame, text="Close", command=dialog.destroy).pack(anchor="e", pady=(12, 0))
 
-    def manage_locations(self):
-        dialog = tk.Toplevel(self)
-        dialog.title("Manage Locations")
-        dialog.transient(self)
-        dialog.grab_set()
-        frame = ttk.Frame(dialog, padding=16)
-        frame.pack(fill="both", expand=True)
-        listing = tk.Listbox(frame, height=12, exportselection=False)
-        listing.pack(fill="both", expand=True)
-        entry = ttk.Entry(frame)
-        entry.pack(fill="x", pady=8)
-        error = ttk.Label(frame, foreground="#b42318")
-        error.pack(anchor="w")
-        def refresh(select=None):
-            values = self.catalog.list_locations()
-            listing.delete(0, "end")
-            for name in values:
-                listing.insert("end", name)
-            if select in values:
-                listing.selection_set(values.index(select))
-        def selected():
-            selection = listing.curselection()
-            return listing.get(selection[0]) if selection else None
-        def add():
-            try:
-                name = self.catalog.add_location(entry.get())
-                error.configure(text="")
-                entry.delete(0, "end")
-                refresh(name)
-            except ValueError as exc:
-                error.configure(text=str(exc))
-        def rename():
-            old = selected()
-            try:
-                if not old:
-                    raise ValueError("Select a location to rename.")
-                name = self.catalog.rename_location(old, entry.get())
-                error.configure(text="")
-                refresh(name)
-            except ValueError as exc:
-                error.configure(text=str(exc))
-        def delete():
-            old = selected()
-            try:
-                if not old:
-                    raise ValueError("Select a location to delete.")
-                self.catalog.delete_location(old)
-                error.configure(text="")
-                refresh()
-            except ValueError as exc:
-                error.configure(text=str(exc))
-        buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(8, 0))
-        ttk.Button(buttons, text="Add", command=add).pack(side="left")
-        ttk.Button(buttons, text="Rename Selected", command=rename).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Delete Selected", command=delete).pack(side="left")
-        ttk.Button(buttons, text="Done", command=lambda: (dialog.destroy(), self.refresh_current())).pack(side="right")
-        def use_selected(_event=None):
-            name = selected()
-            if name:
-                entry.delete(0, "end")
-                entry.insert(0, name)
-        listing.bind("<<ListboxSelect>>", use_selected)
-        refresh()
-
-    def google_books_settings(self):
-        dialog = tk.Toplevel(self)
-        dialog.title("Google Books Settings")
-        dialog.transient(self)
-        dialog.grab_set()
-        frame = ttk.Frame(dialog, padding=18)
-        frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Google Books works without an API key for this integration. A key is optional.", wraplength=500).pack(anchor="w")
-        ttk.Label(frame, text="Optional API key").pack(anchor="w", pady=(12, 4))
-        key = tk.StringVar(value=self._load_google_books_key())
-        ttk.Entry(frame, textvariable=key, show="•", width=58).pack(fill="x")
-        ttk.Label(frame, text=f"Stored in portable data: {self.paths.google_books_config}\nThe key is plain text and is excluded from portable backups.", wraplength=500, foreground="#64748b").pack(anchor="w", pady=8)
-        status = ttk.Label(
-            frame,
-            text="Configured: API key saved" if self._load_google_books_key() else "Not configured: using Google Books without an API key",
-            wraplength=500,
-        )
-        status.pack(anchor="w", pady=6)
-        def save_key():
-            self.paths.user_config.mkdir(parents=True, exist_ok=True)
-            self.paths.google_books_config.write_text(json.dumps({"api_key": key.get().strip()}, indent=2), encoding="utf-8")
-            self.metadata_lookup = MetadataLookupService(
-                build_providers(self.provider_settings, key.get().strip())
-            )
-        def test():
-            try:
-                save_key()
-            except OSError as exc:
-                status.configure(text=f"Could not save settings: {exc}")
-                return
-            api_key = key.get().strip()
-            status.configure(text="Testing Google Books…")
-            def worker():
-                result = GoogleBooksProvider(api_key).lookup("9780306406157")
-                def complete():
-                    try:
-                        if dialog.winfo_exists():
-                            status.configure(text=("Connection succeeded" if result.status != "Lookup failed" else f"Connection failed: {result.error}"))
-                    except tk.TclError:
-                        pass
-                try:
-                    self.after(0, complete)
-                except tk.TclError:
-                    pass
-            threading.Thread(target=worker, daemon=True).start()
-        def save():
-            try:
-                save_key()
-                status.configure(text="Settings saved.")
-            except OSError as exc:
-                status.configure(text=f"Could not save settings: {exc}")
-        buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(8, 0))
-        ttk.Button(buttons, text="Save", command=save).pack(side="left")
-        ttk.Button(buttons, text="Test Connectivity", command=test).pack(side="left", padx=8)
-        ttk.Button(buttons, text="Close", command=dialog.destroy).pack(side="right")
-
     def _after_save(self, message):
         self.status_var.set(message)
         self.refresh_current()
+
+    def export_inventory_csv(self):
+        destination = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export BookLedger inventory",
+            initialdir=self.paths.root,
+            initialfile="bookledger-inventory.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV file", "*.csv"), ("All files", "*.*")],
+        )
+        if not destination:
+            return
+        columns = (
+            ("copy_id", "Copy ID"),
+            ("copy_code", "Copy Code"),
+            ("copy_number", "Copy Number"),
+            ("title", "Title"),
+            ("author", "Author"),
+            ("isbn", "ISBN"),
+            ("genre", "Genre"),
+            ("publisher", "Publisher"),
+            ("publication_year", "Publication Year"),
+            ("edition", "Edition"),
+            ("page_count", "Page Count"),
+            ("book_details", "Book Details"),
+            ("srp_minor", "SRP (PHP)"),
+            ("format", "Format"),
+            ("condition", "Condition"),
+            ("location", "Location"),
+            ("price_minor", "Price (PHP)"),
+            ("status", "Status"),
+            ("metadata_source", "Metadata Source"),
+            ("metadata_status", "Metadata Status"),
+        )
+        try:
+            copies = self.catalog.list_copies()
+            with open(destination, "w", encoding="utf-8", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow([label for _key, label in columns])
+                for copy in copies:
+                    values = []
+                    for key, _label in columns:
+                        value = copy.get(key)
+                        if key in ("price_minor", "srp_minor"):
+                            value = "" if value is None else format(Decimal(int(value)) / Decimal(100), ".2f")
+                        values.append(value if value is not None else "")
+                    writer.writerow(values)
+        except (OSError, csv.Error, ValueError) as exc:
+            messagebox.showerror("CSV export failed", f"The inventory could not be exported: {exc}", parent=self)
+            return
+        self.status_var.set(f"Exported {len(copies)} inventory copies to {Path(destination).name}.")
+        messagebox.showinfo(
+            "CSV export complete",
+            f"Exported {len(copies)} physical copies to:\n{destination}",
+            parent=self,
+        )
+
+    def _read_logging_enabled(self):
+        try:
+            value = self.config_store.get(("logging", "enabled"), False)
+            return value if isinstance(value, bool) else False
+        except (OSError, ValueError):
+            return False
+
+    def _configure_optional_logging(self, enabled):
+        logger = self._optional_logger
+        for handler in tuple(logger.handlers):
+            logger.removeHandler(handler)
+            try:
+                handler.flush()
+                handler.close()
+            except OSError:
+                pass
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        if not enabled:
+            return ""
+        try:
+            handler = logging.FileHandler(self.paths.root / "log.txt", mode="a", encoding="utf-8", delay=False)
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            logger.addHandler(handler)
+            return ""
+        except OSError as exc:
+            return f"Could not open log.txt for writing: {exc}"
+
+    def _toggle_logging(self):
+        requested = bool(self.logging_var.get())
+        previous = self._logging_enabled
+        warning = self._configure_optional_logging(requested)
+        if warning:
+            self._configure_optional_logging(previous)
+            self.logging_var.set(previous)
+            self.logging_status_var.set(warning)
+            return
+        try:
+            self.config_store.set(("logging", "enabled"), requested)
+        except (OSError, ValueError) as exc:
+            self._configure_optional_logging(previous)
+            self.logging_var.set(previous)
+            self.logging_status_var.set(f"Could not save logging preference: {exc}")
+            return
+        self._logging_enabled = requested
+        state = "normal" if requested else "disabled"
+        self.view_log_button.configure(state=state)
+        self.clear_log_button.configure(state=state)
+        self.logging_status_var.set("Logging is enabled." if requested else "Logging is off.")
+        if requested:
+            self._optional_logger.info("diagnostic_logging_enabled")
+
+    def view_log(self):
+        if not self._logging_enabled:
+            return
+        path = self.paths.root / "log.txt"
+        if not path.is_file():
+            messagebox.showinfo("Diagnostic log", "No log file has been created yet.", parent=self)
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except OSError as exc:
+            messagebox.showerror("Could not open log", f"The diagnostic log could not be opened: {exc}", parent=self)
+
+    def clear_log(self):
+        if not self._logging_enabled:
+            return
+        if not messagebox.askyesno(
+            "Clear diagnostic log?", "Clear the contents of log.txt? The log file will remain in place.", parent=self
+        ):
+            return
+        path = self.paths.root / "log.txt"
+        try:
+            active_handlers = [
+                handler for handler in self._optional_logger.handlers
+                if isinstance(handler, logging.FileHandler) and handler.stream is not None
+            ]
+            if active_handlers:
+                for handler in active_handlers:
+                    handler.acquire()
+                    try:
+                        handler.flush()
+                        handler.stream.seek(0)
+                        handler.stream.truncate()
+                        handler.flush()
+                    finally:
+                        handler.release()
+            else:
+                path.write_text("", encoding="utf-8")
+            self.logging_status_var.set("Diagnostic log cleared.")
+        except OSError as exc:
+            messagebox.showerror("Could not clear log", f"The diagnostic log could not be cleared: {exc}", parent=self)
 
     def create_backup(self):
         try:
@@ -1290,7 +1622,7 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Clear Trash Incomplete", str(exc), parent=self)
 
     def purge_data(self):
-        if not messagebox.askyesno("Reset BookLedger Data?", "This removes the database, photos, Trash, locations, Google Books API key, and other data under the portable data folder. Metadata provider order and enabled settings are stored separately and retained. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
+        if not messagebox.askyesno("Reset BookLedger Data?", "This removes the database, photos, Trash, locations, and other data under the portable data folder. Application configuration, including metadata provider settings and the Google Books API key, remains in config.json. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
             return
         from tkinter import simpledialog
         typed = simpledialog.askstring("Confirm Purge", "Type PURGE to permanently reset BookLedger data:", parent=self)
@@ -1298,9 +1630,9 @@ class BookLedgerApp(_WindowBase):
             return
         try:
             self.lifecycle.purge()
-            self.paths.prepare(migrate_profile_config=False)
+            self.paths.prepare()
             self.db = Database(self.paths.database)
-            self.catalog = CatalogService(self.db, self.paths.data)
+            self.catalog = CatalogService(self.db, self.paths.data, config_store=self.config_store)
             self.photos = PhotoService(self.paths.photos, self.paths.trash)
             self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
             self.verifier = VerificationService(self.db, self.paths.data)

@@ -4,6 +4,7 @@ import pytest
 from PIL import Image
 
 from bookledger.db.database import Database
+from bookledger.config_store import AppConfigStore
 from bookledger.paths import AppPaths
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.lifecycle import CopyLifecycleService
@@ -79,7 +80,7 @@ def test_both_legacy_and_portable_databases_are_a_conflict(tmp_path):
         paths.prepare()
 
 
-def test_profile_configuration_moves_portable_and_is_not_restored_after_purge(tmp_path, monkeypatch):
+def test_profile_configuration_migrates_to_root_and_survives_data_purge(tmp_path, monkeypatch):
     profile = tmp_path / "profile"
     legacy_config = profile / "BookLedger" / "google_books.json"
     legacy_config.parent.mkdir(parents=True)
@@ -87,13 +88,22 @@ def test_profile_configuration_moves_portable_and_is_not_restored_after_purge(tm
     monkeypatch.setenv("LOCALAPPDATA", str(profile))
     paths = AppPaths(tmp_path / "BookLedger")
     paths.prepare()
-    paths.finalize_profile_config_migration()
-    assert paths.google_books_config.read_text(encoding="utf-8") == '{"api_key":"portable-test"}'
-    assert not legacy_config.exists()
     db = Database(paths.database)
-    CopyLifecycleService(db, paths.data).purge()
-    paths.prepare(migrate_profile_config=False)
+    config_store = AppConfigStore(paths.provider_config, paths.provider_config_fallback())
+    config_store.migrate_legacy_settings(db, paths.google_books_config, paths._profile_google_books_config())
+    assert config_store.get(("api_keys", "google_books")) == "portable-test"
+    assert paths.provider_config.is_file()
     assert not paths.google_books_config.exists()
+    # The profile source stays available as recovery data but is inactive after
+    # the canonical migration marker is written.
+    assert legacy_config.is_file()
+    CopyLifecycleService(db, paths.data).purge()
+    paths.prepare()
+    migrated_db = Database(paths.database)
+    config_store.migrate_legacy_settings(migrated_db, paths.google_books_config, paths._profile_google_books_config())
+    assert not paths.google_books_config.exists()
+    assert config_store.get(("api_keys", "google_books")) == "portable-test"
+    assert legacy_config.is_file()
 
 
 def test_trash_restore_and_clear_preserve_siblings_and_hide_history(tmp_path):
