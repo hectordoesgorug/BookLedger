@@ -56,7 +56,12 @@ NAVIGATION_ITEMS = (
 )
 NAV_ICON_FRAME_SIZE = 36
 NAV_ICON_CONTENT_SIZES = (26, 30, 32)
-PREFERRED_THEME_NAMES = ("clam", "flatly", "bootstrap-light", "bootstrap-dark", "cosmo", "darkly")
+THEME_OPTIONS = (
+    ("Clam", "clam"),
+    ("Flatly", "flatly"),
+    ("Light", "bootstrap-light"),
+    ("Dark", "bootstrap-dark"),
+)
 
 
 def resolve_theme_name(available, configured, default):
@@ -67,6 +72,27 @@ def resolve_theme_name(available, configured, default):
     if default in available:
         return default
     return available[0] if available else ""
+
+
+def available_theme_options(ttkbootstrap_names, native_names):
+    """Return friendly choices supported by their respective style engines."""
+    ttkbootstrap_names = {str(name) for name in ttkbootstrap_names}
+    native_names = {str(name) for name in native_names}
+    return tuple(
+        (label, name)
+        for label, name in THEME_OPTIONS
+        if (name in native_names if name == "clam" else name in ttkbootstrap_names)
+    )
+
+
+def apply_theme_to_style(style, name):
+    """Apply native Clam through Tk, and Bootstrap themes through ttkbootstrap."""
+    if name == "clam":
+        # Bypass ttkbootstrap.Style.theme_use: Clam has no ttkbootstrap
+        # ThemeDefinition and passing it through that method corrupts its
+        # current-theme state. The base method changes only Tk's active theme.
+        return ttk.Style.theme_use(style, name)
+    return style.theme_use(name)
 
 
 try:
@@ -102,24 +128,43 @@ class BookLedgerApp(_WindowBase):
             self.paths.google_books_config,
             self.paths._profile_google_books_config(),
         )
-        self.theme_style = tb.Style() if _HAS_TTKBOOTSTRAP else ttk.Style(self)
-        registered_themes = {
-            str(name) for name in self.theme_style.theme_names()
-        } | {str(name) for name in ttk.Style(self).theme_names()}
-        self._available_theme_names = tuple(
-            name for name in PREFERRED_THEME_NAMES if name in registered_themes
-        ) or tuple(sorted(registered_themes))
+        # ttkbootstrap.Window owns a process-wide Style singleton. Keep that
+        # instance, but list native Clam separately from its theme definitions.
+        self.theme_style = self.style if _HAS_TTKBOOTSTRAP else ttk.Style(self)
+        ttkbootstrap_themes = self.theme_style.theme_names()
+        native_themes = ttk.Style(self).theme_names()
+        self._theme_options = available_theme_options(ttkbootstrap_themes, native_themes)
+        self._available_theme_names = tuple(name for _label, name in self._theme_options)
+        self._theme_name_by_label = {label: name for label, name in self._theme_options}
+        self._theme_label_by_name = {name: label for label, name in self._theme_options}
         current_theme = self.theme_style.theme_use() or ""
-        default_theme = "clam" if "clam" in self._available_theme_names else current_theme
+        default_theme = (
+            "flatly" if "flatly" in self._available_theme_names
+            else current_theme if current_theme in self._available_theme_names
+            else (self._available_theme_names[0] if self._available_theme_names else "")
+        )
         configured_theme = self.config_store.get(("preferences", "theme"), default_theme)
         self._active_theme = resolve_theme_name(
             self._available_theme_names, configured_theme, default_theme
         )
+        self._theme_startup_warning = ""
+        if configured_theme == "clam" and "clam" not in self._available_theme_names:
+            active_label = self._theme_label_by_name.get(self._active_theme, self._active_theme)
+            self._theme_startup_warning = (
+                f"Saved theme 'Clam' is unavailable in this Tk installation; using '{active_label}'."
+            )
         if self._active_theme:
             try:
-                self.theme_style.theme_use(self._active_theme)
-            except tk.TclError:
+                apply_theme_to_style(self.theme_style, self._active_theme)
+            except Exception as exc:
+                self._theme_startup_warning = (
+                    f"Could not apply saved theme '{self._theme_label_by_name.get(self._active_theme, self._active_theme)}': {exc}"
+                )
                 self._active_theme = current_theme or default_theme
+                try:
+                    apply_theme_to_style(self.theme_style, self._active_theme)
+                except Exception:
+                    pass
         self.provider_settings_store = ProviderSettingsStore(
             self.paths.provider_config,
             self.paths.provider_config_fallback(),
@@ -153,38 +198,45 @@ class BookLedgerApp(_WindowBase):
         self.bind_all("<F5>", lambda _e: self.refresh_current())
 
     def _configure_style(self):
-        style = ttk.Style(self)
-        style.configure("Treeview", rowheight=30, font=("Segoe UI", 10), borderwidth=0)
-        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=8)
-        style.configure("Sidebar.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10))
-        style.configure("SidebarActive.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10, "bold"))
-        style.configure("Primary.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"))
-        style.configure("Invalid.TEntry", fieldbackground="#fff0f0")
-        style.configure("Invalid.TCombobox", fieldbackground="#fff0f0")
+        style = self.theme_style
+        if style.theme_use() == "clam":
+            def configure(style_name, **options):
+                return ttk.Style.configure(style, style_name, **options)
+        else:
+            configure = style.configure
+
+        configure("Treeview", rowheight=30, font=("Segoe UI", 10), borderwidth=0)
+        configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=8)
+        configure("Sidebar.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10))
+        configure("SidebarActive.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10, "bold"))
+        configure("Primary.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"))
+        configure("Invalid.TEntry", fieldbackground="#fff0f0")
+        configure("Invalid.TCombobox", fieldbackground="#fff0f0")
 
     def _apply_theme_selection(self):
-        selected = str(self.theme_var.get() or "")
+        selected_label = str(self.theme_var.get() or "")
+        selected = self._theme_name_by_label.get(selected_label, "")
         if selected not in self._available_theme_names:
-            self.status_var.set("Choose a theme provided by this Tk installation.")
+            self.status_var.set("Choose a supported theme from the list.")
             return False
 
         previous = self.theme_style.theme_use()
         try:
-            self.theme_style.theme_use(selected)
+            apply_theme_to_style(self.theme_style, selected)
             self._configure_style()
             self.config_store.set(("preferences", "theme"), selected)
-        except (tk.TclError, OSError, ValueError, sqlite3.Error) as exc:
+        except Exception as exc:
             try:
-                self.theme_style.theme_use(previous)
+                apply_theme_to_style(self.theme_style, previous)
                 self._configure_style()
-            except tk.TclError:
+            except Exception:
                 pass
-            self.theme_var.set(previous)
+            self.theme_var.set(self._theme_label_by_name.get(previous, previous))
             self.status_var.set(f"Could not apply theme: {exc}")
             return False
 
         self._active_theme = selected
-        self.status_var.set(f"Theme '{selected}' applied and saved.")
+        self.status_var.set(f"Theme '{selected_label}' applied and saved.")
         return True
 
     def _build_shell(self):
@@ -252,7 +304,7 @@ class BookLedgerApp(_WindowBase):
         self.search_entry.bind("<Return>", lambda _e: self.show_page("Catalog"))
         self.workspace = ttk.Frame(right)
         self.workspace.pack(fill="both", expand=True)
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value=self._theme_startup_warning or "Ready")
         self.status_label = ttk.Label(right, textvariable=self.status_var, anchor="w")
         self.status_label.pack(fill="x", pady=(12, 0))
         self._bind_status_color(self.status_var, self.status_label)
@@ -1395,10 +1447,10 @@ class BookLedgerApp(_WindowBase):
         themes.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
         ttk.Label(themes, text="Choose from themes available in this installation.", foreground="#64748b").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
         ttk.Label(themes, text="Theme:").grid(row=1, column=0, sticky="w", padx=(0, 6))
-        self.theme_var = tk.StringVar(value=self._active_theme)
+        self.theme_var = tk.StringVar(value=self._theme_label_by_name.get(self._active_theme, self._active_theme))
         self.theme_selector = ttk.Combobox(
             themes,
-            values=self._available_theme_names,
+            values=tuple(label for label, _name in self._theme_options),
             state="readonly",
             textvariable=self.theme_var,
             width=22,

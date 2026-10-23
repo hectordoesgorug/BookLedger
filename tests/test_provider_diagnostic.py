@@ -105,8 +105,11 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
         root=Path("portable-data"), google_books_config=Path("portable-data/assets/google_books.json")
     )
     harness.config_store = SimpleNamespace(get=lambda *_args: "")
-    harness._available_theme_names = ("clam", "flatly")
-    harness._active_theme = "clam"
+    harness._theme_options = (("Flatly", "flatly"), ("Light", "bootstrap-light"))
+    harness._available_theme_names = ("flatly", "bootstrap-light")
+    harness._theme_name_by_label = {label: name for label, name in harness._theme_options}
+    harness._theme_label_by_name = {name: label for label, name in harness._theme_options}
+    harness._active_theme = "flatly"
     harness._apply_theme_selection = lambda: None
     harness.lifecycle = SimpleNamespace(trash_count=lambda: 1)
     harness.catalog = SimpleNamespace(
@@ -203,7 +206,7 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     )
     theme_selector = next(widget for widget in preference_widgets if isinstance(widget, ttk.Combobox))
     assert str(theme_selector.cget("state")) == "readonly"
-    assert tuple(theme_selector.cget("values")) == harness._available_theme_names
+    assert tuple(theme_selector.cget("values")) == tuple(label for label, _name in harness._theme_options)
 
     # Merely changing tabs does not invoke any Settings operation.
     for index in range(len(expected_tabs)):

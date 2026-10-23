@@ -584,8 +584,11 @@ def test_customize_section_uses_two_equal_button_columns_and_full_width_url_entr
     subject = SimpleNamespace(
         catalog=catalog,
         config_store=SimpleNamespace(get=lambda *_args: ""),
-        _available_theme_names=("clam", "flatly"),
-        _active_theme="clam",
+        _theme_options=(("Flatly", "flatly"), ("Light", "bootstrap-light")),
+        _available_theme_names=("flatly", "bootstrap-light"),
+        _theme_name_by_label={"Flatly": "flatly", "Light": "bootstrap-light"},
+        _theme_label_by_name={"flatly": "Flatly", "bootstrap-light": "Light"},
+        _active_theme="flatly",
         _apply_theme_selection=lambda: None,
         _show_hover_tooltip=lambda *_args: None,
         _hide_hover_tooltip=lambda *_args: None,
@@ -603,8 +606,8 @@ def test_customize_section_uses_two_equal_button_columns_and_full_width_url_entr
         buttons = {child.cget("text"): child for child in customize.winfo_children() if isinstance(child, ttk.Button)}
         theme_selector = subject.theme_selector
         assert str(theme_selector.cget("state")) == "readonly"
-        assert tuple(theme_selector.cget("values")) == subject._available_theme_names
-        assert subject.theme_var.get() == "clam"
+        assert tuple(theme_selector.cget("values")) == ("Flatly", "Light")
+        assert subject.theme_var.get() == "Flatly"
         names = ("Change Logo", "Clear Logo", "Add Logo Link", "Clear Logo Link")
         assert set(names) <= set(buttons)
         assert {buttons[name].cget("width") for name in names} == {16}
@@ -621,7 +624,7 @@ def test_customize_section_uses_two_equal_button_columns_and_full_width_url_entr
         root.destroy()
 
 
-def test_theme_selection_applies_only_supported_names_and_persists_for_restart(tmp_path):
+def test_theme_selection_applies_only_supported_names_and_persists_for_restart(tmp_path, monkeypatch):
     class Value:
         def __init__(self, value):
             self.value = value
@@ -634,13 +637,17 @@ def test_theme_selection_applies_only_supported_names_and_persists_for_restart(t
 
     class ThemeStyle:
         def __init__(self):
-            self.current = "clam"
+            self.current = "flatly"
+            self.fail_on = None
 
         def theme_use(self, name=None):
             if name is None:
                 return self.current
-            if name not in ("clam", "flatly", "darkly"):
+            if name not in ("clam", "flatly", "bootstrap-light", "bootstrap-dark"):
                 raise tk.TclError(name)
+            if name == self.fail_on:
+                self.current = name
+                raise AttributeError("'NoneType' object has no attribute 'name'")
             self.current = name
             return name
 
@@ -648,35 +655,115 @@ def test_theme_selection_applies_only_supported_names_and_persists_for_restart(t
     store = AppConfigStore(config_path)
     store.set(("preferences", "shop_url"), "https://shop.example/books")
     style = ThemeStyle()
+    native_theme_calls = []
+
+    def native_theme_use(style_obj, name=None):
+        if name is None:
+            return style_obj.current
+        native_theme_calls.append(name)
+        if name != "clam":
+            raise tk.TclError(name)
+        style_obj.current = name
+        return name
+
+    monkeypatch.setattr(app_module.ttk.Style, "theme_use", native_theme_use)
     status = Value("")
+    theme_options = app_module.THEME_OPTIONS
     subject = SimpleNamespace(
-        theme_var=Value("flatly"),
+        theme_var=Value("Flatly"),
         theme_style=style,
-        _available_theme_names=("clam", "flatly", "darkly"),
+        _theme_options=theme_options,
+        _available_theme_names=tuple(name for _label, name in theme_options),
+        _theme_name_by_label={label: name for label, name in theme_options},
+        _theme_label_by_name={name: label for label, name in theme_options},
         config_store=store,
         status_var=status,
         _configure_style=lambda: None,
     )
 
-    assert BookLedgerApp._apply_theme_selection(subject)
-    assert style.theme_use() == "flatly"
-    reloaded = AppConfigStore(config_path)
-    assert reloaded.get(("preferences", "theme")) == "flatly"
-    assert reloaded.get(("preferences", "shop_url")) == "https://shop.example/books"
+    assert store.get(("preferences", "shop_url")) == "https://shop.example/books"
+
+    assert app_module.available_theme_options(
+        ("flatly", "bootstrap-light", "bootstrap-dark"), ("clam", "alt")
+    ) == theme_options
+    assert app_module.available_theme_options(
+        ("flatly", "bootstrap-light", "bootstrap-dark"), ("alt",)
+    ) == theme_options[1:]
+    assert dict(theme_options) == {
+        "Clam": "clam",
+        "Flatly": "flatly",
+        "Light": "bootstrap-light",
+        "Dark": "bootstrap-dark",
+    }
+
+    for label, theme_name in theme_options:
+        subject.theme_var.set(label)
+        assert BookLedgerApp._apply_theme_selection(subject)
+        assert style.theme_use() == theme_name
+        reloaded = AppConfigStore(config_path)
+        assert reloaded.get(("preferences", "theme")) == theme_name
+    assert native_theme_calls == ["clam"]
     assert app_module.resolve_theme_name(
         subject._available_theme_names,
         reloaded.get(("preferences", "theme")),
-        "clam",
-    ) == "flatly"
+        "flatly",
+    ) == "bootstrap-dark"
 
     subject.theme_var.set("unsupported-theme")
     assert not BookLedgerApp._apply_theme_selection(subject)
+    assert "supported theme" in status.get()
+    assert subject.theme_var.get() == "unsupported-theme"
+    assert style.theme_use() == "bootstrap-dark"
+    assert reloaded.get(("preferences", "theme")) == "bootstrap-dark"
+
+    subject.theme_var.set("Flatly")
+    assert BookLedgerApp._apply_theme_selection(subject)
+    style.fail_on = "bootstrap-dark"
+    subject.theme_var.set("Dark")
+    assert not BookLedgerApp._apply_theme_selection(subject)
     assert style.theme_use() == "flatly"
+    assert subject.theme_var.get() == "Flatly"
+    assert "Could not apply theme" in status.get()
+    assert "NoneType" in status.get()
     assert reloaded.get(("preferences", "theme")) == "flatly"
 
     store.set(("preferences", "theme"), "missing-theme")
-    assert app_module.resolve_theme_name(subject._available_theme_names, "missing-theme", "clam") == "clam"
+    assert app_module.resolve_theme_name(subject._available_theme_names, "missing-theme", "flatly") == "flatly"
     assert AppConfigStore(config_path).get(("preferences", "theme")) == "missing-theme"
+
+
+@pytest.mark.parametrize("active_theme, native_theme", [("clam", True), ("flatly", False)])
+def test_configure_style_uses_the_matching_ttk_configure_call(
+    active_theme, native_theme, monkeypatch
+):
+    calls = []
+
+    class ThemeStyle:
+        def theme_use(self):
+            return active_theme
+
+        def configure(self, style_name, **options):
+            calls.append(("ttkbootstrap", style_name, options))
+
+    def native_configure(style, style_name, **options):
+        calls.append(("native", style_name, options))
+
+    monkeypatch.setattr(app_module.ttk.Style, "configure", native_configure)
+    subject = SimpleNamespace(theme_style=ThemeStyle())
+
+    BookLedgerApp._configure_style(subject)
+
+    assert len(calls) == 7
+    assert {source for source, _style_name, _options in calls} == {
+        "native" if native_theme else "ttkbootstrap"
+    }
+    treeview = calls[0]
+    assert treeview[1] == "Treeview"
+    assert treeview[2] == {
+        "rowheight": 30,
+        "font": ("Segoe UI", 10),
+        "borderwidth": 0,
+    }
 
 
 def test_navigation_icons_use_uniform_larger_geometry():
