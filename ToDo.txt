@@ -85,3 +85,7 @@ These items are future enhancements and are not part of the current implementati
     -   Preserve ISBN-to-book matching and existing metadata-merging safeguards.
 11. Poster Creation
     -   Explore a canvas-based poster design workspace and designer for creating book-sale posters.
+12. Merge Libraries
+    -   Consider a future Merge Libraries feature: allow importing a BookLedger backup into the current library without replacing it.
+    -   Explore UUID-based record matching, `BL-` display-ID collision handling, duplicate ISBN review with per-copy keep/discard choices, and safe handling of sales, photos, deletions, and transaction history.
+    -   Deferred; for now, transfer the latest verified backup by USB and restore it before starting work on the other PC.
