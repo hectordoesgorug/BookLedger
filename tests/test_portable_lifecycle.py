@@ -56,7 +56,7 @@ def test_legacy_migration_copies_database_and_preserves_source_until_verified(tm
     staged.replace(legacy / "photos" / "1.jpg")
     with db.connect() as conn:
         conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(17,'Kept','Author','Science')")
-        conn.execute("INSERT INTO copies(id,copy_code,book_id,copy_number,format,condition,location,photo_path,price_minor) VALUES(23,'BL-000023',17,4,'Paperback','Good','Shelf','photos/1.jpg',50000)")
+        conn.execute("INSERT INTO copies(id,copy_uuid,copy_code,book_id,copy_number,format,condition,location,photo_path,price_minor) VALUES(23,'00000000-0000-4000-8000-000000000023','BL-000023',17,4,'Paperback','Good','Shelf','photos/1.jpg',50000)")
     paths = AppPaths(root)
     paths.prepare()
     assert paths.database.is_file()

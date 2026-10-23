@@ -72,6 +72,11 @@ class AppPaths:
 
     def prepare(self) -> None:
         """Migrate legacy files before the application can create a fresh database."""
+        # A failed process may have stopped during a multi-component restore.
+        # Roll it back before SQLite or configuration initialization can observe it.
+        from bookledger.services.backups import BackupService
+
+        BackupService.recover_interrupted_restore(self.root)
         legacy_db = self.legacy_data / "bookledger.sqlite3"
         if self.database.exists() and legacy_db.exists():
             raise RuntimeError(

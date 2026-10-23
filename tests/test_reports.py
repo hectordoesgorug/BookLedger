@@ -1,5 +1,6 @@
 from datetime import date
 from types import MethodType, SimpleNamespace
+import uuid
 
 import pytest
 
@@ -35,9 +36,9 @@ def _report_db(tmp_path):
         copy_ids = []
         for index, (book_id, number, price, status) in enumerate(copies, 1):
             cursor = conn.execute(
-                """INSERT INTO copies(copy_code,book_id,copy_number,format,condition,photo_path,price_minor,status)
-                   VALUES(?,?,?,'Paperback','Good','photos/test.jpg',?,?)""",
-                (f"BL-{index:06d}", book_id, number, price, status),
+                """INSERT INTO copies(copy_uuid,copy_code,book_id,copy_number,format,condition,photo_path,price_minor,status)
+                   VALUES(?,?,?,?,'Paperback','Good','photos/test.jpg',?,?)""",
+                (str(uuid.uuid4()), f"BL-{index:06d}", book_id, number, price, status),
             )
             copy_ids.append(cursor.lastrowid)
         conn.execute("INSERT INTO sales(copy_id,price_minor,sale_date) VALUES(?,?,?)", (copy_ids[2], 12500, "2026-10-04"))

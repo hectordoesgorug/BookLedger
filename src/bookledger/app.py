@@ -82,7 +82,7 @@ class BookLedgerApp(_WindowBase):
         self.photos = PhotoService(self.paths.photos, self.paths.trash)
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
         self.verifier = VerificationService(self.db, self.paths.data)
-        self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
+        self.backups = BackupService(self.db, self.paths.data, self.paths.backups, self.paths.provider_config)
         self.metadata_lookup = MetadataLookupService(
             build_providers(self.provider_settings, self._load_google_books_key())
         )
@@ -1577,13 +1577,13 @@ class BookLedgerApp(_WindowBase):
         if not ok:
             messagebox.showerror("Backup verification failed", message, parent=self)
             return
-        if not messagebox.askyesno("Restore backup?", "Restoring replaces the current database and photo collection. A safety backup of the current data will be created first. Continue?", parent=self):
+        if not messagebox.askyesno("Restore backup?", "Restoring replaces the current library, photos, and configuration with the selected snapshot. Changes made after that snapshot will be absent. A recoverable backup of the current library will be saved first. Continue?", parent=self):
             return
         try:
-            self.backups.restore_backup(path)
+            recovery = self.backups.restore_backup(path)
             self.status_var.set(f"Restored backup: {Path(path).name}")
             self.refresh_current()
-            messagebox.showinfo("Restore complete", "The backup was restored and the database passed its integrity check.", parent=self)
+            messagebox.showinfo("Restore complete", f"The snapshot was restored and validated. Recovery point: {recovery.name}\n\nRestart BookLedger to apply restored configuration settings.", parent=self)
         except Exception as exc:
             messagebox.showerror("Restore failed", f"The backup could not be restored: {exc}", parent=self)
 

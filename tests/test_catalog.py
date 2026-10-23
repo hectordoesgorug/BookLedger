@@ -1,5 +1,6 @@
 from pathlib import Path
 import sqlite3
+import uuid
 from datetime import date as real_date
 
 import pytest
@@ -426,8 +427,8 @@ def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(
         )
         book_id = conn.execute("SELECT id FROM book_records WHERE title='Legacy Genre Book'").fetchone()[0]
         conn.execute(
-            "INSERT INTO copies(book_id,copy_number,format,condition,photo_path,price_minor) VALUES(?,1,'Legacy Format','Good','photos/legacy.jpg',10000)",
-            (book_id,),
+                "INSERT INTO copies(copy_uuid,book_id,copy_number,format,condition,photo_path,price_minor) VALUES('00000000-0000-4000-8000-000000000001',?,1,'Legacy Format','Good','photos/legacy.jpg',10000)",
+                (book_id,),
         )
 
     genres = service.list_genres()
@@ -439,7 +440,7 @@ def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(
     assert CatalogService(db).list_genres() == genres
     assert CatalogService(db).list_formats() == formats
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
 
 
 def test_genre_and_format_rename_migrate_assignments_atomically_and_allow_unassigned_delete(setup):
@@ -510,11 +511,12 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     service = CatalogService(db)
     row = service.get_copy(1)
     assert row["title"] == "Kept"
+    assert uuid.UUID(row["copy_uuid"])
     assert row["location"] == "Shelf A"
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 7
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
         assert migrated.execute("SELECT voided_at FROM sales WHERE id=1").fetchone()[0]
     service.change_status(1, "Sold")
@@ -529,7 +531,9 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
         "    void_reason TEXT CHECK(void_reason IS NULL OR void_reason IN (\n        'Marked Sold by Mistake','Cancelled Order','Returned Order','Test'\n    )),\n", ""
     ).replace(
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy\n    ON sales(copy_id) WHERE voided_at IS NULL;\n", ""
-    ).replace("PRAGMA user_version = 6;", "PRAGMA user_version = 4;")
+    ).replace("    copy_uuid TEXT NOT NULL UNIQUE,\n", "").replace(
+        "CREATE TRIGGER IF NOT EXISTS copies_copy_uuid_immutable\n    BEFORE UPDATE OF copy_uuid ON copies\n    WHEN OLD.copy_uuid IS NOT NULL AND NEW.copy_uuid IS NOT OLD.copy_uuid\n    BEGIN SELECT RAISE(ABORT, 'copy UUID is immutable'); END;\n", ""
+    ).replace("PRAGMA user_version = 7;", "PRAGMA user_version = 4;")
     conn = sqlite3.connect(path)
     conn.executescript(legacy_schema)
     conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(1,'Sold','Author','Science')")
@@ -545,7 +549,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
     db = Database(path)
     with db.connect() as migrated:
         rows = migrated.execute("SELECT id,copy_id,price_minor,sale_date,voided_at FROM sales ORDER BY id").fetchall()
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 7
         assert [(row["id"], row["price_minor"], row["sale_date"]) for row in rows] == [
             (10, 15000, "2026-01-01"), (11, 20000, "2026-02-02"), (12, 25000, "2026-03-03")
         ]

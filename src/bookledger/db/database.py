@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+
+_DATABASE_LOCKS: dict[str, threading.RLock] = {}
+_DATABASE_LOCKS_GUARD = threading.Lock()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS book_records (
@@ -33,6 +37,7 @@ CREATE INDEX IF NOT EXISTS ix_book_records_genre ON book_records(genre);
 
 CREATE TABLE IF NOT EXISTS copies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    copy_uuid TEXT NOT NULL UNIQUE,
     copy_code TEXT UNIQUE,
     book_id INTEGER NOT NULL REFERENCES book_records(id) ON DELETE RESTRICT,
     copy_number INTEGER NOT NULL,
@@ -70,6 +75,10 @@ CREATE INDEX IF NOT EXISTS ix_copies_book_id ON copies(book_id);
 CREATE INDEX IF NOT EXISTS ix_copies_status ON copies(status);
 CREATE INDEX IF NOT EXISTS ix_copies_location ON copies(location COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS ix_copies_price ON copies(price_minor);
+CREATE TRIGGER IF NOT EXISTS copies_copy_uuid_immutable
+    BEFORE UPDATE OF copy_uuid ON copies
+    WHEN OLD.copy_uuid IS NOT NULL AND NEW.copy_uuid IS NOT OLD.copy_uuid
+    BEGIN SELECT RAISE(ABORT, 'copy UUID is immutable'); END;
 
 CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,7 +99,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;
 """
 
 
@@ -100,20 +109,24 @@ class Database:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_key = str(self.path.resolve()).casefold()
+        with _DATABASE_LOCKS_GUARD:
+            self._operation_lock = _DATABASE_LOCKS.setdefault(lock_key, threading.RLock())
         self._initialize()
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         """Yield a configured connection and always close it after the transaction."""
-        conn = sqlite3.connect(self.path, timeout=15)
-        try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA busy_timeout = 15000")
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        with self._operation_lock:
+            conn = sqlite3.connect(self.path, timeout=15)
+            try:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("PRAGMA busy_timeout = 15000")
+                with conn:
+                    yield conn
+            finally:
+                conn.close()
 
     def _initialize(self) -> None:
         with self.connect() as conn:
@@ -242,6 +255,29 @@ class Database:
                 except Exception:
                     conn.rollback()
                     raise
+            if version == 6:
+                import uuid
+
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("ALTER TABLE copies ADD COLUMN copy_uuid TEXT")
+                    for row in conn.execute("SELECT id FROM copies WHERE copy_uuid IS NULL").fetchall():
+                        conn.execute("UPDATE copies SET copy_uuid=? WHERE id=?", (str(uuid.uuid4()), row[0]))
+                    conn.execute("CREATE UNIQUE INDEX ux_copies_copy_uuid ON copies(copy_uuid)")
+                    conn.execute("DROP TRIGGER IF EXISTS copies_copy_uuid_immutable")
+                    conn.execute("""CREATE TRIGGER copies_copy_uuid_immutable
+                        BEFORE UPDATE OF copy_uuid ON copies
+                        WHEN OLD.copy_uuid IS NOT NULL AND NEW.copy_uuid IS NOT OLD.copy_uuid
+                        BEGIN SELECT RAISE(ABORT, 'copy UUID is immutable'); END""")
+                    conn.execute("""CREATE TRIGGER copies_copy_uuid_required
+                        BEFORE INSERT ON copies WHEN NEW.copy_uuid IS NULL OR trim(NEW.copy_uuid)=''
+                        BEGIN SELECT RAISE(ABORT, 'copy UUID is required'); END""")
+                    conn.execute("PRAGMA user_version = 7")
+                    conn.commit()
+                    version = 7
+                except Exception:
+                    conn.rollback()
+                    raise
             conn.executescript(SCHEMA)
             conn.execute("INSERT INTO app_meta(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
             conn.execute("INSERT OR IGNORE INTO locations(name) VALUES('Not Specified')")
@@ -249,6 +285,12 @@ class Database:
     def transaction(self) -> ContextManager[sqlite3.Connection]:
         """Return a connection context manager; sqlite commits/rolls back on exit."""
         return self.connect()
+
+    @contextmanager
+    def operation_guard(self) -> Iterator[None]:
+        """Exclude all database connections in this process during a library operation."""
+        with self._operation_lock:
+            yield
 
     def backup_to(self, destination: str | Path) -> Path:
         destination = Path(destination)

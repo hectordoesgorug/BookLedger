@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import sqlite3
+import uuid
 from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.db.database import Database
 from bookledger.services.isbn import isbn_check, normalize_isbn
@@ -509,9 +510,9 @@ class CatalogService:
             next_number = conn.execute("SELECT COALESCE(MAX(copy_number),0)+1 FROM copies WHERE book_id=?", (book_id,)).fetchone()[0]
             location = self._canonical_location(conn, payload.get("location"))
             cur = conn.execute(
-                """INSERT INTO copies(book_id,copy_number,format,condition,location,photo_path,price_minor,status)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (book_id, next_number, payload["format"].strip(), payload["condition"].strip(), location,
+                """INSERT INTO copies(copy_uuid,book_id,copy_number,format,condition,location,photo_path,price_minor,status)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), book_id, next_number, payload["format"].strip(), payload["condition"].strip(), location,
                  "photos/pending.jpg", price_minor, "Available"),
             )
             copy_id = int(cur.lastrowid)
@@ -539,7 +540,7 @@ class CatalogService:
         condition: str = "All",
         location: str = "All",
     ) -> list[dict]:
-        sql = """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,
+        sql = """SELECT c.id AS copy_id,c.copy_uuid,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,
                         c.price_minor AS display_price_minor,c.status,
                         b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
                         s.sale_date,b.metadata_source,b.metadata_status
@@ -587,7 +588,7 @@ class CatalogService:
         """Return a copy with its complete sale/reversal history."""
         with self.db.connect() as conn:
             row = conn.execute(
-                """SELECT c.id AS copy_id,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,
+                """SELECT c.id AS copy_id,c.copy_uuid,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,
                           c.price_minor,c.price_minor AS display_price_minor,c.status,
                           b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,
                           b.page_count,b.book_details,b.srp_minor,b.metadata_source,b.metadata_status,

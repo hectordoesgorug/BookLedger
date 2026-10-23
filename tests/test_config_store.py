@@ -16,8 +16,8 @@ def _assigned_data(db: Database) -> None:
             "INSERT INTO book_records(id,title,author,genre) VALUES(1,'Book','Writer','Science')"
         )
         conn.execute(
-            "INSERT INTO copies(id,copy_code,book_id,copy_number,format,condition,location,photo_path,price_minor) "
-            "VALUES(1,'BL-000001',1,1,'Paperback','Good','Shelf','photos/1.jpg',10000)"
+            "INSERT INTO copies(id,copy_uuid,copy_code,book_id,copy_number,format,condition,location,photo_path,price_minor) "
+            "VALUES(1,'00000000-0000-4000-8000-000000000001','BL-000001',1,1,'Paperback','Good','Shelf','photos/1.jpg',10000)"
         )
         conn.execute(
             "INSERT INTO app_meta(key,value) VALUES('genre_options',?)",
