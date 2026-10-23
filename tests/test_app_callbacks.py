@@ -5,7 +5,7 @@ from PIL import Image
 import pytest
 
 from bookledger import app as app_module
-from bookledger.app import CATALOG_CARD_WIDTH, BookLedgerApp
+from bookledger.app import ABOUT_GUIDE_SECTIONS, CATALOG_CARD_WIDTH, BookLedgerApp
 from bookledger.config_store import AppConfigStore
 
 
@@ -53,6 +53,33 @@ def test_legacy_sales_page_name_resolves_to_sale_history():
 
     assert subject.current_page == "Sale History"
     assert captured == {"text": "Sale History", "built": True}
+
+
+def test_about_navigation_opens_the_about_guide():
+    captured = {}
+    subject = SimpleNamespace(
+        current_page=None,
+        page_title=SimpleNamespace(configure=lambda **options: captured.update(options)),
+        _clear_workspace=lambda: None,
+        _build_about_page=lambda: captured.setdefault("built", True),
+    )
+
+    BookLedgerApp.show_page(subject, "About")
+
+    assert subject.current_page == "About"
+    assert captured == {"text": "About", "built": True}
+
+
+def test_about_guide_covers_verified_workflows_and_restore_replacement():
+    text = "\n".join(paragraph for _heading, paragraphs in ABOUT_GUIDE_SECTIONS for paragraph in paragraphs)
+
+    for phrase in (
+        "physical copy", "Look Up ISBN", "Choose Photo", "Sale History",
+        "Settings → Preferences", "Back Up Now", "Restore Backup…",
+        "does not merge", "USB drive", "computer currently being used",
+        "not encrypted", "simulations",
+    ):
+        assert phrase.casefold() in text.casefold()
 
 
 def test_double_click_uses_the_matching_active_tree_row():
