@@ -8,6 +8,7 @@ from tkinter import ttk
 
 from bookledger.provider_registry import PROVIDER_REGISTRY
 from bookledger.services.metadata_contract import MetadataResult, failure_kind
+from bookledger.ui.status_colors import ERROR_COLOR, NEUTRAL_COLOR, SUCCESS_COLOR, status_message_color
 
 
 DIAGNOSTIC_TIMEOUT_SECONDS = 5.0
@@ -22,9 +23,9 @@ FIELD_DEFINITIONS = (
     ("SRP", "srp"),
     ("Book Details", "book_details"),
 )
-FIELD_COLORS = {"OK": "#18723a", "No Data": "#b42318", "N/A": "#64748b", "—": "#64748b"}
-TIME_FAST_COLOR = "#18723a"
-TIME_SLOW_COLOR = "#b42318"
+FIELD_COLORS = {"OK": SUCCESS_COLOR, "No Data": NEUTRAL_COLOR, "N/A": NEUTRAL_COLOR, "—": NEUTRAL_COLOR}
+TIME_FAST_COLOR = SUCCESS_COLOR
+TIME_SLOW_COLOR = ERROR_COLOR
 
 
 def diagnostic_field_statuses(result: MetadataResult, supported_fields) -> dict[str, str]:
@@ -134,7 +135,15 @@ class _MetadataProviderTestView:
         summary.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         summary.columnconfigure(1, weight=1)
         ttk.Label(summary, text="Overall Status").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
-        ttk.Label(summary, textvariable=self.overall_status_var).grid(row=0, column=1, sticky="w", pady=3)
+        self.overall_status_label = ttk.Label(summary, textvariable=self.overall_status_var)
+        self.overall_status_label.grid(row=0, column=1, sticky="w", pady=3)
+        self.overall_status_var.trace_add(
+            "write",
+            lambda *_args: self.overall_status_label.configure(
+                foreground=status_message_color(self.overall_status_var.get())
+            ),
+        )
+        self.overall_status_label.configure(foreground=status_message_color(self.overall_status_var.get()))
         ttk.Label(summary, text="Fetch Time").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
         self.fetch_time_label = ttk.Label(summary, textvariable=self.fetch_time_var, foreground="#64748b")
         self.fetch_time_label.grid(row=1, column=1, sticky="w", pady=3)

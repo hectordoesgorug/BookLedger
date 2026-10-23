@@ -412,7 +412,7 @@ def test_field_statuses_distinguish_returned_missing_and_unsupported_fields():
     }
     assert "A Title" not in statuses.values()
     assert FIELD_COLORS["OK"] != FIELD_COLORS["No Data"]
-    assert FIELD_COLORS["N/A"] != FIELD_COLORS["No Data"]
+    assert FIELD_COLORS["N/A"] == FIELD_COLORS["No Data"]
 
 
 @pytest.mark.parametrize(

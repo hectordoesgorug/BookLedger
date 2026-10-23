@@ -1,8 +1,11 @@
+import tkinter as tk
+from tkinter import ttk
 from types import SimpleNamespace
 from PIL import Image
+import pytest
 
 from bookledger import app as app_module
-from bookledger.app import BookLedgerApp
+from bookledger.app import CATALOG_CARD_WIDTH, BookLedgerApp
 
 
 class FakeTree:
@@ -94,8 +97,8 @@ def test_inventory_rows_include_physical_copy_number():
         def delete(self, *_items):
             self.rows.clear()
 
-        def insert(self, _parent, _index, *, iid, values):
-            self.rows.append((iid, values))
+        def insert(self, _parent, _index, *, iid, values, tags=()):
+            self.rows.append((iid, values, tags))
 
     records = [
         {"copy_id": 41, "copy_code": "BL-000041", "copy_number": 1, "title": "Shared Title", "author": "Author", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
@@ -107,6 +110,7 @@ def test_inventory_rows_include_physical_copy_number():
         genre_filter=SimpleNamespace(get=lambda: "All"), condition_filter=SimpleNamespace(get=lambda: "All"),
         location_filter=SimpleNamespace(get=lambda: "All"), _catalog_inventory=True,
         _inventory_sort_column="title", _inventory_sort_reverse=False, tree=InventoryTree(),
+        _inventory_status_tags={"Available": "inventory_status_available"},
         _sold_last_sort=BookLedgerApp._sold_last_sort, money=BookLedgerApp.money,
         status_var=SimpleNamespace(set=lambda _text: None),
     )
@@ -114,6 +118,7 @@ def test_inventory_rows_include_physical_copy_number():
     BookLedgerApp._populate_catalog(subject)
 
     assert [entry[1][1] for entry in subject.tree.rows] == [1, 2]
+    assert all(entry[2] == ("inventory_status_available",) for entry in subject.tree.rows)
 
 
 def test_explicit_copy_id_does_not_read_tree_selection(monkeypatch):
@@ -218,6 +223,100 @@ def test_sold_thumbnail_gets_gray_overlay_only_when_sold():
     sold = BookLedgerApp._sold_thumbnail(cover, "Sold")
     assert sold.getpixel((0, 0)) != cover.getpixel((0, 0))
     assert sold.getpixel((0, 0))[0] < 255 and sold.getpixel((0, 0))[1] > 0
+
+
+def test_catalog_thumbnail_indicator_follows_physical_copy_status():
+    assert BookLedgerApp._catalog_thumbnail_indicator("Available") is None
+    assert BookLedgerApp._catalog_thumbnail_indicator("Listed") is None
+    assert BookLedgerApp._catalog_thumbnail_indicator("Not for Sale") == "lock"
+    assert BookLedgerApp._catalog_thumbnail_indicator("Sold") == "sold"
+
+
+def test_catalog_grid_reflows_fixed_width_cards_when_width_changes():
+    class Cards:
+        def __init__(self):
+            self.columns = {}
+
+        def grid_columnconfigure(self, column, **options):
+            self.columns[column] = options
+
+    class Card:
+        def __init__(self):
+            self.positions = []
+
+        def grid(self, **options):
+            self.positions.append(options)
+
+    subject = SimpleNamespace(
+        _catalog_card_widgets=[Card() for _ in range(5)],
+        _catalog_grid_columns=0,
+        catalog_cards=Cards(),
+    )
+
+    BookLedgerApp._layout_catalog_cards(subject, 700)
+    assert [card.positions[-1]["column"] for card in subject._catalog_card_widgets] == [0, 1, 0, 1, 0]
+    assert subject._catalog_grid_columns == 2
+
+    BookLedgerApp._layout_catalog_cards(subject, 340)
+    assert [card.positions[-1]["column"] for card in subject._catalog_card_widgets] == [0, 0, 0, 0, 0]
+    assert subject._catalog_grid_columns == 1
+    assert subject.catalog_cards.columns[1]["weight"] == 0
+
+
+def test_catalog_grid_renders_fixed_width_cards_left_aligned_at_responsive_sizes():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk widget geometry tests require a display: {exc}")
+    try:
+        root.geometry("760x420+0+0")
+        container = ttk.Frame(root)
+        container.pack(fill="both", expand=True)
+        subject = SimpleNamespace(
+            _catalog_card_widgets=[],
+            _catalog_grid_columns=0,
+            after_idle=root.after_idle,
+        )
+        subject._queue_catalog_layout = lambda canvas, width: BookLedgerApp._queue_catalog_layout(subject, canvas, width)
+        subject._apply_pending_catalog_layout = lambda: BookLedgerApp._apply_pending_catalog_layout(subject)
+        subject._layout_catalog_cards = lambda width: BookLedgerApp._layout_catalog_cards(subject, width)
+        BookLedgerApp._build_catalog_grid(subject, container)
+        canvas = subject.catalog_canvas
+        cards = subject.catalog_cards
+        root.update()
+        widgets = []
+        for index in range(4):
+            card = ttk.LabelFrame(cards, text=f"BL-{index + 1}", width=CATALOG_CARD_WIDTH, padding=8)
+            tk.Frame(card, width=CATALOG_CARD_WIDTH - 40, height=180).pack(fill="x")
+            ttk.Label(card, text="A book title", wraplength=CATALOG_CARD_WIDTH - 40).pack(anchor="w")
+            widgets.append(card)
+        subject._catalog_card_widgets = widgets
+        for card in widgets:
+            BookLedgerApp._fix_catalog_card_geometry(card)
+        BookLedgerApp._layout_catalog_cards(subject, canvas.winfo_width())
+        root.update()
+
+        assert subject._catalog_grid_columns == 2
+        assert cards.winfo_width() == min(canvas.winfo_width(), 2 * (CATALOG_CARD_WIDTH + 14))
+        assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
+        assert widgets[0].winfo_x() < 20
+        assert widgets[1].winfo_x() > widgets[0].winfo_x()
+
+        root.geometry("360x420+0+0")
+        root.update()
+        assert subject._catalog_grid_columns == 1
+        assert cards.winfo_width() == min(canvas.winfo_width(), CATALOG_CARD_WIDTH + 14)
+        assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
+        assert widgets[0].winfo_x() < 20
+
+        root.geometry("1000x650+0+0")
+        root.update()
+        assert subject._catalog_grid_columns == 2
+        assert cards.winfo_width() == min(canvas.winfo_width(), 2 * (CATALOG_CARD_WIDTH + 14))
+        assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
+        assert widgets[0].winfo_x() < 20
+    finally:
+        root.destroy()
 
 
 def test_status_menu_prompts_only_for_not_for_sale_or_sold_departures(monkeypatch):

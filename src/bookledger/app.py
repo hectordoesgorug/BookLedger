@@ -31,6 +31,10 @@ from bookledger.services.lifecycle import CopyLifecycleService
 from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
+from bookledger.ui.status_colors import INVENTORY_STATUS_COLORS, status_message_color
+
+CATALOG_CARD_WIDTH = 320
+CATALOG_CARD_GAP = 14
 
 try:
     import ttkbootstrap as tb
@@ -155,10 +159,28 @@ class BookLedgerApp(_WindowBase):
         self.workspace = ttk.Frame(right)
         self.workspace.pack(fill="both", expand=True)
         self.status_var = tk.StringVar(value="Ready")
-        ttk.Label(right, textvariable=self.status_var, foreground="#64748b", anchor="w").pack(fill="x", pady=(12, 0))
+        self.status_label = ttk.Label(right, textvariable=self.status_var, anchor="w")
+        self.status_label.pack(fill="x", pady=(12, 0))
+        self._bind_status_color(self.status_var, self.status_label)
+
+    @staticmethod
+    def _bind_status_color(variable, label):
+        def update_color(*_args):
+            label.configure(foreground=status_message_color(variable.get()))
+
+        variable.trace_add("write", update_color)
+        update_color()
 
     def _clear_workspace(self):
         # Destroyed page widgets must not remain the active source for a later event.
+        layout_after_id = getattr(self, "_catalog_layout_after_id", None)
+        if layout_after_id is not None:
+            try:
+                self.after_cancel(layout_after_id)
+            except tk.TclError:
+                pass
+        self._catalog_layout_after_id = None
+        self._catalog_pending_layout = None
         self.tree = None
         self.tree_container = None
         self._sales_strike_overlays = []
@@ -240,6 +262,11 @@ class BookLedgerApp(_WindowBase):
         if inventory:
             ttk.Button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
             self._make_tree(frame, columns=("code", "copy_number", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Copy #", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
+            self._inventory_status_tags = {}
+            for status, color in INVENTORY_STATUS_COLORS.items():
+                tag = f"inventory_status_{status.casefold().replace(' ', '_')}"
+                self.tree.tag_configure(tag, foreground=color)
+                self._inventory_status_tags[status] = tag
             self.tree.bind("<Double-1>", self._on_tree_double_click)
             self.tree.bind("<Button-3>", self._on_inventory_right_click)
             for col in self.tree["columns"]:
@@ -295,7 +322,8 @@ class BookLedgerApp(_WindowBase):
             self.tree.delete(*self.tree.get_children())
             for row in rows:
                 values = (row["copy_code"], row["copy_number"], row["title"], row["author"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
-                self.tree.insert("", "end", iid=str(row["copy_id"]), values=values)
+                status_tags = getattr(self, "_inventory_status_tags", {})
+                self.tree.insert("", "end", iid=str(row["copy_id"]), values=values, tags=(status_tags.get(row["status"], ""),))
         else:
             rows = self._sort_catalog_rows(rows)
             self._visible_rows = rows
@@ -310,21 +338,70 @@ class BookLedgerApp(_WindowBase):
         scrollbar.pack(side="right", fill="y")
         self.catalog_cards = ttk.Frame(self.catalog_canvas)
         self._catalog_window = self.catalog_canvas.create_window((0, 0), window=self.catalog_cards, anchor="nw")
-        self.catalog_cards.bind("<Configure>", lambda _event: self.catalog_canvas.configure(scrollregion=self.catalog_canvas.bbox("all")))
-        self.catalog_canvas.bind("<Configure>", lambda event: self.catalog_canvas.itemconfigure(self._catalog_window, width=event.width))
+        canvas = self.catalog_canvas
+        cards = self.catalog_cards
+        window = self._catalog_window
+        cards.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        self._catalog_card_widgets = []
+        self._catalog_grid_columns = 0
+        self._catalog_layout_after_id = None
+        self._catalog_pending_layout = None
+
+        def resize_canvas(event):
+            self._queue_catalog_layout(canvas, event.width)
+
+        self.catalog_canvas.bind("<Configure>", resize_canvas)
+
+    def _queue_catalog_layout(self, canvas, width):
+        self._catalog_pending_layout = (canvas, width)
+        if self._catalog_layout_after_id is None:
+            self._catalog_layout_after_id = self.after_idle(self._apply_pending_catalog_layout)
+
+    def _apply_pending_catalog_layout(self):
+        self._catalog_layout_after_id = None
+        pending = self._catalog_pending_layout
+        self._catalog_pending_layout = None
+        if not pending:
+            return
+        canvas, width = pending
+        if canvas is not getattr(self, "catalog_canvas", None):
+            return
+        try:
+            if not canvas.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._layout_catalog_cards(width)
+
+    def _layout_catalog_cards(self, available_width):
+        if not self._catalog_card_widgets:
+            return
+        cell_width = CATALOG_CARD_WIDTH + CATALOG_CARD_GAP
+        columns = max(1, int(max(available_width, 1) // cell_width))
+        content_width = min(max(available_width, 1), columns * cell_width)
+        canvas = getattr(self, "catalog_canvas", None)
+        window = getattr(self, "_catalog_window", None)
+        if canvas is not None and window is not None:
+            canvas.itemconfigure(window, width=content_width)
+        prior_columns = self._catalog_grid_columns
+        if columns == prior_columns:
+            return
+        for column in range(max(prior_columns, columns)):
+            self.catalog_cards.grid_columnconfigure(column, weight=0, uniform="")
+        self._catalog_grid_columns = columns
+        for index, card in enumerate(self._catalog_card_widgets):
+            card.grid(row=index // columns, column=index % columns, sticky="nw", padx=CATALOG_CARD_GAP // 2, pady=7)
 
     def _render_catalog_cards(self, rows):
         for child in self.catalog_cards.winfo_children():
             child.destroy()
         self._catalog_images = []
-        width = max(self.catalog_canvas.winfo_width(), 760)
-        columns = max(2, min(6, width // 195))
-        for col in range(columns):
-            self.catalog_cards.grid_columnconfigure(col, weight=1, uniform="catalog-card")
+        self._catalog_card_widgets = []
+        self._catalog_grid_columns = 0
         for index, row in enumerate(rows):
-            card = ttk.LabelFrame(self.catalog_cards, text=row["copy_code"], padding=8)
-            card.grid(row=index // columns, column=index % columns, sticky="nsew", padx=7, pady=7)
-            art = tk.Frame(card, width=150, height=170, background="#edf1f5")
+            card = ttk.LabelFrame(self.catalog_cards, text=row["copy_code"], padding=8, width=CATALOG_CARD_WIDTH)
+            self._catalog_card_widgets.append(card)
+            art = tk.Frame(card, width=CATALOG_CARD_WIDTH - 40, height=180, background="#edf1f5")
             art.pack(fill="x", pady=(0, 7))
             art.pack_propagate(False)
             photo_path = Path(row["photo_path"])
@@ -333,7 +410,7 @@ class BookLedgerApp(_WindowBase):
             try:
                 with Image.open(photo_path) as source:
                     image = source.convert("RGB")
-                    image.thumbnail((145, 165), Image.Resampling.LANCZOS)
+                    image.thumbnail((CATALOG_CARD_WIDTH - 52, 170), Image.Resampling.LANCZOS)
                     image = self._sold_thumbnail(image, row["status"])
                     photo = ImageTk.PhotoImage(image)
                 self._catalog_images.append(photo)
@@ -341,11 +418,14 @@ class BookLedgerApp(_WindowBase):
                 image_label.place(relx=0.5, rely=0.5, anchor="center")
             except (OSError, tk.TclError):
                 tk.Label(art, text="Photo Unavailable", background="#edf1f5", foreground="#596579").place(relx=0.5, rely=0.5, anchor="center")
-            if row["status"] == "Sold":
+            decoration = self._catalog_thumbnail_indicator(row["status"])
+            if decoration == "sold":
                 tk.Label(art, text="SOLD", bg="#b42318", fg="white", font=("Segoe UI", 12, "bold"), padx=10, pady=4).place(relx=0.5, rely=0.5, anchor="center")
-            ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=165).pack(anchor="w")
+            elif decoration == "lock":
+                self._add_not_for_sale_lock(art)
+            ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=CATALOG_CARD_WIDTH - 40).pack(anchor="w")
             ttk.Label(card, text=self._physical_copy_label(row), foreground="#596579").pack(anchor="w", pady=(2, 0))
-            ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=165).pack(anchor="w", pady=(2, 5))
+            ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=CATALOG_CARD_WIDTH - 40).pack(anchor="w", pady=(2, 5))
             ttk.Label(card, text=self.money(row["display_price_minor"]), font=("Segoe UI", 11, "bold")).pack(anchor="w")
             def bind_card(widget, copy_id=row["copy_id"]):
                 widget.bind("<Double-Button-1>", lambda _event: self.open_copy_details(copy_id))
@@ -353,6 +433,33 @@ class BookLedgerApp(_WindowBase):
                 for child in widget.winfo_children():
                     bind_card(child, copy_id)
             bind_card(card)
+        for card in self._catalog_card_widgets:
+            self._fix_catalog_card_geometry(card)
+        self._layout_catalog_cards(self.catalog_canvas.winfo_width())
+
+    @staticmethod
+    def _fix_catalog_card_geometry(card):
+        # Card contents use pack(), which otherwise overrides the configured width.
+        card.update_idletasks()
+        card.configure(width=CATALOG_CARD_WIDTH, height=card.winfo_reqheight())
+        card.pack_propagate(False)
+
+    @staticmethod
+    def _add_not_for_sale_lock(parent):
+        icon = tk.Canvas(parent, width=32, height=32, background="#edf1f5", highlightthickness=0, bd=0)
+        icon.place(relx=1.0, x=-6, y=6, anchor="ne")
+        icon.create_oval(1, 1, 31, 31, fill="#334155", outline="#ffffff", width=1)
+        icon.create_arc(9, 6, 23, 20, start=0, extent=180, style="arc", outline="#ffffff", width=2)
+        icon.create_rectangle(8, 14, 24, 25, fill="#ffffff", outline="#ffffff")
+        icon.create_oval(14, 17, 18, 21, fill="#334155", outline="#334155")
+
+    @staticmethod
+    def _catalog_thumbnail_indicator(status):
+        if status == "Sold":
+            return "sold"
+        if status == "Not for Sale":
+            return "lock"
+        return None
 
     def _sort_inventory(self, column):
         if getattr(self, "_inventory_sort_column", None) == column:
@@ -920,7 +1027,9 @@ class BookLedgerApp(_WindowBase):
         warning = self.provider_settings_store.warning or ""
         config_path = self.provider_settings_store.active_path
         self._provider_config_status = tk.StringVar(value=warning or f"Settings file: {config_path}")
-        ttk.Label(panel, textvariable=self._provider_config_status, foreground="#64748b", wraplength=560).pack(anchor="w", pady=(8, 0))
+        self._provider_config_status_label = ttk.Label(panel, textvariable=self._provider_config_status, wraplength=560)
+        self._provider_config_status_label.pack(anchor="w", pady=(8, 0))
+        self._bind_status_color(self._provider_config_status, self._provider_config_status_label)
 
         planned = ttk.LabelFrame(parent, text="Planned metadata integrations", padding=16)
         planned.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
@@ -972,7 +1081,9 @@ class BookLedgerApp(_WindowBase):
         self.google_books_api_status = tk.StringVar(
             value=config_warning or "API key is optional; saved keys remain masked."
         )
-        ttk.Label(google, textvariable=self.google_books_api_status, foreground="#64748b", wraplength=920).grid(row=2, column=0, columnspan=7, sticky="w", pady=(8, 0))
+        self.google_books_api_status_label = ttk.Label(google, textvariable=self.google_books_api_status, wraplength=920)
+        self.google_books_api_status_label.grid(row=2, column=0, columnspan=7, sticky="w", pady=(8, 0))
+        self._bind_status_color(self.google_books_api_status, self.google_books_api_status_label)
 
         planned = ttk.LabelFrame(parent, text="Planned API integrations", padding=12)
         planned.pack(fill="x", anchor="n", pady=(12, 0))
@@ -1021,7 +1132,9 @@ class BookLedgerApp(_WindowBase):
         self.clear_log_button.pack(fill="x", pady=3)
         ttk.Checkbutton(logging_panel, text="Enable Logging", variable=self.logging_var, command=self._toggle_logging).pack(anchor="w", pady=(8, 3))
         self.logging_status_var = tk.StringVar(value=self._logging_warning or ("Logging is enabled." if self._logging_enabled else "Logging is off."))
-        ttk.Label(logging_panel, textvariable=self.logging_status_var, foreground="#64748b", wraplength=220).pack(anchor="w", pady=(4, 0))
+        self.logging_status_label = ttk.Label(logging_panel, textvariable=self.logging_status_var, wraplength=220)
+        self.logging_status_label.pack(anchor="w", pady=(4, 0))
+        self._bind_status_color(self.logging_status_var, self.logging_status_label)
 
     def _build_poster_setup(self, parent):
         ttk.Label(parent, text="Poster setup is reserved for future development.", foreground="#64748b").pack(anchor="nw")

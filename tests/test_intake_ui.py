@@ -64,9 +64,120 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert widget.mobile_panel.master is widget.right_panel
     assert widget.actions_panel.master is widget.right_panel
     title_row = int(widget._widgets["title"].grid_info()["row"])
+    assert int(widget._field_labels["title"].grid_info()["row"]) == title_row
     title_error = widget._errors["title"].grid_info()
-    assert int(title_error["row"]) > title_row
+    assert int(title_error["row"]) == title_row + 1
     assert int(title_error["column"]) == 1
+    assert widget._field_labels["srp"].cget("text") == "SRP"
+
+
+def test_short_fields_use_the_approved_two_column_form_layout(form):
+    widget, _root, _photo = form
+    for left_key, right_key in (
+        ("genre", "edition"),
+        ("publisher", "page_count"),
+        ("publication_year", "srp"),
+        ("format", "location"),
+        ("condition", "price"),
+    ):
+        left = widget._widgets[left_key].grid_info()
+        right = widget._widgets[right_key].grid_info()
+        assert left["row"] == right["row"]
+        assert widget._widgets[left_key].master is widget.body
+        assert widget._widgets[right_key].master is widget.body
+        assert int(widget._field_labels[left_key].grid_info()["column"]) == 0
+        assert int(left["column"]) == 1
+        assert int(widget._field_labels[right_key].grid_info()["column"]) == 2
+        assert int(right["column"]) == 3
+        assert int(widget._field_labels[left_key].grid_info()["row"]) == int(left["row"])
+        assert int(widget._field_labels[right_key].grid_info()["row"]) == int(right["row"])
+        for key in (left_key, right_key):
+            field = widget._widgets[key].grid_info()
+            error = widget._errors[key].grid_info()
+            assert widget._errors[key].master is widget.body
+            assert int(error["row"]) == int(field["row"]) + 1
+            assert int(error["column"]) == int(field["column"])
+
+    widget.update_idletasks()
+    left_input = widget._widgets["genre"]
+    right_label = widget._field_labels["edition"]
+    assert right_label.winfo_x() - (left_input.winfo_x() + left_input.winfo_width()) >= 16
+
+    for key in ("title", "author", "isbn"):
+        field = widget._widgets[key].grid_info()
+        label = widget._field_labels[key].grid_info()
+        error = widget._errors[key].grid_info()
+        assert int(label["row"]) == int(field["row"])
+        assert int(field["column"]) == 1
+        assert int(field["columnspan"]) == 3
+        assert int(error["row"]) == int(field["row"]) + 1
+    synopsis = widget._widgets["book_details"].grid_info()
+    assert int(synopsis["column"]) == 1
+    assert int(synopsis["columnspan"]) == 3
+    assert int(widget._field_labels["book_details"].grid_info()["row"]) == int(synopsis["row"])
+    photo_controls = widget.photo_path_label.master.grid_info()
+    assert int(photo_controls["columnspan"]) == 3
+    assert int(photo_controls["row"]) == int(widget._field_labels["photo_path"].grid_info()["row"])
+    assert int(widget._errors["photo_path"].grid_info()["row"]) == int(photo_controls["row"]) + 1
+
+
+def test_form_minimum_size_keeps_scrollable_content_reachable(form):
+    widget, root, _photo = form
+    root.deiconify()
+    root.geometry("400x300+0+0")
+    widget.geometry("960x700")
+    widget.update()
+    canvas = widget.body.master
+    canvas.update_idletasks()
+    body_height = widget.body.winfo_reqheight()
+    viewport_height = canvas.winfo_height()
+    assert body_height > 0
+    assert viewport_height > 0
+    scroll_region = tuple(map(int, canvas.cget("scrollregion").split()))
+    assert scroll_region[3] >= body_height
+    assert body_height > viewport_height
+    assert widget.body.winfo_width() <= canvas.winfo_width()
+    short_keys = ("genre", "edition", "publisher", "page_count", "publication_year", "srp", "format", "location", "condition", "price")
+    input_widths = {widget._widgets[key].winfo_width() for key in short_keys}
+    assert len(input_widths) == 1
+    short_row = int(widget._widgets["genre"].grid_info()["row"])
+    assert widget.body.grid_bbox(0, short_row, 1, 1)[2] == widget.body.grid_bbox(2, short_row, 1, 1)[2]
+    for key in short_keys:
+        error = widget._errors[key]
+        assert int(error.cget("wraplength")) == error.winfo_width()
+    # Scrolling remains available at the minimum supported window size.
+    assert int(widget.minsize()[1]) == 700
+
+    for geometry in ("1120x850", "1400x900"):
+        widget.geometry(geometry)
+        widget.update()
+        short_row = int(widget._widgets["genre"].grid_info()["row"])
+        assert widget.body.grid_bbox(0, short_row, 1, 1)[2] == widget.body.grid_bbox(2, short_row, 1, 1)[2]
+        assert len({widget._widgets[key].winfo_width() for key in short_keys}) == 1
+        assert all(widget._errors[key].winfo_width() == widget._widgets[key].winfo_width() for key in short_keys)
+
+
+def test_edit_form_uses_the_same_two_column_layout(form):
+    widget, root, photo = form
+    edit = BookForm(
+        root,
+        service=widget.service,
+        photo_service=widget.photo_service,
+        on_saved=lambda: None,
+        existing={
+            "title": "An Existing Book", "author": "Test Author", "genre": "Science",
+            "format": "Paperback", "condition": "Good", "location": "Shelf",
+            "price_minor": 50000, "status": "Available", "srp_minor": None,
+        },
+    )
+    edit.update_idletasks()
+    assert int(edit._field_labels["genre"].grid_info()["row"]) == int(edit._widgets["genre"].grid_info()["row"])
+    assert int(edit._widgets["genre"].grid_info()["column"]) == 1
+    assert int(edit._widgets["edition"].grid_info()["column"]) == 3
+    assert int(edit._errors["genre"].grid_info()["row"]) == int(edit._widgets["genre"].grid_info()["row"]) + 1
+    assert int(edit.photo_path_label.master.grid_info()["columnspan"]) == 3
+    assert edit._field_labels["srp"].cget("text") == "SRP"
+    edit.destroy()
 
 
 def test_lookup_keeps_all_provider_statuses_not_attempted_until_service_reports_progress(form, monkeypatch):

@@ -12,6 +12,7 @@ from bookledger.config import APPROVED_GENRES, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
+from bookledger.ui.status_colors import status_message_color
 
 NO_DATA = "No Data"
 OPTIONAL_METADATA_FIELDS = frozenset({"publisher", "publication_year", "edition", "page_count", "srp", "book_details"})
@@ -106,16 +107,19 @@ class BookForm(tk.Toplevel):
         scrollbar.grid(row=0, column=1, sticky="ns")
         canvas.bind("<Configure>", lambda event: canvas.itemconfigure(self._form_canvas_window, width=event.width))
         self.body = body
-        body.columnconfigure(1, weight=1)
+        body.columnconfigure(0, weight=0, uniform="form-labels")
+        body.columnconfigure(1, weight=1, uniform="form-inputs")
+        body.columnconfigure(2, weight=0, uniform="form-labels")
+        body.columnconfigure(3, weight=1, uniform="form-inputs")
 
         row = 0
-        ttk.Label(body, text="Bibliographic Details", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(body, text="Bibliographic Details", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=4, sticky="w", pady=(0, 8))
         row += 1
-        row = self._field(body, "Title", "title", row, required=True)
-        row = self._field(body, "Author", "author", row, required=True)
-        row = self._field(body, "ISBN (Optional)", "isbn", row)
+        row = self._field(body, "Title", "title", row, required=True, full_width=True)
+        row = self._field(body, "Author", "author", row, required=True, full_width=True)
+        row = self._field(body, "ISBN (Optional)", "isbn", row, full_width=True)
         self.isbn_controls = ttk.Frame(body)
-        self.isbn_controls.grid(row=row, column=1, sticky="w", pady=(0, 6))
+        self.isbn_controls.grid(row=row, column=1, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
         self.lookup_button = ttk.Button(self.isbn_controls, text="Look Up ISBN", command=self._lookup_metadata)
         self.lookup_button.pack(side="left")
@@ -126,24 +130,28 @@ class BookForm(tk.Toplevel):
         ).pack(side="left", padx=(10, 0))
         genre_values = self.service.list_genres() if hasattr(self.service, "list_genres") else APPROVED_GENRES
         format_values = self.service.list_formats() if hasattr(self.service, "list_formats") else DEFAULT_FORMATS
-        row = self._field(body, "Genre", "genre", row, required=True, values=genre_values)
-        row = self._field(body, "Publisher/Imprint", "publisher", row)
-        row = self._field(body, "Publication Year", "publication_year", row)
-        row = self._field(body, "Edition", "edition", row)
-        row = self._field(body, "Page Count", "page_count", row)
-        row = self._field(body, "SRP (PHP, Reference Only)", "srp", row, read_only=True)
+        for left, right in (
+            (("Genre", "genre", {"required": True, "values": genre_values}), ("Edition", "edition", {})),
+            (("Publisher/Imprint", "publisher", {}), ("Page Count", "page_count", {})),
+            (("Publication Year", "publication_year", {}), ("SRP", "srp", {"read_only": True})),
+        ):
+            self._field(body, left[0], left[1], row, column=0, **left[2])
+            self._field(body, right[0], right[1], row, column=2, **right[2])
+            row += 2
         row = self._multiline_field(body, "Book Details/Synopsis", "book_details", row)
 
-        ttk.Label(body, text="Physical Copy", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(18, 8))
+        ttk.Label(body, text="Physical Copy", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=4, sticky="w", pady=(18, 8))
         row += 1
-        row = self._field(body, "Format", "format", row, required=True, values=format_values)
-        row = self._field(body, "Condition", "condition", row, required=True, values=("Like New", "Very Good", "Good", "Acceptable", "Poor"))
-        row = self._field(body, "Location", "location", row, values=self.service.list_locations())
-        row = self._field(body, "Price (PHP)", "price", row, required=True)
+        self._field(body, "Format", "format", row, column=0, required=True, values=format_values)
+        self._field(body, "Location", "location", row, column=2, values=self.service.list_locations())
+        row += 2
+        self._field(body, "Condition", "condition", row, column=0, required=True, values=("Like New", "Very Good", "Good", "Acceptable", "Poor"))
+        self._field(body, "Price (PHP)", "price", row, column=2, required=True)
+        row += 2
         row = self._photo_row(body, row)
 
         self.metadata_status_panel = ttk.Frame(body)
-        self.metadata_status_panel.grid(row=row, column=0, columnspan=2, sticky="w", pady=(12, 2))
+        self.metadata_status_panel.grid(row=row, column=0, columnspan=4, sticky="w", pady=(12, 2))
         self.metadata_label = ttk.Label(self.metadata_status_panel, textvariable=self.metadata_status, foreground="#334155")
         self.metadata_label.grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(self.metadata_status_panel, text="Open Library:", foreground="#596579").grid(row=1, column=0, sticky="w", padx=(0, 4))
@@ -157,11 +165,11 @@ class BookForm(tk.Toplevel):
         self.booktopia_label.grid(row=3, column=1, sticky="w")
         row += 1
         ttk.Label(body, text="Fields marked * are required. Metadata lookup is optional.", foreground="#596579").grid(
-            row=row, column=0, columnspan=2, sticky="w"
+            row=row, column=0, columnspan=4, sticky="w"
         )
         row += 1
         self.error_summary = ttk.Label(body, text="", foreground="#b42318", wraplength=620)
-        self.error_summary.grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.error_summary.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
         self.right_panel = ttk.Frame(content)
         self.right_panel.grid(row=0, column=1, sticky="nsew")
@@ -189,26 +197,59 @@ class BookForm(tk.Toplevel):
 
         self._build_mobile_status(self.right_panel)
         self._build_actions(self.right_panel)
+        self._bind_status_color(self.metadata_status, self.metadata_label)
+        self._bind_status_color(self.open_library_status, self.open_library_label)
+        self._bind_status_color(self.google_books_status, self.google_books_label)
+        self._bind_status_color(self.booktopia_status, self.booktopia_label)
+        self._bind_status_color(self.mobile_status, self.mobile_status_label)
         self._update_control_states()
 
-    def _field(self, parent, label, key, row, *, required=False, values=None, read_only=False):
-        field_label = ttk.Label(parent, text=f"{label} *" if required else label)
-        field_label.grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
+    @staticmethod
+    def _bind_status_color(variable, label):
+        def update_color(*_args):
+            label.configure(foreground=status_message_color(variable.get()))
+
+        variable.trace_add("write", update_color)
+        update_color()
+
+    def _field(self, parent, label, key, row, *, required=False, values=None, read_only=False, column=0, full_width=False):
+        if full_width:
+            field_parent = parent
+            label_column, label_span = 0, 1
+            widget_column, widget_span = 1, 3
+            label_row = widget_row = row
+            error_row, next_row = row + 1, row + 2
+        else:
+            field_parent = parent
+            label_column, label_span = column, 1
+            widget_column, widget_span = column + 1, 1
+            label_row = widget_row = row
+            error_row, next_row = row + 1, row + 2
+        field_label = ttk.Label(field_parent, text=f"{label} *" if required else label)
+        label_padx = (16, 8) if column == 2 and not full_width else (0, 8)
+        field_label.grid(row=label_row, column=label_column, columnspan=label_span, sticky="w", padx=label_padx, pady=4)
         self._field_labels[key] = field_label
         if values:
-            widget = ttk.Combobox(parent, values=values, width=32)
+            widget = ttk.Combobox(field_parent, values=values, width=14 if not full_width else 32)
             if key != "genre":
                 widget.configure(state="readonly")
         else:
-            widget = ttk.Entry(parent, width=34)
+            widget = ttk.Entry(field_parent, width=12 if not full_width else 34)
             if read_only:
                 widget.configure(state="readonly")
-        widget.grid(row=row, column=1, sticky="ew", pady=4)
-        parent.grid_columnconfigure(1, weight=1)
+        widget.grid(row=widget_row, column=widget_column, columnspan=widget_span, sticky="ew", pady=4)
         self._widgets[key] = widget
-        error = ttk.Label(parent, text="", foreground="#b42318", wraplength=560)
-        error.grid(row=row + 1, column=1, sticky="w", pady=(0, 3))
+        error = ttk.Label(field_parent, text="", foreground="#b42318", wraplength=560 if full_width else 1)
+        error.grid(row=error_row, column=widget_column, columnspan=widget_span, sticky="ew", pady=(0, 3))
         self._errors[key] = error
+        if not full_width:
+            error.bind(
+                "<Configure>",
+                lambda event, target=error: target.configure(wraplength=max(1, event.width))
+                if int(target.cget("wraplength")) != event.width
+                else None,
+                add="+",
+            )
         widget.bind("<KeyRelease>", lambda _event, field=key: self._clear_valid_error(field), add="+")
         if key == "isbn":
             widget.bind("<KeyRelease>", lambda _event: self._isbn_changed(), add="+")
@@ -217,17 +258,16 @@ class BookForm(tk.Toplevel):
             widget.bind("<FocusOut>", lambda _event, field=key: self._restore_placeholder(field), add="+")
         if isinstance(widget, ttk.Combobox):
             widget.bind("<<ComboboxSelected>>", lambda _event, field=key: self._clear_valid_error(field), add="+")
-        return row + 2
+        return next_row
 
     def _multiline_field(self, parent, label, key, row):
         field_label = ttk.Label(parent, text=label)
         field_label.grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=4)
         widget = tk.Text(parent, height=3, width=34, wrap="word", relief="solid", borderwidth=1)
-        widget.grid(row=row, column=1, sticky="ew", pady=4)
-        parent.grid_columnconfigure(1, weight=1)
+        widget.grid(row=row, column=1, columnspan=3, sticky="ew", pady=4)
         self._widgets[key] = widget
         error = ttk.Label(parent, text="", foreground="#b42318", wraplength=560)
-        error.grid(row=row + 1, column=1, sticky="w", pady=(0, 3))
+        error.grid(row=row + 1, column=1, columnspan=3, sticky="w", pady=(0, 3))
         self._errors[key] = error
         self._field_labels[key] = field_label
         widget.bind("<KeyRelease>", lambda _event: self._clear_valid_error(key), add="+")
@@ -241,12 +281,12 @@ class BookForm(tk.Toplevel):
         photo_label.grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
         self._field_labels["photo_path"] = photo_label
         controls = ttk.Frame(parent)
-        controls.grid(row=row, column=1, sticky="ew", pady=4)
+        controls.grid(row=row, column=1, columnspan=3, sticky="ew", pady=4)
         self.photo_path_label = ttk.Label(controls, text="No Photo Selected", width=25)
         self.photo_path_label.pack(side="left", fill="x", expand=True)
         ttk.Button(controls, text="Choose Photo", command=self._choose_photo).pack(side="left", padx=(8, 0))
         self._errors["photo_path"] = ttk.Label(parent, text="", foreground="#b42318", wraplength=560)
-        self._errors["photo_path"].grid(row=row + 1, column=1, sticky="w", pady=(0, 3))
+        self._errors["photo_path"].grid(row=row + 1, column=1, columnspan=3, sticky="w", pady=(0, 3))
         return row + 2
 
     def _build_mobile_status(self, parent):
@@ -255,7 +295,8 @@ class BookForm(tk.Toplevel):
         panel.grid(row=1, column=0, sticky="ew", pady=(10, 8))
         panel.columnconfigure(1, weight=1)
         ttk.Label(panel, text="Status:").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        ttk.Label(panel, textvariable=self.mobile_status, foreground="#334155").grid(row=0, column=1, sticky="w")
+        self.mobile_status_label = ttk.Label(panel, textvariable=self.mobile_status)
+        self.mobile_status_label.grid(row=0, column=1, sticky="w")
 
         ttk.Label(panel, text="Connection Outcome").grid(row=1, column=0, sticky="w", pady=(8, 0))
         self.connection_outcome_box = ttk.Combobox(
