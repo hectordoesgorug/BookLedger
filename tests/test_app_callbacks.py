@@ -6,6 +6,7 @@ import pytest
 
 from bookledger import app as app_module
 from bookledger.app import CATALOG_CARD_WIDTH, BookLedgerApp
+from bookledger.config_store import AppConfigStore
 
 
 class FakeTree:
@@ -317,6 +318,636 @@ def test_catalog_grid_renders_fixed_width_cards_left_aligned_at_responsive_sizes
         assert widgets[0].winfo_x() < 20
     finally:
         root.destroy()
+
+
+def test_hover_tooltip_is_screen_clamped_and_stays_outside_parent_layout(monkeypatch):
+    class Tip:
+        def __init__(self, parent):
+            self.parent = parent
+            self.geometry = None
+            self.overrideredirect = False
+            self.attributes = {}
+
+        def wm_overrideredirect(self, value):
+            self.overrideredirect = value
+
+        def wm_attributes(self, name, value):
+            self.attributes[name] = value
+
+        def wm_geometry(self, value):
+            self.geometry = value
+
+        def update_idletasks(self):
+            pass
+
+        def winfo_reqwidth(self):
+            return 300
+
+        def winfo_reqheight(self):
+            return 100
+
+        def winfo_screenwidth(self):
+            return 1920
+
+        def winfo_screenheight(self):
+            return 1080
+
+    class Label:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def pack(self):
+            pass
+
+    tips = []
+    monkeypatch.setattr(app_module.tk, "Toplevel", lambda parent: tips.append(Tip(parent)) or tips[-1])
+    monkeypatch.setattr(app_module.ttk, "Label", Label)
+    parent = object()
+    subject = SimpleNamespace(
+        _hover_tooltip=None,
+        _hide_hover_tooltip=lambda _event=None: None,
+        winfo_toplevel=lambda: parent,
+    )
+    event = SimpleNamespace(x_root=1915, y_root=1075)
+
+    BookLedgerApp._show_hover_tooltip(subject, event, "Full explanation remains available")
+
+    assert subject._hover_tooltip.overrideredirect
+    assert subject._hover_tooltip.parent is parent
+    assert subject._hover_tooltip.attributes["-topmost"]
+    assert subject._hover_tooltip.geometry == "+1603+963"
+
+
+def test_tooltip_uses_floating_window_without_managing_parent_layout(monkeypatch):
+    events = []
+
+    class Tip:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def wm_overrideredirect(self, _value):
+            pass
+
+        def wm_attributes(self, *_args):
+            pass
+
+        def wm_geometry(self, _value):
+            pass
+
+        def update_idletasks(self):
+            pass
+
+        def winfo_reqwidth(self):
+            return 100
+
+        def winfo_reqheight(self):
+            return 60
+
+        def winfo_screenwidth(self):
+            return 1280
+
+        def winfo_screenheight(self):
+            return 800
+
+    class Label:
+        def __init__(self, parent, **_kwargs):
+            events.append(("label-parent", parent))
+
+        def pack(self):
+            events.append(("pack-tooltip-label",))
+
+    root = object()
+    panel = object()
+    monkeypatch.setattr(app_module.tk, "Toplevel", lambda parent: events.append(("toplevel-parent", parent)) or Tip(parent))
+    monkeypatch.setattr(app_module.ttk, "Label", Label)
+    subject = SimpleNamespace(
+        _hover_tooltip=None,
+        _hide_hover_tooltip=lambda _event=None: None,
+        winfo_toplevel=lambda: root,
+    )
+
+    BookLedgerApp._show_hover_tooltip(subject, SimpleNamespace(x_root=100, y_root=100), "Help")
+
+    assert subject._hover_tooltip.parent is root
+    assert events == [("toplevel-parent", root), ("label-parent", subject._hover_tooltip), ("pack-tooltip-label",)]
+    assert all(panel is not event for event in events)
+
+
+def test_tooltip_wraps_inside_available_panel_space_to_avoid_adjacent_controls(monkeypatch):
+    captured = {}
+
+    class Tip:
+        def __init__(self, _parent):
+            pass
+
+        def wm_overrideredirect(self, _value):
+            pass
+
+        def wm_attributes(self, *_args):
+            pass
+
+        def wm_geometry(self, value):
+            captured["geometry"] = value
+
+        def update_idletasks(self):
+            pass
+
+        def winfo_reqwidth(self):
+            return captured["wraplength"] + 16
+
+        def winfo_reqheight(self):
+            return 80
+
+        def winfo_screenwidth(self):
+            return 1280
+
+        def winfo_screenheight(self):
+            return 800
+
+    class Label:
+        def __init__(self, _parent, *, wraplength, **_kwargs):
+            captured["wraplength"] = wraplength
+
+        def pack(self):
+            pass
+
+    panel = SimpleNamespace(winfo_width=lambda: 494, winfo_rootx=lambda: 246)
+    widget = SimpleNamespace(_tooltip_bounds=panel)
+    monkeypatch.setattr(app_module.tk, "Toplevel", Tip)
+    monkeypatch.setattr(app_module.ttk, "Label", Label)
+    subject = SimpleNamespace(
+        _hover_tooltip=None,
+        _hide_hover_tooltip=lambda _event=None: None,
+        winfo_toplevel=lambda: object(),
+    )
+
+    BookLedgerApp._show_hover_tooltip(subject, SimpleNamespace(x_root=493, y_root=198, widget=widget), "Readable help")
+
+    assert captured["wraplength"] == 215
+    assert captured["geometry"] == "+505+210"
+    assert int(captured["geometry"].split("+")[1]) + captured["wraplength"] + 16 <= 740
+
+
+def test_preferences_delete_tooltip_has_no_info_icon_and_preserves_row_geometry():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk UI geometry test requires Tcl/Tk: {exc}")
+    root.geometry("1000x700")
+    root._hide_hover_tooltip = lambda event=None: BookLedgerApp._hide_hover_tooltip(root, event)
+    parent = ttk.Frame(root, padding=12)
+    parent.pack(fill="both", expand=True)
+    subject = SimpleNamespace(
+        _show_hover_tooltip=lambda event, message: BookLedgerApp._show_hover_tooltip(root, event, message),
+        _hide_hover_tooltip=lambda event=None: BookLedgerApp._hide_hover_tooltip(root, event),
+    )
+    try:
+        def geometry(widget):
+            return (widget.winfo_rootx(), widget.winfo_rooty(), widget.winfo_width(), widget.winfo_height())
+
+        for index, (title, kind) in enumerate((
+            ("Genre", "genre"),
+            ("Format", "format"),
+            ("Location", "location"),
+        )):
+            BookLedgerApp._build_value_list_editor(
+                subject,
+                parent,
+                title,
+                kind,
+                lambda: ["Assigned value", "Unassigned value"],
+                lambda value: int(value == "Assigned value"),
+                lambda value: value,
+                lambda old, new: new,
+                lambda _value: None,
+                row=index,
+                column=0,
+            )
+        root.update()
+        for title in ("Genre", "Format", "Location"):
+            panel = next(child for child in parent.winfo_children() if isinstance(child, ttk.LabelFrame) and child.cget("text") == title)
+            list_frame = next(child for child in panel.winfo_children() if isinstance(child, ttk.Frame))
+            canvas = next(child for child in list_frame.winfo_children() if isinstance(child, tk.Canvas))
+            rows = next(child for child in canvas.winfo_children() if isinstance(child, ttk.Frame))
+            assigned_row, unassigned_row = rows.winfo_children()
+            assigned_buttons = {child.cget("text"): child for child in assigned_row.winfo_children() if isinstance(child, ttk.Button)}
+            unassigned_buttons = {child.cget("text"): child for child in unassigned_row.winfo_children() if isinstance(child, ttk.Button)}
+            assert not any(
+                isinstance(child, ttk.Label) and child.cget("text") == "ⓘ"
+                for row in (assigned_row, unassigned_row)
+                for child in row.winfo_children()
+            ), f"{title} rows should not contain redundant information icons"
+            assert str(assigned_buttons["Delete"].cget("state")) == "disabled"
+            assert str(unassigned_buttons["Delete"].cget("state")) == "normal"
+            for name in ("Rename", "Delete"):
+                assert geometry(assigned_buttons[name])[0] == geometry(unassigned_buttons[name])[0]
+                assert geometry(assigned_buttons[name])[2:] == geometry(unassigned_buttons[name])[2:]
+
+            buttons = assigned_buttons
+            before = {name: geometry(buttons[name]) for name in ("Rename", "Delete")}
+            delete_button = buttons["Delete"]
+            event = SimpleNamespace(x_root=delete_button.winfo_rootx(), y_root=delete_button.winfo_rooty(), widget=delete_button)
+            BookLedgerApp._show_hover_tooltip(root, event, f"{title} assignments remain protected.")
+            root.update()
+            visible = {name: geometry(buttons[name]) for name in ("Rename", "Delete")}
+            assert root._hover_tooltip.winfo_exists()
+            assert "assignments remain protected" in root._hover_tooltip.winfo_children()[0].cget("text")
+            assert visible == before, f"{title} row moved while its tooltip was visible"
+
+            BookLedgerApp._hide_hover_tooltip(root)
+            root.update()
+            hidden = {name: geometry(buttons[name]) for name in ("Rename", "Delete")}
+            assert hidden == before, f"{title} row moved after its tooltip was dismissed"
+    finally:
+        root.destroy()
+
+
+def test_customize_section_uses_two_equal_button_columns_and_full_width_url_entry():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk UI geometry test requires Tcl/Tk: {exc}")
+    root.geometry("1000x700")
+    parent = ttk.Frame(root, padding=12)
+    parent.pack(fill="both", expand=True)
+    catalog = SimpleNamespace()
+    for name, values in {
+        "list_genres": [], "list_formats": [], "list_locations": [],
+    }.items():
+        setattr(catalog, name, lambda values=values: values)
+    for name in (
+        "value_assignment_count", "location_assignment_count",
+    ):
+        setattr(catalog, name, lambda *_args: 0)
+    for name in ("add_genre", "rename_genre", "delete_genre", "add_format", "rename_format", "delete_format", "add_location", "rename_location", "delete_location"):
+        setattr(catalog, name, lambda *_args: None)
+    subject = SimpleNamespace(
+        catalog=catalog,
+        config_store=SimpleNamespace(get=lambda *_args: ""),
+        _available_theme_names=("clam", "flatly"),
+        _active_theme="clam",
+        _apply_theme_selection=lambda: None,
+        _show_hover_tooltip=lambda *_args: None,
+        _hide_hover_tooltip=lambda *_args: None,
+        _change_shop_logo=lambda: None,
+        _clear_shop_logo=lambda: None,
+        _save_shop_url=lambda: None,
+        _clear_shop_url=lambda: None,
+    )
+    subject._build_value_list_editor = lambda *args, **kwargs: BookLedgerApp._build_value_list_editor(subject, *args, **kwargs)
+
+    try:
+        BookLedgerApp._build_preferences(subject, parent)
+        root.update()
+        customize = next(child for child in parent.winfo_children() if isinstance(child, ttk.LabelFrame) and child.cget("text") == "Customize")
+        buttons = {child.cget("text"): child for child in customize.winfo_children() if isinstance(child, ttk.Button)}
+        theme_selector = subject.theme_selector
+        assert str(theme_selector.cget("state")) == "readonly"
+        assert tuple(theme_selector.cget("values")) == subject._available_theme_names
+        assert subject.theme_var.get() == "clam"
+        names = ("Change Logo", "Clear Logo", "Add Logo Link", "Clear Logo Link")
+        assert set(names) <= set(buttons)
+        assert {buttons[name].cget("width") for name in names} == {16}
+        assert len({buttons[name].winfo_height() for name in names}) == 1
+        assert buttons["Change Logo"].grid_info()["row"] == buttons["Clear Logo"].grid_info()["row"]
+        assert buttons["Add Logo Link"].grid_info()["row"] == buttons["Clear Logo Link"].grid_info()["row"]
+        assert buttons["Change Logo"].winfo_rootx() < buttons["Clear Logo"].winfo_rootx()
+        assert buttons["Add Logo Link"].winfo_rootx() < buttons["Clear Logo Link"].winfo_rootx()
+        url_entry = subject.shop_url_entry
+        assert url_entry.grid_info()["row"] == 5
+        assert url_entry.grid_info()["columnspan"] == 2
+        assert url_entry.winfo_width() > buttons["Change Logo"].winfo_width()
+    finally:
+        root.destroy()
+
+
+def test_theme_selection_applies_only_supported_names_and_persists_for_restart(tmp_path):
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    class ThemeStyle:
+        def __init__(self):
+            self.current = "clam"
+
+        def theme_use(self, name=None):
+            if name is None:
+                return self.current
+            if name not in ("clam", "flatly", "darkly"):
+                raise tk.TclError(name)
+            self.current = name
+            return name
+
+    config_path = tmp_path / "config.json"
+    store = AppConfigStore(config_path)
+    store.set(("preferences", "shop_url"), "https://shop.example/books")
+    style = ThemeStyle()
+    status = Value("")
+    subject = SimpleNamespace(
+        theme_var=Value("flatly"),
+        theme_style=style,
+        _available_theme_names=("clam", "flatly", "darkly"),
+        config_store=store,
+        status_var=status,
+        _configure_style=lambda: None,
+    )
+
+    assert BookLedgerApp._apply_theme_selection(subject)
+    assert style.theme_use() == "flatly"
+    reloaded = AppConfigStore(config_path)
+    assert reloaded.get(("preferences", "theme")) == "flatly"
+    assert reloaded.get(("preferences", "shop_url")) == "https://shop.example/books"
+    assert app_module.resolve_theme_name(
+        subject._available_theme_names,
+        reloaded.get(("preferences", "theme")),
+        "clam",
+    ) == "flatly"
+
+    subject.theme_var.set("unsupported-theme")
+    assert not BookLedgerApp._apply_theme_selection(subject)
+    assert style.theme_use() == "flatly"
+    assert reloaded.get(("preferences", "theme")) == "flatly"
+
+    store.set(("preferences", "theme"), "missing-theme")
+    assert app_module.resolve_theme_name(subject._available_theme_names, "missing-theme", "clam") == "clam"
+    assert AppConfigStore(config_path).get(("preferences", "theme")) == "missing-theme"
+
+
+def test_navigation_icons_use_uniform_larger_geometry():
+    assert app_module.NAV_ICON_FRAME_SIZE == 36
+    assert len(set(app_module.NAV_ICON_CONTENT_SIZES)) == 3
+    assert min(app_module.NAV_ICON_CONTENT_SIZES) >= 26
+    for _name, filename, _fallback in app_module.NAVIGATION_ITEMS:
+        image = app_module.render_svg_icon(
+            app_module.resource_path("assets", filename),
+            frame_size=app_module.NAV_ICON_FRAME_SIZE,
+            content_size=app_module.NAV_ICON_CONTENT_SIZES[0],
+        )
+        assert image is not None
+        assert image.size == (36, 36)
+        assert image.getbbox() is not None
+
+
+def test_navigation_active_style_and_hover_animation_restore_without_layout_changes():
+    class Scheduler:
+        def __init__(self):
+            self.jobs = {}
+            self.serial = 0
+
+        def after(self, _delay, callback):
+            self.serial += 1
+            self.jobs[self.serial] = callback
+            return self.serial
+
+        def after_cancel(self, job_id):
+            self.jobs.pop(job_id, None)
+
+        def finish(self):
+            while self.jobs:
+                job_id = next(iter(self.jobs))
+                self.jobs.pop(job_id)()
+
+    class Button:
+        def __init__(self, images):
+            self._nav_frame_images = images
+            self._nav_frame_index = 0
+            self._nav_animation_after_id = None
+            self.current_image = images[0]
+            self.styles = []
+
+        def configure(self, **kwargs):
+            if "image" in kwargs:
+                self.current_image = kwargs["image"]
+            if "style" in kwargs:
+                self.styles.append(kwargs["style"])
+
+        def winfo_exists(self):
+            return True
+
+    scheduler = Scheduler()
+    images = (object(), object(), object())
+    catalog = Button(images)
+    settings = Button(images)
+    subject = SimpleNamespace(
+        after=scheduler.after,
+        after_cancel=scheduler.after_cancel,
+        current_page="Catalog",
+        nav_buttons={"Catalog": catalog, "Settings": settings},
+    )
+
+    BookLedgerApp._update_active_navigation(subject)
+    assert catalog.styles[-1] == "SidebarActive.TButton"
+    assert settings.styles[-1] == "Sidebar.TButton"
+
+    BookLedgerApp._animate_navigation_button(subject, catalog, 2)
+    scheduler.finish()
+    assert catalog._nav_frame_index == 2
+    assert catalog.current_image is images[2]
+    BookLedgerApp._animate_navigation_button(subject, catalog, 0)
+    scheduler.finish()
+    assert catalog._nav_frame_index == 0
+    assert catalog.current_image is images[0]
+
+
+def test_shop_url_save_and_logo_click_preserve_config_and_only_open_web_urls(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"other":{"keep":true}}', encoding="utf-8")
+    store = AppConfigStore(config_path)
+
+    class Value:
+        def __init__(self, value=""):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    subject = SimpleNamespace(
+        config_store=store,
+        shop_url_var=Value("shop.example/store"),
+        status_var=Value(),
+    )
+    subject._logo_url = lambda: BookLedgerApp._logo_url(subject)
+    assert BookLedgerApp._save_shop_url(subject)
+    assert subject.shop_url_var.get() == "https://shop.example/store"
+    saved = __import__("json").loads(config_path.read_text(encoding="utf-8"))
+    assert saved["other"] == {"keep": True}
+    assert saved["preferences"]["shop_url"] == "https://shop.example/store"
+
+    opened = []
+    monkeypatch.setattr(app_module.webbrowser, "open", lambda url, new: opened.append((url, new)) or True)
+    assert BookLedgerApp._open_shop_link(subject)
+    assert opened == [("https://shop.example/store", 2)]
+    store.set(("preferences", "shop_url"), "file:///C:/Windows/system.ini")
+    assert not BookLedgerApp._open_shop_link(subject)
+    assert opened == [("https://shop.example/store", 2)]
+    store.set(("preferences", "shop_url"), "")
+    assert not BookLedgerApp._open_shop_link(subject)
+
+
+def test_custom_shop_logo_selection_is_saved_as_a_relative_portable_asset(tmp_path, monkeypatch):
+    source = tmp_path / "shop.png"
+    Image.new("RGBA", (1400, 700), (30, 90, 160, 255)).save(source)
+    data = tmp_path / "portable" / "data"
+    store = AppConfigStore(tmp_path / "portable" / "config.json")
+    selected = [str(source)]
+    monkeypatch.setattr(app_module.filedialog, "askopenfilename", lambda **_kwargs: selected[0])
+
+    class Status:
+        def set(self, _value):
+            pass
+
+    subject = SimpleNamespace(
+        paths=SimpleNamespace(data=data, assets=data / "assets"),
+        config_store=store,
+        status_var=Status(),
+        _refresh_brand_logo=lambda: None,
+    )
+
+    assert BookLedgerApp._change_shop_logo(subject)
+    first_reference = store.get(("preferences", "shop_logo_path"))
+    assert first_reference.startswith("assets/shop-logo-") and first_reference.endswith(".png")
+    first_path = data / first_reference
+    assert first_path.is_file()
+    with Image.open(first_path) as image:
+        assert image.size == (1024, 512)
+
+    replacement = tmp_path / "replacement.jpg"
+    Image.new("RGB", (300, 900), "orange").save(replacement)
+    selected[0] = str(replacement)
+    assert BookLedgerApp._change_shop_logo(subject)
+    second_reference = store.get(("preferences", "shop_logo_path"))
+    assert second_reference != first_reference
+    assert (data / second_reference).is_file()
+    assert first_path.is_file()
+
+
+def test_clear_shop_logo_restores_default_persists_and_keeps_managed_asset(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    assets = data / "assets"
+    assets.mkdir(parents=True)
+    custom_logo = assets / "shop-logo-kept.png"
+    Image.new("RGB", (100, 50), "blue").save(custom_logo)
+    config_path = tmp_path / "config.json"
+    store = AppConfigStore(config_path)
+    store.set(("preferences", "shop_logo_path"), "assets/shop-logo-kept.png")
+    refreshes = []
+
+    class Status:
+        def set(self, _value):
+            pass
+
+    subject = SimpleNamespace(
+        config_store=store,
+        paths=SimpleNamespace(data=data),
+        status_var=Status(),
+        _refresh_brand_logo=lambda: refreshes.append(True),
+    )
+
+    assert BookLedgerApp._clear_shop_logo(subject)
+    assert refreshes == [True]
+    assert custom_logo.is_file()
+    assert AppConfigStore(config_path).get(("preferences", "shop_logo_path"), "") == ""
+
+    # A fresh store models restart: an empty selection loads the bundled default.
+    loaded_sizes = []
+    monkeypatch.setattr(app_module.ImageTk, "PhotoImage", lambda image, master: loaded_sizes.append(image.size) or object())
+    subject.config_store = AppConfigStore(config_path)
+    subject.brand_logo_label = SimpleNamespace(
+        configure=lambda **_kwargs: None,
+        pack_forget=lambda: None,
+        pack=lambda **_kwargs: None,
+        winfo_manager=lambda: "pack",
+    )
+    BookLedgerApp._refresh_brand_logo(subject)
+    with Image.open(app_module.resource_path("assets", "generalists_bookshop_logo.png")) as default:
+        default.thumbnail((176, 66), Image.Resampling.LANCZOS)
+        assert loaded_sizes == [default.size]
+
+
+def test_clear_shop_link_persists_across_restart_and_sidebar_logo_does_not_open_browser(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    store = AppConfigStore(config_path)
+    store.set(("preferences", "shop_url"), "https://shop.example/books")
+
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    class Status:
+        def set(self, _value):
+            pass
+
+    subject = SimpleNamespace(config_store=store, shop_url_var=Value("https://shop.example/books"), status_var=Status())
+    assert BookLedgerApp._clear_shop_url(subject)
+    assert subject.shop_url_var.get() == ""
+    restarted = SimpleNamespace(config_store=AppConfigStore(config_path), status_var=Status())
+    restarted._logo_url = lambda: BookLedgerApp._logo_url(restarted)
+    assert restarted._logo_url() == ""
+    opened = []
+    monkeypatch.setattr(app_module.webbrowser, "open", lambda *args, **kwargs: opened.append((args, kwargs)) or True)
+    assert not BookLedgerApp._open_shop_link(restarted)
+    assert opened == []
+
+
+@pytest.mark.parametrize("logo_state", ["missing", "unreadable"])
+def test_missing_or_unreadable_custom_logo_falls_back_to_the_bundled_default(tmp_path, monkeypatch, logo_state):
+    from bookledger.resources import resource_path
+
+    class LogoLabel:
+        def __init__(self):
+            self.options = {}
+            self.manager = ""
+
+        def configure(self, **options):
+            self.options.update(options)
+
+        def pack_forget(self):
+            self.manager = ""
+
+        def pack(self, **_options):
+            self.manager = "pack"
+
+        def winfo_manager(self):
+            return self.manager
+
+    loaded_sizes = []
+    monkeypatch.setattr(app_module.ImageTk, "PhotoImage", lambda image, master: loaded_sizes.append(image.size) or object())
+    data = tmp_path / "data"
+    subject = SimpleNamespace(
+        config_store=AppConfigStore(tmp_path / "config.json"),
+        paths=SimpleNamespace(data=data),
+        brand_logo_label=LogoLabel(),
+    )
+    if logo_state == "unreadable":
+        broken_asset = data / "assets" / "shop-logo-broken.png"
+        broken_asset.parent.mkdir(parents=True)
+        broken_asset.write_bytes(b"not an image")
+        reference = "assets/shop-logo-broken.png"
+    else:
+        reference = "assets/missing-logo.png"
+    subject.config_store.set(("preferences", "shop_logo_path"), reference)
+
+    BookLedgerApp._refresh_brand_logo(subject)
+
+    with Image.open(resource_path("assets", "generalists_bookshop_logo.png")) as default:
+        default.thumbnail((176, 66), Image.Resampling.LANCZOS)
+        assert loaded_sizes == [default.size]
+    assert subject.brand_logo_label.manager == "pack"
 
 
 def test_status_menu_prompts_only_for_not_for_sale_or_sold_departures(monkeypatch):

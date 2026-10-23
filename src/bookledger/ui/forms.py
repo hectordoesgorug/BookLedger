@@ -12,6 +12,7 @@ from bookledger.config import APPROVED_GENRES, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
+from bookledger.resources import apply_application_icon
 from bookledger.ui.status_colors import status_message_color
 
 NO_DATA = "No Data"
@@ -33,6 +34,7 @@ class BookForm(tk.Toplevel):
         metadata_lookup: MetadataLookupService | None = None,
     ):
         super().__init__(parent)
+        apply_application_icon(self)
         self.parent = parent
         self.service = service
         self.photo_service = photo_service

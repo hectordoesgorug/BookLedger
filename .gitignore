@@ -14,11 +14,11 @@ config.json
 log.txt
 data/
 backups/
-assets/
 *.db
 *.sqlite
 *.sqlite3
 *.bak
+*.png
 
 # Build output
 build/

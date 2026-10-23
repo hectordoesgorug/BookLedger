@@ -7,6 +7,7 @@ from queue import Empty, SimpleQueue
 from tkinter import ttk
 
 from bookledger.provider_registry import PROVIDER_REGISTRY
+from bookledger.resources import apply_application_icon
 from bookledger.services.metadata_contract import MetadataResult, failure_kind
 from bookledger.ui.status_colors import ERROR_COLOR, NEUTRAL_COLOR, SUCCESS_COLOR, status_message_color
 
@@ -352,6 +353,7 @@ class MetadataProviderTestDialog(tk.Toplevel, _MetadataProviderTestView):
 
     def __init__(self, parent, *, google_books_api_key: str = "", providers=None):
         tk.Toplevel.__init__(self, parent)
+        apply_application_icon(self)
         self.title("ISBN Lookup Test")
         self.geometry("500x560")
         self.minsize(420, 500)

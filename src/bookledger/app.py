@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import sys
 import threading
+import webbrowser
 from decimal import Decimal
 from calendar import monthrange
 from datetime import date
@@ -26,6 +27,14 @@ from bookledger.services.reports import ReportService
 from bookledger.services.metadata import GoogleBooksProvider, MetadataLookupService
 from bookledger.provider_registry import PROVIDER_REGISTRY, build_providers
 from bookledger.provider_settings import ProviderSettings, ProviderSettingsStore
+from bookledger.resources import (
+    apply_application_icon,
+    normalize_shop_url,
+    render_svg_icon,
+    resource_path,
+    resolve_managed_logo,
+    store_shop_logo,
+)
 from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
 from bookledger.services.verification import VerificationService
@@ -35,6 +44,30 @@ from bookledger.ui.status_colors import INVENTORY_STATUS_COLORS, status_message_
 
 CATALOG_CARD_WIDTH = 320
 CATALOG_CARD_GAP = 14
+NAVIGATION_ITEMS = (
+    ("Dashboard", "icon-dashboard.svg", "⌂"),
+    ("Catalog", "icon-catalog.svg", "▤"),
+    ("Inventory", "icon-inventory.svg", "▦"),
+    ("Acquisitions", "icon-acquisitions.svg", "+"),
+    ("Sale History", "icon-sale history.svg", "↗"),
+    ("Reports", "icon-reports.svg", "▥"),
+    ("Settings", "icon-settings.svg", "⚙"),
+    ("About", "icon-help.svg", "?"),
+)
+NAV_ICON_FRAME_SIZE = 36
+NAV_ICON_CONTENT_SIZES = (26, 30, 32)
+PREFERRED_THEME_NAMES = ("clam", "flatly", "bootstrap-light", "bootstrap-dark", "cosmo", "darkly")
+
+
+def resolve_theme_name(available, configured, default):
+    """Return a configured theme only when the active Tk runtime provides it."""
+    available = tuple(available)
+    if configured in available:
+        return configured
+    if default in available:
+        return default
+    return available[0] if available else ""
+
 
 try:
     import ttkbootstrap as tb
@@ -51,6 +84,7 @@ class BookLedgerApp(_WindowBase):
             super().__init__(themename="flatly")
         else:
             super().__init__()
+        apply_application_icon(self)
         self.paths = AppPaths()
         self.paths.prepare()
         self.db = Database(self.paths.database)
@@ -68,6 +102,24 @@ class BookLedgerApp(_WindowBase):
             self.paths.google_books_config,
             self.paths._profile_google_books_config(),
         )
+        self.theme_style = tb.Style() if _HAS_TTKBOOTSTRAP else ttk.Style(self)
+        registered_themes = {
+            str(name) for name in self.theme_style.theme_names()
+        } | {str(name) for name in ttk.Style(self).theme_names()}
+        self._available_theme_names = tuple(
+            name for name in PREFERRED_THEME_NAMES if name in registered_themes
+        ) or tuple(sorted(registered_themes))
+        current_theme = self.theme_style.theme_use() or ""
+        default_theme = "clam" if "clam" in self._available_theme_names else current_theme
+        configured_theme = self.config_store.get(("preferences", "theme"), default_theme)
+        self._active_theme = resolve_theme_name(
+            self._available_theme_names, configured_theme, default_theme
+        )
+        if self._active_theme:
+            try:
+                self.theme_style.theme_use(self._active_theme)
+            except tk.TclError:
+                self._active_theme = current_theme or default_theme
         self.provider_settings_store = ProviderSettingsStore(
             self.paths.provider_config,
             self.paths.provider_config_fallback(),
@@ -102,16 +154,38 @@ class BookLedgerApp(_WindowBase):
 
     def _configure_style(self):
         style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
         style.configure("Treeview", rowheight=30, font=("Segoe UI", 10), borderwidth=0)
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=8)
-        style.configure("Sidebar.TButton", anchor="w", padding=(14, 11), font=("Segoe UI", 10))
+        style.configure("Sidebar.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10))
+        style.configure("SidebarActive.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10, "bold"))
         style.configure("Primary.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"))
         style.configure("Invalid.TEntry", fieldbackground="#fff0f0")
         style.configure("Invalid.TCombobox", fieldbackground="#fff0f0")
+
+    def _apply_theme_selection(self):
+        selected = str(self.theme_var.get() or "")
+        if selected not in self._available_theme_names:
+            self.status_var.set("Choose a theme provided by this Tk installation.")
+            return False
+
+        previous = self.theme_style.theme_use()
+        try:
+            self.theme_style.theme_use(selected)
+            self._configure_style()
+            self.config_store.set(("preferences", "theme"), selected)
+        except (tk.TclError, OSError, ValueError, sqlite3.Error) as exc:
+            try:
+                self.theme_style.theme_use(previous)
+                self._configure_style()
+            except tk.TclError:
+                pass
+            self.theme_var.set(previous)
+            self.status_var.set(f"Could not apply theme: {exc}")
+            return False
+
+        self._active_theme = selected
+        self.status_var.set(f"Theme '{selected}' applied and saved.")
+        return True
 
     def _build_shell(self):
         shell = ttk.Frame(self)
@@ -121,25 +195,45 @@ class BookLedgerApp(_WindowBase):
         self.sidebar.pack_propagate(False)
         brand = ttk.Frame(self.sidebar)
         brand.pack(fill="x", pady=(0, 24))
-        logo_path = self.paths.root / "assets" / "generalists_bookshop_logo.png"
-        if logo_path.exists():
-            try:
-                from PIL import Image, ImageTk
-                with Image.open(logo_path) as source:
-                    image = source.convert("RGBA")
-                    image.thumbnail((176, 66), Image.Resampling.LANCZOS)
-                    self._brand_image = ImageTk.PhotoImage(image)
-                ttk.Label(brand, image=self._brand_image).pack(anchor="w", pady=(0, 8))
-            except Exception:
-                self._brand_image = None
+        self._brand_image = None
+        self.brand_logo_label = ttk.Label(brand, cursor="hand2")
+        self.brand_logo_label.bind("<Button-1>", lambda _event: self._open_shop_link())
+        self._refresh_brand_logo()
         ttk.Label(brand, text="BookLedger", font=("Segoe UI", 17, "bold")).pack(anchor="w")
         ttk.Label(brand, text="Your collection, accounted for", foreground="#64748b", font=("Segoe UI", 9)).pack(anchor="w", pady=(3, 0))
         ttk.Separator(self.sidebar).pack(fill="x", pady=(0, 12))
         self.nav_buttons = {}
-        for name, icon in (("Dashboard", "⌂"), ("Catalog", "▤"), ("Inventory", "▦"), ("Acquisitions", "+"), ("Sale History", "↗"), ("Reports", "▥"), ("Settings", "⚙")):
-            btn = ttk.Button(self.sidebar, text=f"{icon}   {name}", style="Sidebar.TButton", command=lambda n=name: self.show_page(n))
-            btn.pack(fill="x", pady=2)
-            self.nav_buttons[name] = btn
+        self._nav_image_sets = {}
+        for name, icon_file, fallback in NAVIGATION_ITEMS:
+            icon_path = resource_path("assets", icon_file)
+            images = []
+            if icon_path.is_file():
+                for visible_size in NAV_ICON_CONTENT_SIZES:
+                    raster = render_svg_icon(icon_path, frame_size=NAV_ICON_FRAME_SIZE, content_size=visible_size)
+                    if raster is not None:
+                        images.append(ImageTk.PhotoImage(raster, master=self))
+            self._nav_image_sets[name] = tuple(images)
+            button = ttk.Button(
+                self.sidebar,
+                text=name,
+                image=images[0] if images else "",
+                compound="left" if images else "none",
+                style="Sidebar.TButton",
+                command=lambda selected=name: self.show_page(selected),
+            )
+            if not images:
+                button.configure(text=f"{fallback}   {name}")
+            if name == "About":
+                # The planned About view is intentionally present as a disabled placeholder.
+                button.configure(state="disabled")
+            button.pack(fill="x", pady=2)
+            self.nav_buttons[name] = button
+            button._nav_frame_images = tuple(images)
+            button._nav_frame_index = 0
+            button._nav_animation_after_id = None
+            if name != "About" and images:
+                button.bind("<Enter>", lambda _event, target=button: self._animate_navigation_button(target, 2))
+                button.bind("<Leave>", lambda _event, target=button: self._animate_navigation_button(target, 0))
         ttk.Frame(self.sidebar).pack(fill="both", expand=True)
         ttk.Label(self.sidebar, text=f"Version {__version__}\nOffline-first · Local data", foreground="#64748b", font=("Segoe UI", 9)).pack(anchor="w", pady=(12, 0))
 
@@ -171,6 +265,140 @@ class BookLedgerApp(_WindowBase):
         variable.trace_add("write", update_color)
         update_color()
 
+    def _refresh_brand_logo(self):
+        configured = self.config_store.get(("preferences", "shop_logo_path"), "")
+        selected = resolve_managed_logo(self.paths.data, configured)
+        default = resource_path("assets", "generalists_bookshop_logo.png")
+        candidates = [path for path in (selected, default) if path is not None and path.is_file()]
+        self._brand_image = None
+        for image_path in candidates:
+            try:
+                with Image.open(image_path) as source:
+                    image = source.convert("RGBA")
+                    image.thumbnail((176, 66), Image.Resampling.LANCZOS)
+                    self._brand_image = ImageTk.PhotoImage(image, master=self)
+                break
+            except (OSError, ValueError, Image.DecompressionBombError):
+                continue
+        if self._brand_image is None:
+            self.brand_logo_label.configure(image="")
+            self.brand_logo_label.pack_forget()
+        else:
+            self.brand_logo_label.configure(image=self._brand_image)
+            if not self.brand_logo_label.winfo_manager():
+                self.brand_logo_label.pack(anchor="w", pady=(0, 8))
+
+    def _animate_navigation_button(self, button, target_index):
+        try:
+            after_id = getattr(button, "_nav_animation_after_id", None)
+            if after_id is not None:
+                self.after_cancel(after_id)
+            current_index = int(getattr(button, "_nav_frame_index", 0))
+            images = button._nav_frame_images
+            if not images or current_index == target_index:
+                button._nav_animation_after_id = None
+                return
+
+            direction = 1 if target_index > current_index else -1
+
+            def advance():
+                if not button.winfo_exists():
+                    return
+                next_index = int(button._nav_frame_index) + direction
+                button.configure(image=images[next_index])
+                button._nav_frame_index = next_index
+                if next_index == target_index:
+                    button._nav_animation_after_id = None
+                else:
+                    button._nav_animation_after_id = self.after(32, advance)
+
+            button._nav_animation_after_id = self.after(1, advance)
+        except (AttributeError, tk.TclError):
+            return
+
+    def _update_active_navigation(self):
+        for name, button in getattr(self, "nav_buttons", {}).items():
+            button.configure(style="SidebarActive.TButton" if name == self.current_page else "Sidebar.TButton")
+
+    def _logo_url(self):
+        value = self.config_store.get(("preferences", "shop_url"), "")
+        return normalize_shop_url(value)
+
+    def _open_shop_link(self):
+        url = self._logo_url()
+        if not url:
+            return False
+        if url is None:
+            self.status_var.set("Shop link is invalid; use an HTTP or HTTPS URL.")
+            return False
+        try:
+            return bool(webbrowser.open(url, new=2))
+        except (OSError, webbrowser.Error):
+            self.status_var.set("Could not open the shop link.")
+            return False
+
+    def _save_shop_url(self):
+        url = normalize_shop_url(self.shop_url_var.get())
+        if url is None:
+            self.status_var.set("Enter a valid HTTP or HTTPS shop URL.")
+            return False
+        try:
+            self.config_store.set(("preferences", "shop_url"), url)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            self.status_var.set(f"Could not save shop link: {exc}")
+            return False
+        self.shop_url_var.set(url)
+        self.status_var.set("Shop link saved." if url else "Shop link cleared.")
+        return True
+
+    def _change_shop_logo(self):
+        selected = filedialog.askopenfilename(
+            parent=self,
+            title="Choose Shop Logo",
+            filetypes=(("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tif *.tiff"), ("All files", "*.*")),
+        )
+        if not selected:
+            return False
+        stored_path = None
+        try:
+            stored_path = store_shop_logo(selected, self.paths.assets)
+            reference = stored_path.relative_to(self.paths.data.resolve()).as_posix()
+            self.config_store.set(("preferences", "shop_logo_path"), reference)
+            self._refresh_brand_logo()
+        except (OSError, ValueError, sqlite3.Error, Image.DecompressionBombError) as exc:
+            if stored_path is not None:
+                try:
+                    if self.config_store.get(("preferences", "shop_logo_path"), "") != stored_path.relative_to(self.paths.data.resolve()).as_posix():
+                        stored_path.unlink(missing_ok=True)
+                except (OSError, ValueError):
+                    pass
+            messagebox.showerror("Could not change logo", str(exc), parent=self)
+            return False
+        self.status_var.set("Shop logo updated.")
+        return True
+
+    def _clear_shop_logo(self):
+        """Restore the bundled logo without deleting managed backup assets."""
+        try:
+            self.config_store.set(("preferences", "shop_logo_path"), "")
+            self._refresh_brand_logo()
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            self.status_var.set(f"Could not clear shop logo: {exc}")
+            return False
+        self.status_var.set("Default shop logo restored.")
+        return True
+
+    def _clear_shop_url(self):
+        """Clear the saved shop link and its visible entry."""
+        try:
+            self.config_store.set(("preferences", "shop_url"), "")
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            self.status_var.set(f"Could not clear shop link: {exc}")
+            return False
+        self.shop_url_var.set("")
+        self.status_var.set("Shop link cleared.")
+        return True
+
     def _clear_workspace(self):
         # Destroyed page widgets must not remain the active source for a later event.
         layout_after_id = getattr(self, "_catalog_layout_after_id", None)
@@ -192,6 +420,9 @@ class BookLedgerApp(_WindowBase):
             name = "Sale History"
         self.current_page = name
         self.page_title.configure(text=name)
+        update_navigation = getattr(self, "_update_active_navigation", None)
+        if update_navigation is not None:
+            update_navigation()
         self._clear_workspace()
         if name in ("Catalog", "Inventory"):
             self._build_catalog_page(inventory=(name == "Inventory"))
@@ -1160,13 +1391,30 @@ class BookLedgerApp(_WindowBase):
             self.catalog.add_location, self.catalog.rename_location, self.catalog.delete_location,
             row=1, column=0,
         )
-        themes = ttk.LabelFrame(parent, text="Themes", padding=12)
+        themes = ttk.LabelFrame(parent, text="Customize", padding=12)
         themes.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(6, 0))
-        ttk.Label(themes, text="Theme selection is not available yet.", foreground="#64748b").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
-        ttk.Label(themes, text="Themes:").grid(row=1, column=0, sticky="w", padx=(0, 6))
-        ttk.Combobox(themes, values=("Unavailable",), state="disabled", width=22).grid(row=1, column=1, sticky="ew")
-        ttk.Button(themes, text="Preview", state="disabled").grid(row=2, column=0, pady=(10, 0), sticky="w")
-        ttk.Button(themes, text="Apply", state="disabled").grid(row=2, column=1, pady=(10, 0), sticky="w")
+        ttk.Label(themes, text="Choose from themes available in this installation.", foreground="#64748b").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(themes, text="Theme:").grid(row=1, column=0, sticky="w", padx=(0, 6))
+        self.theme_var = tk.StringVar(value=self._active_theme)
+        self.theme_selector = ttk.Combobox(
+            themes,
+            values=self._available_theme_names,
+            state="readonly",
+            textvariable=self.theme_var,
+            width=22,
+        )
+        self.theme_selector.grid(row=1, column=1, sticky="ew")
+        ttk.Button(themes, text="Apply", command=self._apply_theme_selection).grid(row=2, column=1, pady=(10, 0), sticky="w")
+        themes.columnconfigure((0, 1), weight=1, uniform="customize_columns")
+        action_button = {"width": 16, "padding": (8, 6)}
+        ttk.Button(themes, text="Change Logo", command=self._change_shop_logo, **action_button).grid(row=3, column=0, sticky="ew", padx=(0, 4), pady=(12, 4))
+        ttk.Button(themes, text="Clear Logo", command=self._clear_shop_logo, **action_button).grid(row=3, column=1, sticky="ew", padx=(4, 0), pady=(12, 4))
+        ttk.Button(themes, text="Add Logo Link", command=self._save_shop_url, **action_button).grid(row=4, column=0, sticky="ew", padx=(0, 4), pady=4)
+        ttk.Button(themes, text="Clear Logo Link", command=self._clear_shop_url, **action_button).grid(row=4, column=1, sticky="ew", padx=(4, 0), pady=4)
+        self.shop_url_var = tk.StringVar(value=str(self.config_store.get(("preferences", "shop_url"), "") or ""))
+        self.shop_url_entry = ttk.Entry(themes, textvariable=self.shop_url_var)
+        self.shop_url_entry.grid(row=5, column=0, columnspan=2, sticky="ew")
+        self.shop_url_entry.bind("<Return>", lambda _event: self._save_shop_url())
 
     def _build_value_list_editor(self, parent, title, kind, list_values, assignment_count, add_value, rename_value, delete_value, *, row, column):
         panel = ttk.LabelFrame(parent, text=title, padding=10)
@@ -1214,10 +1462,7 @@ class BookLedgerApp(_WindowBase):
                 delete_button.grid(row=0, column=2, padx=2)
                 if count:
                     explanation = f"Cannot delete this {kind} because one or more books are assigned to it. Rename it to migrate the assignments, or update those books first."
-                    info = ttk.Label(item, text="ⓘ", foreground="#64748b", cursor="question_arrow")
-                    info.grid(row=0, column=3, padx=(4, 0))
-                    info.bind("<Enter>", lambda event, message=explanation: self._show_hover_tooltip(event, message))
-                    info.bind("<Leave>", self._hide_hover_tooltip)
+                    delete_button._tooltip_bounds = panel
                     delete_button.bind("<Enter>", lambda event, message=explanation: self._show_hover_tooltip(event, message))
                     delete_button.bind("<Leave>", self._hide_hover_tooltip)
 
@@ -1272,10 +1517,37 @@ class BookLedgerApp(_WindowBase):
     def _show_hover_tooltip(self, event, message):
         self._hide_hover_tooltip()
         try:
-            tip = tk.Toplevel(self)
+            # Keep the tooltip in its own native window: it is never a child
+            # managed by the hovered panel's grid/pack geometry.
+            tip = tk.Toplevel(self.winfo_toplevel())
             tip.wm_overrideredirect(True)
-            tip.wm_geometry(f"+{event.x_root + 12}+{event.y_root + 12}")
-            ttk.Label(tip, text=message, wraplength=340, padding=8, relief="solid").pack()
+            tip.wm_attributes("-topmost", True)
+            wraplength = 340
+            x, y = event.x_root + 12, event.y_root + 12
+            bounds = getattr(getattr(event, "widget", None), "_tooltip_bounds", None)
+            if bounds is not None and bounds.winfo_width() > 1:
+                left = bounds.winfo_rootx()
+                right = left + bounds.winfo_width()
+                right_width = right - x - 20
+                left_width = event.x_root - left - 20
+                if right_width >= 180:
+                    wraplength = min(wraplength, right_width)
+                elif left_width >= 180:
+                    wraplength = min(wraplength, left_width)
+                    x = event.x_root - wraplength - 20
+                else:
+                    wraplength = max(160, min(240, bounds.winfo_width() - 16))
+                    x = left + 8
+            ttk.Label(tip, text=message, wraplength=wraplength, padding=8, relief="solid").pack()
+            width, height = tip.winfo_reqwidth(), tip.winfo_reqheight()
+            screen_width, screen_height = tip.winfo_screenwidth(), tip.winfo_screenheight()
+            if x + width > screen_width:
+                x = event.x_root - width - 12
+            if y + height > screen_height:
+                y = event.y_root - height - 12
+            x = max(0, min(x, max(0, screen_width - width)))
+            y = max(0, min(y, max(0, screen_height - height)))
+            tip.wm_geometry(f"+{x}+{y}")
             self._hover_tooltip = tip
         except tk.TclError:
             self._hover_tooltip = None

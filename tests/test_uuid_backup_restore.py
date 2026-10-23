@@ -53,8 +53,15 @@ def test_backup_contains_config_assets_manifest_and_unique_names(setup):
     copy_id = catalog.create_copy(payload)
     (data / "assets").mkdir()
     (data / "assets" / "keep.json").write_text('{"kept":true}', encoding="utf-8")
+    (data / "assets" / "shop-logo-sample.png").write_bytes(b"portable logo bytes")
     config = root / "config.json"
-    config.write_text(json.dumps({"api_keys": {"google_books": "test-secret"}, "preferences": {"locations": ["Shelf"]}}), encoding="utf-8")
+    config.write_text(json.dumps({
+        "api_keys": {"google_books": "test-secret"},
+        "preferences": {
+            "locations": ["Shelf"], "shop_logo_path": "assets/shop-logo-sample.png",
+            "shop_url": "https://shop.example/books",
+        },
+    }), encoding="utf-8")
     backups = BackupService(db, data, root / "backups", config)
 
     first = backups.create_backup()
@@ -68,11 +75,14 @@ def test_backup_contains_config_assets_manifest_and_unique_names(setup):
         assert "config.json" in names
         assert "data/bookledger.sqlite3" in names
         assert "data/assets/keep.json" in names
+        assert "data/assets/shop-logo-sample.png" in names
         assert f"data/photos/{copy_id}.jpg" in names
         assert not any(".staging" in name for name in names)
         assert "manifest.json" in names
         snapshot = json.loads(archive.read("config.json"))
         assert snapshot["api_keys"]["google_books"] == "test-secret"
+        assert snapshot["preferences"]["shop_logo_path"] == "assets/shop-logo-sample.png"
+        assert snapshot["preferences"]["shop_url"] == "https://shop.example/books"
 
 
 def test_restore_replaces_snapshot_state_and_preserves_recovery_point(setup):

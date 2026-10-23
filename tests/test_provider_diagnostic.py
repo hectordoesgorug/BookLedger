@@ -104,6 +104,10 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     harness.paths = SimpleNamespace(
         root=Path("portable-data"), google_books_config=Path("portable-data/assets/google_books.json")
     )
+    harness.config_store = SimpleNamespace(get=lambda *_args: "")
+    harness._available_theme_names = ("clam", "flatly")
+    harness._active_theme = "clam"
+    harness._apply_theme_selection = lambda: None
     harness.lifecycle = SimpleNamespace(trash_count=lambda: 1)
     harness.catalog = SimpleNamespace(
         list_genres=lambda: ("Science", "Fiction"),
@@ -178,9 +182,10 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     poster_text = " ".join(texts(4))
     assert "reserved for future development" in poster_text
     preferences_text = " ".join(texts(5))
-    assert all(name in preferences_text for name in ("Genre", "Format", "Location", "Themes", "Preview", "Apply"))
+    assert all(name in preferences_text for name in ("Genre", "Format", "Location", "Theme:", "Apply"))
+    assert "Preview" not in preferences_text
+    assert "not available yet" not in preferences_text
     assert "Manage Locations" not in preferences_text
-    assert "not available yet" in preferences_text
     preference_widgets = tab_widgets(5)
     science_row = next(
         widget for widget in preference_widgets
@@ -190,12 +195,15 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
         widget for widget in science_row.winfo_children()
         if isinstance(widget, ttk.Button) and widget.cget("text") == "Delete"
     )
-    info_label = next(
-        widget for widget in science_row.winfo_children()
-        if isinstance(widget, ttk.Label) and widget.cget("text") == "ⓘ"
-    )
     assert delete_button.instate(("disabled",))
-    assert info_label.bind("<Enter>")
+    assert delete_button.bind("<Enter>")
+    assert not any(
+        isinstance(widget, ttk.Label) and widget.cget("text") == "ⓘ"
+        for widget in science_row.winfo_children()
+    )
+    theme_selector = next(widget for widget in preference_widgets if isinstance(widget, ttk.Combobox))
+    assert str(theme_selector.cget("state")) == "readonly"
+    assert tuple(theme_selector.cget("values")) == harness._available_theme_names
 
     # Merely changing tabs does not invoke any Settings operation.
     for index in range(len(expected_tabs)):
