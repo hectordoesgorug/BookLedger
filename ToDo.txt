@@ -16,29 +16,19 @@ Future Enhancements / Backlog
 
 These items are future enhancements and are not part of the current implementation scope.
 
-1.  Add Book and Edit Book Form Scrolling
-    -   Restructure both forms so their contents fit within the application window without requiring scrolling.
-2.  Not for Sale Lock Icon
-    -   Add a small lock icon to copies marked Not for Sale.
-3.  Color-Coded Status Indicators
-    -   Apply a consistent green/red color scheme to connection status and book/inventory status indicators.
-4.  Book Condition List
-    -   Expand and refine the available book-condition options.
-5.  Aesthetic Icons
-    -   Review and improve the application's icons for a more consistent appearance.
-6.  Basic Text Summarizer
+1.  Basic Text Summarizer
     -   Add a basic text summarizer for poster summaries.
-7.  About, Tooltips, and Legends
+2.  About, Tooltips, and Legends
     -   Add an About section or tab.
     -   Introduce relevant tooltips.
     -   Provide legends explaining status meanings and other indicators where helpful.
-8.  Bulk Metadata Download
+3.  Bulk Metadata Download
     -   Allow rapid successive book intake without waiting for metadata retrieval on every entry.
     -   Support downloading the corresponding metadata in bulk afterward.
     -   Preserve ISBN-to-book matching and existing metadata-merging safeguards.
-9.  Poster Creation
+4.  Poster Creation
     -   Explore a canvas-based poster design workspace and designer for creating book-sale posters.
-10. Merge Libraries
+5. Merge Libraries
     -   Consider a future Merge Libraries feature: allow importing a BookLedger backup into the current library without replacing it.
     -   Explore UUID-based record matching, `BL-` display-ID collision handling, duplicate ISBN review with per-copy keep/discard choices, and safe handling of sales, photos, deletions, and transaction history.
     -   Deferred; for now, transfer the latest verified backup by USB and restore it before starting work on the other PC.
