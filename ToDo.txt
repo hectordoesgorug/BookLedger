@@ -4,48 +4,6 @@ The following items are intentionally deferred as low priority. They are
 not blockers for the configurable metadata provider registry work.
 Revisit when convenient.
 
-1.  Review remaining storage edge cases — LOW PRIORITY
-    -   Confirm the legacy migration regression for photos belonging to
-        trashed copies is covered and passing.
-    -   Review pending-operation interactions identified in the earlier
-        static audit, including Clear Trash versus pending restore
-        operations.
-    -   Review recovery/error-reporting behavior for exceptional
-        filesystem or database failures.
-    -   Keep the scope limited to confirming, testing, and fixing
-        demonstrated issues; do not reopen already-working normal
-        workflows without evidence.
-2.  Close the backup/restore test gap — LOW PRIORITY
-    -   Manually test a normal backup and restore, including database
-        records and photos.
-    -   Review the previously identified risk involving backups taken
-        while photo-install operations are pending.
-    -   Review backup verification coverage, including SQLite integrity,
-        foreign-key consistency, and referenced photo files.
-    -   Backup is expected to be used rarely, so this is deliberately
-        low priority. Do not expand into a backup overhaul unless
-        testing demonstrates a concrete need.
-3.  Confirm small GUI polish items — LOW PRIORITY
-    -   Confirm Catalog and Inventory clearly distinguish multiple
-        physical copies of the same bibliographic record (for example,
-        Title — Copy 1, Title — Copy 2).
-    -   Confirm optional missing metadata is displayed consistently as
-        “No Data” in relevant form fields as well as status/footer
-        areas.
-    -   Check the current GUI before changing anything; these were
-        previously observed items and may already have been addressed.
-4.  Provider Status Test — DEFERRED
-    -   Consider a small diagnostic dialogue in Settings that accepts an
-        ISBN and tests enabled providers in configured order without
-        saving a book or changing inventory.
-    -   Report field-level success, missing data, unsupported fields,
-        ISBN not found, provider error, and timeout, with elapsed time per
-        provider and for the complete lookup.
-    -   Reuse the live adapters and shared result contract. Do not persist
-        ISBNs, returned metadata, or diagnostic payloads in logs.
-    -   Make clear that diagnostics issue live requests and may encounter
-        provider rate limits.
-
 Notes
 
 -   These items are deferred, not confirmed resolved.
@@ -60,32 +18,27 @@ These items are future enhancements and are not part of the current implementati
 
 1.  Add Book and Edit Book Form Scrolling
     -   Restructure both forms so their contents fit within the application window without requiring scrolling.
-2.  Catalog Card Width
-    -   Fix the outstanding Catalog card-width issue.
-    -   Consider Small, Medium, and Large thumbnail views in a future version.
-3.  Not for Sale Lock Icon
+2.  Not for Sale Lock Icon
     -   Add a small lock icon to copies marked Not for Sale.
-4.  Color-Coded Status Indicators
+3.  Color-Coded Status Indicators
     -   Apply a consistent green/red color scheme to connection status and book/inventory status indicators.
-5.  Configurable Genres
-    -   Make genre options configurable by the user, following the existing configurable-location approach.
-6.  Book Condition List
+4.  Book Condition List
     -   Expand and refine the available book-condition options.
-7.  Aesthetic Icons
+5.  Aesthetic Icons
     -   Review and improve the application's icons for a more consistent appearance.
-8.  Basic Text Summarizer
+6.  Basic Text Summarizer
     -   Add a basic text summarizer for poster summaries.
-9.  About, Tooltips, and Legends
+7.  About, Tooltips, and Legends
     -   Add an About section or tab.
     -   Introduce relevant tooltips.
     -   Provide legends explaining status meanings and other indicators where helpful.
-10. Bulk Metadata Download
+8.  Bulk Metadata Download
     -   Allow rapid successive book intake without waiting for metadata retrieval on every entry.
     -   Support downloading the corresponding metadata in bulk afterward.
     -   Preserve ISBN-to-book matching and existing metadata-merging safeguards.
-11. Poster Creation
+9.  Poster Creation
     -   Explore a canvas-based poster design workspace and designer for creating book-sale posters.
-12. Merge Libraries
+10. Merge Libraries
     -   Consider a future Merge Libraries feature: allow importing a BookLedger backup into the current library without replacing it.
     -   Explore UUID-based record matching, `BL-` display-ID collision handling, duplicate ISBN review with per-copy keep/discard choices, and safe handling of sales, photos, deletions, and transaction history.
     -   Deferred; for now, transfer the latest verified backup by USB and restore it before starting work on the other PC.
