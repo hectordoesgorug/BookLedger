@@ -56,6 +56,46 @@ NAVIGATION_ITEMS = (
 )
 NAV_ICON_FRAME_SIZE = 36
 NAV_ICON_CONTENT_SIZES = (26, 30, 32)
+ABOUT_GUIDE_SECTIONS = (
+    (
+        "About BookLedger",
+        (
+            "BookLedger keeps bibliographic details for books alongside records for each physical copy. Use it to catalog books, track copy photos, condition, location, price and status, and review sales and reports.",
+            "A bibliographic record describes a title or edition and can be shared by multiple copies. Each physical copy has its own Copy ID, photo, format, condition, location, price and status. BookLedger stores its working library locally, so cataloging and inventory do not require an internet connection. ISBN metadata lookup does use online providers when requested.",
+        ),
+    ),
+    (
+        "Getting Started",
+        (
+            "1. Add a copy: choose Acquisitions → Add a book, Catalog → Add Book, or Dashboard → Add a book. Enter the book details and the copy's Format, Condition, Location and Price (PHP), choose its photo with Choose Photo, then select Save Book. Title, Author, Genre, Format, Condition, Price and Copy Photo are required. ISBN is optional.",
+            "2. Look up optional metadata: enter an ISBN and select Look Up ISBN. Retrieved values fill empty fields; existing entries are preserved. Check the results and complete any required fields before saving. You can also enter details manually.",
+            "3. Find and edit copies: open Catalog to browse photo cards or Inventory to see sortable rows. Use the search box and Genre, Condition, Location and Status filters. Double-click a copy or choose Edit Book from its context menu to edit it. Use Choose Photo to replace its photo.",
+            "4. Manage a copy: use its context menu in Catalog or Inventory to mark it Available, Listed, Not for Sale or Sold. Each copy is managed separately. Marking a copy Sold records a sale; changing a Sold copy to another status asks for a reason and keeps the sale reversal in its history. A Sold copy's Price is locked until its status changes.",
+            "5. Review activity: Sale History lists sale records, including reversed sales. Reports summarizes inventory and sales. Dashboard shows copy counts and recently added copies.",
+            "6. Maintain lists: Settings → Preferences contains the Genre, Format and Location lists. Add or rename options there. Delete is disabled while an option is assigned to a copy; rename it to move those assignments to the new name, or update the copies first.",
+            "7. Back up or restore: open Settings → Storage and Backup. Select Back Up Now to create a snapshot, or Restore Backup… to select one. Read the confirmation carefully: restoring replaces the active library and does not merge it.",
+        ),
+    ),
+    (
+        "Statuses and Messages",
+        (
+            "Available means the copy is available in inventory. Listed means it is listed for sale. Not for Sale means it is intentionally withheld from sale. Sold records a sale for that copy. These are inventory states, not connection or lookup results.",
+            "Metadata lookup can report retrieved or partially retrieved details, no matching ISBN record, an unconfirmed ISBN, or metadata unavailable. A provider may time out or have a network or service problem. Review the provider and field statuses; try again later or enter details yourself. Lookup is optional and does not replace information you already entered.",
+            "Validation messages appear beside the fields that need attention. Correct the marked values and select Save Book again. If a photo cannot be read, choose another image with Choose Photo.",
+            "BookLedger Mobile controls in the book form are simulations. Connection Failed or Scan Failed describes the simulated result; no phone is connected by these controls.",
+            "Backup and restore show a success or error message when an operation finishes. Restore checks the selected archive before replacement and creates a recovery backup of the current library first. If verification or restoration fails, read the displayed message and keep the backup file; do not assume an unverified snapshot was restored.",
+        ),
+    ),
+    (
+        "Your Data and Moving Between Computers",
+        (
+            "BookLedger keeps its database, copy photos, Trash photos and managed assets in its local data folder. Application preferences are stored in the BookLedger configuration. Backups include a database snapshot, managed photos and assets, and configuration. Backup archives are not encrypted, so store them in a secure place.",
+            "To move work with a USB drive: on the computer you are currently using, select Back Up Now and copy the resulting BookLedger backup ZIP to the USB drive. On the other computer, open Settings → Storage and Backup, select Restore Backup…, choose that ZIP and confirm. Restart BookLedger after restore so saved settings reload.",
+            "When moving work back, first create a new backup on the computer currently being used, copy that newest ZIP to the USB drive, then restore it on the original computer. Restore replaces that computer's active library; it does not combine changes from both computers. Keep backup files until you have confirmed the restored library is correct.",
+        ),
+    ),
+)
+
 THEME_OPTIONS = (
     ("Clam", "clam"),
     ("Flatly", "flatly"),
@@ -275,15 +315,12 @@ class BookLedgerApp(_WindowBase):
             )
             if not images:
                 button.configure(text=f"{fallback}   {name}")
-            if name == "About":
-                # The planned About view is intentionally present as a disabled placeholder.
-                button.configure(state="disabled")
             button.pack(fill="x", pady=2)
             self.nav_buttons[name] = button
             button._nav_frame_images = tuple(images)
             button._nav_frame_index = 0
             button._nav_animation_after_id = None
-            if name != "About" and images:
+            if images:
                 button.bind("<Enter>", lambda _event, target=button: self._animate_navigation_button(target, 2))
                 button.bind("<Leave>", lambda _event, target=button: self._animate_navigation_button(target, 0))
         ttk.Frame(self.sidebar).pack(fill="both", expand=True)
@@ -486,8 +523,65 @@ class BookLedgerApp(_WindowBase):
             self._build_sales()
         elif name == "Reports":
             self._build_reports()
+        elif name == "About":
+            self._build_about_page()
         else:
             self._build_settings()
+
+    def _build_about_page(self):
+        """Show an offline, vertically scrollable guide based on current UI behavior."""
+        self.status_var.set("Ready")
+        container = ttk.Frame(self.workspace)
+        container.pack(fill="both", expand=True)
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+
+        canvas = tk.Canvas(container, highlightthickness=0, borderwidth=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        content = ttk.Frame(canvas, padding=(4, 2, 18, 20))
+        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        wrapped_labels = []
+
+        ttk.Label(content, text="BookLedger User Guide", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(2, 4))
+        for heading, paragraphs in ABOUT_GUIDE_SECTIONS:
+            ttk.Label(content, text=heading, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(14, 5))
+            for paragraph in paragraphs:
+                label = ttk.Label(content, text=paragraph, justify="left", anchor="w", wraplength=720)
+                label.pack(fill="x", anchor="w", pady=(0, 7))
+                wrapped_labels.append(label)
+
+        ttk.Separator(content).pack(fill="x", pady=(10, 8))
+        app_info = ttk.Label(
+            content,
+            text=f"{APP_NAME} {__version__} · Local book collection and inventory manager.",
+            foreground="#64748b",
+            wraplength=720,
+            anchor="w",
+        )
+        app_info.pack(fill="x", anchor="w")
+        wrapped_labels.append(app_info)
+
+        def resize_content(event):
+            canvas.itemconfigure(window_id, width=event.width)
+            wraplength = max(180, event.width - 28)
+            for label in wrapped_labels:
+                label.configure(wraplength=wraplength)
+
+        canvas.bind("<Configure>", resize_content)
+
+        def on_mousewheel(event):
+            if event.delta:
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+                return "break"
+            return None
+
+        for widget in (canvas, content, *content.winfo_children()):
+            widget.bind("<MouseWheel>", on_mousewheel, add="+")
 
     def refresh_current(self):
         self.show_page(self.current_page)
