@@ -44,6 +44,14 @@ class AppPaths:
         return self.data / "assets"
 
     @property
+    def poster_background_fallback(self) -> Path:
+        return self.data / "poster_backgrounds"
+
+    @property
+    def posters(self) -> Path:
+        return self.root / "posters"
+
+    @property
     def backups(self) -> Path:
         return self.root / "backups"
 
@@ -82,7 +90,7 @@ class AppPaths:
             raise RuntimeError(
                 f"Both portable and legacy databases exist. Resolve the conflict before starting: {self.database} and {legacy_db}"
             )
-        for folder in (self.data, self.photos, self.trash, self.assets, self.backups):
+        for folder in (self.data, self.photos, self.trash, self.assets, self.poster_background_fallback, self.backups):
             folder.mkdir(parents=True, exist_ok=True)
         if legacy_db.exists():
             self._migrate_legacy(legacy_db)
@@ -114,7 +122,7 @@ class AppPaths:
             finally:
                 target.close()
                 source.close()
-            for name in ("photos", "trash", "assets", "backups"):
+            for name in ("photos", "trash", "assets", "poster_backgrounds", "backups"):
                 origin = self.legacy_data / name
                 if origin.exists():
                     shutil.copytree(origin, temp_root / name, dirs_exist_ok=True)
@@ -135,7 +143,7 @@ class AppPaths:
             ):
                 raise RuntimeError("Legacy migration found existing portable data files. Resolve the destination conflict before starting.")
             self.database.parent.mkdir(parents=True, exist_ok=True)
-            for name in ("photos", "trash", "assets"):
+            for name in ("photos", "trash", "assets", "poster_backgrounds"):
                 staged = temp_root / name
                 if staged.exists():
                     for item in staged.rglob("*"):
@@ -146,7 +154,7 @@ class AppPaths:
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(item, destination)
                         installed_files.append(destination)
-                elif name in ("photos", "trash", "assets"):
+                else:
                     (self.data / name).mkdir(exist_ok=True)
             legacy_backups = temp_root / "backups"
             if legacy_backups.exists():

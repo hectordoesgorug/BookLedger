@@ -6,10 +6,12 @@ import os
 import shutil
 import sqlite3
 import stat
+import tempfile
 import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+import re
 
 from bookledger.db.database import SCHEMA_VERSION, Database
 
@@ -19,7 +21,9 @@ class BackupService:
 
     MANIFEST = "manifest.json"
     DB_MEMBER = "data/bookledger.sqlite3"
-    COMPONENTS = ("database", "photos", "trash", "assets", "config")
+    COMPONENTS = ("database", "photos", "trash", "assets", "config", "poster_backgrounds", "application_assets", "posters")
+    POSTER_BACKGROUND_PATTERN = re.compile(r"^template_background_\d+\.(?:png|jpe?g|webp)$", re.IGNORECASE)
+    POSTER_OUTPUT_PATTERN = re.compile(r"^BL-\d{6,}\.png$", re.IGNORECASE)
 
     def __init__(self, db: Database, data_dir: str | Path, backup_dir: str | Path, config_path: str | Path | None = None):
         self.db = db
@@ -41,10 +45,20 @@ class BackupService:
                 with zipfile.ZipFile(partial, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
                     manifest = {"format": "bookledger-snapshot", "version": 1, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"), "files": {}}
                     self._add_file(archive, manifest, self.db.path, self.DB_MEMBER)
-                    for directory in ("photos", "trash", "assets"):
+                    for directory in ("photos", "trash", "assets", "poster_backgrounds"):
                         source = self.data_dir / directory
                         if source.exists():
                             self._add_tree(archive, manifest, source, f"data/{directory}")
+                    app_assets = self.data_dir.parent / "assets"
+                    if app_assets.is_dir():
+                        for path in sorted(app_assets.iterdir()):
+                            if path.is_file() and not path.is_symlink() and self.POSTER_BACKGROUND_PATTERN.fullmatch(path.name):
+                                self._add_file(archive, manifest, path, f"application_assets/{path.name}")
+                    posters = self.data_dir.parent / "posters"
+                    if posters.is_dir():
+                        for path in sorted(posters.iterdir()):
+                            if path.is_file() and not path.is_symlink() and self.POSTER_OUTPUT_PATTERN.fullmatch(path.name):
+                                self._add_file(archive, manifest, path, f"posters/{path.name}")
                     config_bytes = self.config_path.read_bytes() if self.config_path.is_file() else b"{}\n"
                     self._add_bytes(archive, manifest, config_bytes, "config.json")
                     archive.writestr(self.MANIFEST, json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
@@ -168,11 +182,30 @@ class BackupService:
 
     @staticmethod
     def _allowed_member(name: str) -> bool:
-        return name in ("config.json", BackupService.DB_MEMBER) or name.startswith(("data/photos/", "data/trash/", "data/assets/"))
+        if name in ("config.json", BackupService.DB_MEMBER):
+            return True
+        parts = PurePosixPath(name).parts
+        if len(parts) == 2 and parts[0] == "application_assets":
+            return bool(BackupService.POSTER_BACKGROUND_PATTERN.fullmatch(parts[1]))
+        if len(parts) == 2 and parts[0] == "posters":
+            return bool(BackupService.POSTER_OUTPUT_PATTERN.fullmatch(parts[1]))
+        return name.startswith(("data/photos/", "data/trash/", "data/assets/", "data/poster_backgrounds/"))
 
     @staticmethod
     def _validate_staged(stage: Path) -> tuple[bool, str]:
         db_path = stage / BackupService.DB_MEMBER
+        try:
+            preflight = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
+            try:
+                version = int(preflight.execute("PRAGMA user_version").fetchone()[0])
+            finally:
+                preflight.close()
+            if 1 <= version < SCHEMA_VERSION:
+                Database(db_path)  # Apply the project's sequential migrations in the isolated stage.
+            elif version != SCHEMA_VERSION:
+                return False, f"Unsupported database schema version: {version}"
+        except Exception as exc:
+            return False, f"Database migration failed: {type(exc).__name__}."
         conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
         try:
             result = conn.execute("PRAGMA integrity_check").fetchone()
@@ -183,7 +216,7 @@ class BackupService:
                 return False, f"Unsupported database schema version: {version}"
             if conn.execute("PRAGMA foreign_key_check").fetchone():
                 return False, "The database contains a foreign-key violation."
-            required = {"copies", "book_records", "sales", "trash_entries", "storage_operations", "app_meta", "locations"}
+            required = {"copies", "book_records", "sales", "trash_entries", "storage_operations", "app_meta", "locations", "poster_templates"}
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not required.issubset(tables):
                 return False, "The database is missing required BookLedger tables."
@@ -196,6 +229,18 @@ class BackupService:
                 candidate = stage / "data" / path
                 if not candidate.is_file():
                     return False, "A copy refers to a missing managed photo."
+            for background_ref, in conn.execute("SELECT background_ref FROM poster_templates"):
+                relative = PurePosixPath(str(background_ref))
+                if relative.is_absolute() or ".." in relative.parts or "\\" in str(background_ref):
+                    return False, "A poster template refers to an unsafe background path."
+                if relative.parts[:1] == ("assets",) and len(relative.parts) == 2:
+                    candidate = stage / "application_assets" / relative.name
+                elif relative.parts[:2] == ("data", "poster_backgrounds") and len(relative.parts) == 3:
+                    candidate = stage / "data" / "poster_backgrounds" / relative.name
+                else:
+                    return False, "A poster template refers to a background outside managed poster storage."
+                if not candidate.is_file():
+                    return False, "A poster template refers to a missing background."
             return True, "Backup archive and library contents verified."
         finally:
             conn.close()
@@ -224,6 +269,79 @@ class BackupService:
                 valid, message = self._validate_staged(stage)
                 if not valid:
                     raise ValueError(f"Staged backup validation failed: {message}")
+                # Merge only the app-owned poster backgrounds and generated posters;
+                # keep unrelated assets/files in those folders intact.
+                skipped_components = set()
+                app_assets_target = self.data_dir.parent / "assets"
+                app_assets_stage = stage / "application_assets"
+                if app_assets_target.is_symlink():
+                    raise ValueError("Refusing to restore through a linked application assets directory.")
+                assets_writable = False
+                try:
+                    if app_assets_target.exists() and not app_assets_target.is_dir():
+                        raise OSError("Application assets path is not a directory")
+                    if not app_assets_target.exists():
+                        app_assets_target.mkdir(parents=True)
+                    descriptor, probe = tempfile.mkstemp(prefix=".restore-probe-", dir=app_assets_target)
+                    os.close(descriptor)
+                    Path(probe).unlink()
+                    assets_writable = True
+                except OSError:
+                    assets_writable = False
+                if not assets_writable:
+                    skipped_components.add("application_assets")
+                    if app_assets_stage.is_dir():
+                        fallback_stage = stage / "data" / "poster_backgrounds"
+                        fallback_stage.mkdir(parents=True, exist_ok=True)
+                        remapped = {}
+                        for incoming in app_assets_stage.iterdir():
+                            destination = fallback_stage / incoming.name
+                            if destination.exists() and destination.read_bytes() != incoming.read_bytes():
+                                number = 1
+                                suffix = incoming.suffix
+                                while (fallback_stage / f"template_background_{number}{suffix}").exists():
+                                    number += 1
+                                destination = fallback_stage / f"template_background_{number}{suffix}"
+                            if not destination.exists():
+                                shutil.copy2(incoming, destination)
+                            remapped[f"assets/{incoming.name}"] = f"data/poster_backgrounds/{destination.name}"
+                        if remapped:
+                            conn = sqlite3.connect(stage / self.DB_MEMBER)
+                            try:
+                                for old_ref, new_ref in remapped.items():
+                                    conn.execute("UPDATE poster_templates SET background_ref=? WHERE background_ref=?", (new_ref, old_ref))
+                                conn.commit()
+                            finally:
+                                conn.close()
+                        shutil.rmtree(app_assets_stage)
+                for key, target, pattern in (
+                    ("application_assets", app_assets_target, self.POSTER_BACKGROUND_PATTERN),
+                    ("posters", self.data_dir.parent / "posters", self.POSTER_OUTPUT_PATTERN),
+                ):
+                    if key in skipped_components:
+                        continue
+                    if target.exists() and not target.is_dir():
+                        raise ValueError(f"Refusing to replace a non-directory poster component: {target.name}")
+                    staged_subset = stage / key
+                    merged = work / f"merged-{key}"
+                    if target.is_symlink():
+                        raise ValueError(f"Refusing to restore through a linked managed directory: {target.name}")
+                    if target.is_dir():
+                        shutil.copytree(target, merged, symlinks=True)
+                    else:
+                        merged.mkdir(parents=True)
+                    for existing in merged.iterdir():
+                        if pattern.fullmatch(existing.name):
+                            if existing.is_dir():
+                                shutil.rmtree(existing)
+                            else:
+                                existing.unlink()
+                    if staged_subset.is_dir():
+                        for incoming in staged_subset.iterdir():
+                            shutil.copy2(incoming, merged / incoming.name)
+                    if staged_subset.exists():
+                        shutil.rmtree(staged_subset)
+                    shutil.copytree(merged, staged_subset)
                 items = self._component_paths()
                 had_old = {key: target.exists() for key, target in items.items()}
                 with journal.open("x", encoding="utf-8") as stream:
@@ -231,10 +349,16 @@ class BackupService:
                     stream.flush()
                     os.fsync(stream.fileno())
                 for key, target in items.items():
+                    if key in skipped_components:
+                        continue
                     if key == "database":
                         staged = stage / self.DB_MEMBER
                     elif key == "config":
                         staged = stage / "config.json"
+                    elif key == "application_assets":
+                        staged = stage / "application_assets"
+                    elif key == "posters":
+                        staged = stage / "posters"
                     else:
                         staged = stage / "data" / key
                     if had_old[key]:
@@ -242,16 +366,20 @@ class BackupService:
                     if staged.exists():
                         target.parent.mkdir(parents=True, exist_ok=True)
                         staged.replace(target)
-                    elif key in ("photos", "trash", "assets"):
+                    elif key in ("photos", "trash", "assets", "poster_backgrounds", "posters", "application_assets"):
                         target.mkdir(parents=True, exist_ok=True)
                 # Check the activated copy while the durable journal can still roll it back.
                 check_root = work / "activated-check"
                 check_root.mkdir()
                 (check_root / "data").mkdir()
                 shutil.copy2(self.db.path, check_root / self.DB_MEMBER)
-                for name in ("photos", "trash", "assets"):
+                for name in ("photos", "trash", "assets", "poster_backgrounds"):
                     if (self.data_dir / name).exists():
                         shutil.copytree(self.data_dir / name, check_root / "data" / name)
+                for name in ("application_assets", "posters"):
+                    source = self.data_dir.parent / ("assets" if name == "application_assets" else "posters")
+                    if source.is_dir():
+                        shutil.copytree(source, check_root / name)
                 valid, message = self._validate_staged(check_root)
                 if not valid:
                     raise RuntimeError(f"Activated library validation failed: {message}")
@@ -269,7 +397,10 @@ class BackupService:
             "photos": self.data_dir / "photos",
             "trash": self.data_dir / "trash",
             "assets": self.data_dir / "assets",
+            "poster_backgrounds": self.data_dir / "poster_backgrounds",
             "config": self.config_path,
+            "application_assets": self.data_dir.parent / "assets",
+            "posters": self.data_dir.parent / "posters",
         }
 
     @classmethod
@@ -277,7 +408,7 @@ class BackupService:
         """Roll back any interrupted component swap before normal app startup."""
         root = Path(root).resolve()
         data = root / "data"
-        components = {"database": data / "bookledger.sqlite3", "photos": data / "photos", "trash": data / "trash", "assets": data / "assets", "config": root / "config.json"}
+        components = {"database": data / "bookledger.sqlite3", "photos": data / "photos", "trash": data / "trash", "assets": data / "assets", "poster_backgrounds": data / "poster_backgrounds", "config": root / "config.json", "application_assets": root / "assets", "posters": root / "posters"}
         recovered = []
         for work in root.glob(".bookledger-restore-*"):
             journal = work / "restore.json"
@@ -286,13 +417,15 @@ class BackupService:
             try:
                 state = json.loads(journal.read_text(encoding="utf-8"))
                 had_old = state.get("had_old")
+                legacy_components = {"database", "photos", "trash", "assets", "config"}
                 if (
                     state.get("version") != 1
                     or not isinstance(had_old, dict)
-                    or set(had_old) != set(cls.COMPONENTS)
+                    or set(had_old) not in (set(cls.COMPONENTS), legacy_components)
                     or any(type(value) is not bool for value in had_old.values())
                 ):
                     raise ValueError("Invalid restore recovery journal")
+                had_old = {key: had_old.get(key, False) for key in cls.COMPONENTS}
                 for key in reversed(cls.COMPONENTS):
                     target = components[key]
                     old = work / f"old-{key}"
@@ -304,11 +437,9 @@ class BackupService:
                         elif not target.exists():
                             raise FileNotFoundError(f"Previous {key} component is missing")
                     elif target.exists():
-                        # A component absent before restore may have been installed by it.
-                        if (work / "stage").exists():
-                            staged = work / "stage" / ("config.json" if key == "config" else cls.DB_MEMBER if key == "database" else f"data/{key}")
-                            if not staged.exists():
-                                cls._remove_component(target)
+                        # The component did not exist before activation, so remove
+                        # any directory or file installed from the selected snapshot.
+                        cls._remove_component(target)
                 recovered.append(work.name)
                 shutil.rmtree(work, ignore_errors=True)
             except Exception as exc:

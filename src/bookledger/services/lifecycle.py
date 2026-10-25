@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import re
 from pathlib import Path
 
 from bookledger.db.database import Database
@@ -233,5 +234,18 @@ class CopyLifecycleService:
                 shutil.rmtree(child)
             else:
                 child.unlink()
+        # Poster outputs and application-assets backgrounds live outside data/.
+        # Remove only filenames reserved by PosterService, keeping unrelated files.
+        app_root = root.parent
+        background_pattern = re.compile(r"^template_background_\d+\.(?:png|jpe?g|webp)$", re.IGNORECASE)
+        poster_pattern = re.compile(r"^BL-\d{6,}\.png$", re.IGNORECASE)
+        for directory, pattern in ((app_root / "assets", background_pattern), (app_root / "posters", poster_pattern)):
+            if not directory.is_dir() or directory.is_symlink():
+                continue
+            for path in directory.iterdir():
+                if pattern.fullmatch(path.name) and path.is_file() and not path.is_symlink():
+                    path.unlink()
+            if directory.name == "posters" and not any(directory.iterdir()):
+                directory.rmdir()
         self.db.path.parent.mkdir(parents=True, exist_ok=True)
         # Reinitialization happens through the app after the existing DB is removed.

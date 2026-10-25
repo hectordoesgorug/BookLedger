@@ -209,7 +209,7 @@ def test_context_menu_has_approved_options_order_and_disabled_current_status(mon
         status_var=SimpleNamespace(set=lambda _text: None),
         open_copy_details=lambda copy_id: captured.setdefault("view", copy_id),
         open_selected_edit=lambda copy_id: captured.setdefault("edit", copy_id),
-        _poster_not_implemented=lambda: None,
+        _create_poster=lambda copy_id: captured.setdefault("poster", copy_id),
         _change_copy_status=lambda copy_id, status: None,
         _confirm_delete_not_implemented=lambda copy_id: None,
     )
@@ -221,8 +221,10 @@ def test_context_menu_has_approved_options_order_and_disabled_current_status(mon
     ]
     assert menu.entries[3]["state"] == "disabled"
     menu.entries[0]["command"]()
+    menu.entries[1]["command"]()
     menu.entries[6]["command"]()
     assert captured["view"] == 42
+    assert captured["poster"] == 42
     assert captured["edit"] == 42
 
 

@@ -39,6 +39,8 @@ from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
 from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
+from bookledger.services.posters import PosterService
+from bookledger.ui.poster_designer import PosterDesigner
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
 from bookledger.ui.status_colors import INVENTORY_STATUS_COLORS, status_message_color
 
@@ -224,6 +226,7 @@ class BookLedgerApp(_WindowBase):
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
         self.verifier = VerificationService(self.db, self.paths.data)
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups, self.paths.provider_config)
+        self.posters = PosterService(self.db, self.paths)
         self.metadata_lookup = MetadataLookupService(
             build_providers(self.provider_settings, self._load_google_books_key())
         )
@@ -936,7 +939,7 @@ class BookLedgerApp(_WindowBase):
             return
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="View Details", command=lambda cid=copy_id: self.open_copy_details(cid))
-        menu.add_command(label="Create Poster", command=self._poster_not_implemented)
+        menu.add_command(label="Create Poster", command=lambda cid=int(copy_id): self._create_poster(cid))
         for status in ("Available", "Listed", "Not for Sale", "Sold"):
             menu.add_command(
                 label=f"Mark as {status}",
@@ -950,8 +953,8 @@ class BookLedgerApp(_WindowBase):
         finally:
             menu.grab_release()
 
-    def _poster_not_implemented(self):
-        messagebox.showinfo("Create Poster", "Not implemented yet.", parent=self)
+    def _create_poster(self, copy_id):
+        self.poster_designer.create_poster(int(copy_id))
 
     def _change_copy_status(self, copy_id, target_status):
         row = self.catalog.get_copy(int(copy_id))
@@ -1514,7 +1517,11 @@ class BookLedgerApp(_WindowBase):
         self._bind_status_color(self.logging_status_var, self.logging_status_label)
 
     def _build_poster_setup(self, parent):
-        ttk.Label(parent, text="Poster setup is reserved for future development.", foreground="#64748b").pack(anchor="nw")
+        self.poster_designer = PosterDesigner(
+            parent, service=self.posters, config_store=self.config_store,
+            catalog=self.catalog, paths=self.paths,
+        )
+        self.poster_designer.pack(fill="both", expand=True)
 
     def _build_preferences(self, parent):
         parent.columnconfigure((0, 1), weight=1, uniform="preferences")

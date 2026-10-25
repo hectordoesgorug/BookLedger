@@ -61,6 +61,13 @@
 - [x] Focused tests: 91 passed; full suite: 170 passed, 2 Tk tests skipped because Tcl/Tk files are missing; compileall and `git diff --check` passed
 - [ ] Native Tk UI runtime acceptance remains pending because the installed Tcl/Tk files are incomplete
 
+## Poster creation
+- [x] Poster Setup canvas with background upload, movable/resizable book fields, font-size control, and reusable sequential presets
+- [x] Copy context menu exports a copy-specific PNG using normalized template coordinates, title shortening rules, current copy price, and replacement confirmation
+- [x] Schema v8 stores template definitions; relative background paths support portable app assets and a managed-data fallback
+- [x] Backups/restores include poster templates, managed backgrounds, and generated posters; Purge removes poster-owned files while preserving unrelated app assets
+- [ ] Manual Windows visual inspection remains pending; this environment's Tk tests are skipped when Tcl/Tk is incomplete
+
 ## Next stages
 1. Visually review the Catalog grid, Inventory table, and Add/Edit layouts on a complete native Windows Tk installation.
 2. Add import/export and fuller reports.

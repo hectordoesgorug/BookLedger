@@ -80,7 +80,7 @@ def _walk_widgets(widget):
         yield from _walk_widgets(child)
 
 
-def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctional(tk_root):
+def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
     class SettingsHarness:
         _build_settings = BookLedgerApp._build_settings
         _build_mobile_app_setup = BookLedgerApp._build_mobile_app_setup
@@ -102,8 +102,11 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     harness.workspace = ttk.Frame(tk_root)
     harness.workspace.pack(fill="both", expand=True)
     harness.paths = SimpleNamespace(
-        root=Path("portable-data"), google_books_config=Path("portable-data/assets/google_books.json")
+        root=Path("portable-data"), google_books_config=Path("portable-data/assets/google_books.json"),
+        poster_background_fallback=Path("portable-data/data/poster_backgrounds"),
     )
+    harness.posters = SimpleNamespace(paths=harness.paths, list_templates=lambda: [])
+    harness.catalog = SimpleNamespace(get_copy=lambda _copy_id: None)
     harness.config_store = SimpleNamespace(get=lambda *_args: "")
     harness._theme_options = (("Flatly", "flatly"), ("Light", "bootstrap-light"))
     harness._available_theme_names = ("flatly", "bootstrap-light")
@@ -183,7 +186,7 @@ def test_settings_tabs_relocate_controls_and_keep_future_integrations_nonfunctio
     assert "Data folder:" not in storage_text and "Database:" not in storage_text and "Open Data Folder" not in storage_text
     assert "Google Books API key" not in storage_text
     poster_text = " ".join(texts(4))
-    assert "reserved for future development" in poster_text
+    assert all(name in poster_text for name in ("Upload Background", "Save as New Template", "Discard Template", "Select Template", "Title", "Photo"))
     preferences_text = " ".join(texts(5))
     assert all(name in preferences_text for name in ("Genre", "Format", "Location", "Theme:", "Apply"))
     assert "Preview" not in preferences_text

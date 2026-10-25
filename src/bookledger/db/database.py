@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _DATABASE_LOCKS: dict[str, threading.RLock] = {}
 _DATABASE_LOCKS_GUARD = threading.Lock()
@@ -99,7 +99,14 @@ CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-PRAGMA user_version = 7;
+CREATE TABLE IF NOT EXISTS poster_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    background_ref TEXT NOT NULL,
+    elements_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+PRAGMA user_version = 8;
 """
 
 
@@ -275,6 +282,22 @@ class Database:
                     conn.execute("PRAGMA user_version = 7")
                     conn.commit()
                     version = 7
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 7:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("""CREATE TABLE IF NOT EXISTS poster_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        background_ref TEXT NOT NULL,
+                        elements_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                    )""")
+                    conn.execute("PRAGMA user_version = 8")
+                    conn.commit()
+                    version = 8
                 except Exception:
                     conn.rollback()
                     raise
