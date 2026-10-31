@@ -233,7 +233,7 @@ class BookLedgerApp(_WindowBase):
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups, self.paths.provider_config)
         self.posters = PosterService(self.db, self.paths)
         self.metadata_lookup = MetadataLookupService(
-            build_providers(self.provider_settings, self._load_google_books_key())
+            build_providers(self.provider_settings, credentials=self._load_api_credentials())
         )
         self.title(f"{APP_NAME} · Book collection manager")
         self.geometry("1280x800")
@@ -1415,6 +1415,14 @@ class BookLedgerApp(_WindowBase):
         ttk.Label(panel, text="Enabled sources are searched from top to bottom. Drag a source by its handle to change priority.", wraplength=560).pack(anchor="w")
         self._provider_rows = {}
         self._provider_variables = {}
+        provider_tooltips = {
+            "open_library": "Public ISBN metadata lookup. The source is queried first by default.",
+            "google_books": "Google Books may supply bibliographic fields and Book Details.",
+            "archive_org": "Archive.org verifies candidate items individually and may supply bibliographic metadata and descriptions.",
+            "booktopia": "Booktopia can enrich missing fields from its product pages.",
+            "bigbook": "Bigbook uses the saved API key for exact ISBN searches and confirms an ISBN from book details before accepting fields.",
+            "hardcover": "Hardcover uses the saved personal token to query editions by exact ISBN. Its API is in beta.",
+        }
         rows = ttk.Frame(panel)
         rows.pack(fill="x", pady=(8, 4))
         for descriptor in PROVIDER_REGISTRY:
@@ -1426,6 +1434,8 @@ class BookLedgerApp(_WindowBase):
             ttk.Checkbutton(row, variable=var).pack(side="left")
             name = ttk.Label(row, text=descriptor.name, width=24, anchor="w")
             name.pack(side="left")
+            name.bind("<Enter>", lambda event, help_text=provider_tooltips.get(descriptor.id, "Metadata provider."): self._show_hover_tooltip(event, help_text))
+            name.bind("<Leave>", self._hide_hover_tooltip)
             ttk.Label(row, text="Implemented" if descriptor.implemented else "Planned · unavailable", foreground="#64748b").pack(side="left", padx=(6, 0))
             handle = ttk.Label(row, text="⠿", cursor="fleur", foreground="#64748b", padding=(12, 0))
             handle.pack(side="right")
@@ -1449,7 +1459,7 @@ class BookLedgerApp(_WindowBase):
 
         planned = ttk.LabelFrame(parent, text="Planned metadata integrations", padding=16)
         planned.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
-        for name in ("ISBNdb", "WorldCat", "BigBook", "Hardcover", "Goodreads"):
+        for name in ("ISBNdb", "WorldCat", "Goodreads"):
             ttk.Label(planned, text=f"{name} — planned; not integrated.", wraplength=560).pack(anchor="w", pady=2)
 
         diagnostic = ttk.LabelFrame(parent, text="ISBN Lookup Test", padding=10)
@@ -1460,67 +1470,133 @@ class BookLedgerApp(_WindowBase):
             wraplength=390,
         ).pack(anchor="w", pady=(0, 6))
         self._provider_test_panel = MetadataProviderTestPanel(
-            diagnostic, google_books_api_key=self._load_google_books_key()
+            diagnostic, credentials=self._load_api_credentials()
         )
         self._provider_test_panel.pack(fill="both", expand=True)
 
     def _build_api_management(self, parent):
-        parent.columnconfigure(1, weight=1)
-        google = ttk.LabelFrame(parent, text="Google Books", padding=12)
-        google.pack(fill="x", anchor="n")
-        ttk.Label(
-            google,
-            text="The optional key identifies BookLedger for public Google Books lookups. Test Lookup runs a sample ISBN metadata request.",
-            wraplength=920,
-        ).grid(row=0, column=0, columnspan=7, sticky="w", pady=(0, 8))
-        ttk.Label(google, text="Google Books API key").grid(row=1, column=0, sticky="w", padx=(0, 8))
-        self.google_books_key_var = tk.StringVar(value=self._load_google_books_key())
-        self.google_books_key_entry = ttk.Entry(google, textvariable=self.google_books_key_var, show="•", width=28)
-        self.google_books_key_entry.grid(row=1, column=1, sticky="ew", padx=(0, 6))
-        self.google_books_show_var = tk.BooleanVar(value=False)
+        self._api_credential_vars = {}
+        self._api_credential_status = {}
+        self._api_credential_entries = {}
+        descriptions = {
+            "google_books": ("Google Books", "Google Books API key", "An API key is optional and identifies BookLedger for public metadata lookups."),
+            "bigbook": ("Bigbook", "Bigbook API key", "An API key is required to search Bigbook by ISBN and retrieve verified book metadata."),
+            "hardcover": ("Hardcover", "Hardcover API token", "A personal API token is required. Keep it private; it grants access to your Hardcover account."),
+        }
+        saved_credentials = self._load_api_credentials()
+        for provider_id, (name, credential_label, description) in descriptions.items():
+            section = ttk.LabelFrame(parent, text=name, padding=12)
+            section.pack(fill="x", anchor="n", pady=(0, 10))
+            section.columnconfigure(1, weight=1)
+            ttk.Label(section, text=description, wraplength=920).grid(row=0, column=0, columnspan=7, sticky="w", pady=(0, 8))
+            field_label = ttk.Label(section, text=credential_label)
+            field_label.grid(row=1, column=0, sticky="w", padx=(0, 8))
+            field_label.bind("<Enter>", lambda event, help_text=description: self._show_hover_tooltip(event, help_text))
+            field_label.bind("<Leave>", self._hide_hover_tooltip)
+            variable = tk.StringVar(value=saved_credentials.get(provider_id, ""))
+            entry = ttk.Entry(section, textvariable=variable, show="•", width=28)
+            entry.grid(row=1, column=1, sticky="ew", padx=(0, 6))
+            entry.bind("<Enter>", lambda event, help_text=description: self._show_hover_tooltip(event, help_text))
+            entry.bind("<Leave>", self._hide_hover_tooltip)
+            show_var = tk.BooleanVar(value=False)
+            show_button = ttk.Button(section, text="Show")
 
-        def toggle_key_visibility():
-            visible = self.google_books_show_var.get()
-            self.google_books_key_entry.configure(show="" if visible else "•")
-            show_button.configure(text="Hide" if visible else "Show")
+            def toggle_visibility(entry=entry, variable=show_var, button=show_button):
+                visible = not variable.get()
+                variable.set(visible)
+                entry.configure(show="" if visible else "•")
+                button.configure(text="Hide" if visible else "Show")
 
-        show_button = ttk.Button(google, text="Show", command=lambda: (self.google_books_show_var.set(not self.google_books_show_var.get()), toggle_key_visibility()))
-        show_button.grid(row=1, column=2, padx=3)
-        ttk.Button(google, text="Test Lookup", command=self._test_google_books_lookup).grid(row=1, column=3, padx=3)
-        ttk.Button(google, text="Save", command=self._save_google_books_key).grid(row=1, column=4, padx=3)
-        ttk.Button(google, text="Remove", command=self._remove_google_books_key).grid(row=1, column=5, padx=3)
-        ttk.Button(google, text="?", width=3, command=lambda: self._show_api_help("Google Books")).grid(row=1, column=6, padx=(3, 0))
+            show_button.configure(command=toggle_visibility)
+            show_button.grid(row=1, column=2, padx=3)
+            save_command = self._save_google_books_key if provider_id == "google_books" else lambda key=provider_id: self._save_provider_credential(key)
+            remove_command = self._remove_google_books_key if provider_id == "google_books" else lambda key=provider_id: self._remove_provider_credential(key)
+            test_command = self._test_google_books_lookup if provider_id == "google_books" else lambda key=provider_id: self._test_provider_credential(key)
+            ttk.Button(section, text="Test Lookup", command=test_command).grid(row=1, column=3, padx=3)
+            ttk.Button(section, text="Save", command=save_command).grid(row=1, column=4, padx=3)
+            ttk.Button(section, text="Remove", command=remove_command).grid(row=1, column=5, padx=3)
+            ttk.Button(section, text="?", width=3, command=lambda item=name: self._show_api_help(item)).grid(row=1, column=6, padx=(3, 0))
+            status = tk.StringVar(value="Saved credentials are masked." if saved_credentials.get(provider_id) else "No saved credential.")
+            status_label = ttk.Label(section, textvariable=status, wraplength=920)
+            status_label.grid(row=2, column=0, columnspan=7, sticky="w", pady=(8, 0))
+            self._bind_status_color(status, status_label)
+            self._api_credential_vars[provider_id] = variable
+            self._api_credential_status[provider_id] = status
+            self._api_credential_entries[provider_id] = entry
+            if provider_id == "google_books":
+                self.google_books_key_var = variable
+                self.google_books_key_entry = entry
+                self.google_books_api_status = status
+                self.google_books_api_status_label = status_label
+                self.google_books_show_var = show_var
+
         configuration_messages = list(self._configuration_warnings)
         if self.provider_settings_store.warning and self.provider_settings_store.warning not in configuration_messages:
             configuration_messages.insert(0, self.provider_settings_store.warning)
         config_warning = " ".join(configuration_messages)
-        self.google_books_api_status = tk.StringVar(
-            value=config_warning or "API key is optional; saved keys remain masked."
-        )
-        self.google_books_api_status_label = ttk.Label(google, textvariable=self.google_books_api_status, wraplength=920)
-        self.google_books_api_status_label.grid(row=2, column=0, columnspan=7, sticky="w", pady=(8, 0))
-        self._bind_status_color(self.google_books_api_status, self.google_books_api_status_label)
-
-        planned = ttk.LabelFrame(parent, text="Planned API integrations", padding=12)
-        planned.pack(fill="x", anchor="n", pady=(12, 0))
-        for row, name in enumerate(("ISBNdb", "BigBook", "Hardcover")):
-            ttk.Label(planned, text=name, width=18).grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Label(planned, text="Planned · API configuration unavailable until integrated.").grid(row=row, column=1, sticky="w", pady=3)
-            ttk.Button(planned, text="?", width=3, command=lambda provider=name: self._show_api_help(provider)).grid(row=row, column=2, padx=(8, 0))
+        if config_warning:
+            self.google_books_api_status.set(config_warning)
 
     def _show_api_help(self, provider):
-        if provider == "Google Books":
-            messagebox.showinfo(
-                "Google Books API Help",
-                "BookLedger uses the Google Books API to retrieve public book metadata. An API key identifies the application and is optional for the current integration. Google explains API keys and credentials here:\n\nhttps://developers.google.com/books/docs/v1/using",
-                parent=self,
-            )
-        else:
-            messagebox.showinfo(
-                f"{provider} Help",
-                f"{provider} is planned but is not integrated. BookLedger cannot configure credentials or connect to this provider yet.",
-                parent=self,
-            )
+        help_content = {
+            "Google Books": (
+                "BookLedger uses the Google Books API to retrieve public book metadata. An API key identifies the application and is optional for the current integration. Google explains API keys and credentials here:",
+                "https://developers.google.com/books/docs/v1/using",
+            ),
+            "Bigbook": (
+                "BookLedger uses Bigbook to retrieve ISBN-matched book metadata. A Bigbook API key is required and is stored locally in config.json.",
+                "https://bigbookapi.com/docs/",
+            ),
+            "Hardcover": (
+                "BookLedger uses Hardcover to retrieve edition-specific book metadata. A personal API token is required. Keep it private; the API is in beta and its schema may change.",
+                "https://docs.hardcover.app/api/getting-started/",
+            ),
+        }
+        content = help_content.get(provider)
+        if content is None:
+            messagebox.showinfo(f"{provider} Help", f"{provider} is planned but is not integrated.", parent=self)
+            return None
+        message, url = content
+        dialog = tk.Toplevel(self)
+        apply_application_icon(dialog)
+        dialog.title(f"{provider} API Help")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        body = ttk.Frame(dialog, padding=(16, 14, 16, 12))
+        body.pack(fill="both", expand=True)
+        icon = ttk.Label(body, text="ℹ", foreground="#168bd2", font=("Segoe UI", 28, "bold"), width=2, anchor="center")
+        icon.grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10))
+        ttk.Label(body, text=message, wraplength=340, justify="left").grid(row=0, column=1, sticky="w")
+        link = ttk.Label(body, text=url, foreground="#0563c1", cursor="hand2", takefocus=True, font=("Segoe UI", 9, "underline"))
+        link.grid(row=1, column=1, sticky="w", pady=(9, 0))
+
+        def open_documentation(_event=None):
+            try:
+                opened = webbrowser.open(url, new=2)
+            except (OSError, webbrowser.Error):
+                opened = False
+            if not opened:
+                messagebox.showerror("Could not open documentation", "The documentation page could not be opened.", parent=dialog)
+
+        link.bind("<Button-1>", open_documentation)
+        link.bind("<Return>", open_documentation)
+        footer = ttk.Frame(dialog, padding=(12, 8))
+        footer.pack(fill="x", side="bottom")
+        ttk.Separator(dialog, orient="horizontal").pack(fill="x", side="bottom")
+        close_button = ttk.Button(footer, text="OK", command=dialog.destroy)
+        close_button.pack(side="right", ipadx=14)
+        dialog.bind("<Return>", lambda _event: dialog.destroy())
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.update_idletasks()
+        width = max(410, min(500, body.winfo_reqwidth() + 34))
+        height = max(170, body.winfo_reqheight() + footer.winfo_reqheight() + 34)
+        x = self.winfo_rootx() + max((self.winfo_width() - width) // 2, 0)
+        y = self.winfo_rooty() + max((self.winfo_height() - height) // 2, 0)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.grab_set()
+        close_button.focus_set()
+        return dialog
 
     def _build_storage_settings(self, parent):
         parent.columnconfigure((0, 1, 2), weight=1, uniform="storage")
@@ -1867,31 +1943,133 @@ class BookLedgerApp(_WindowBase):
             self._provider_config_status.set(f"Could not save provider settings: {exc}")
             return
         self.metadata_lookup = MetadataLookupService(
-            build_providers(self.provider_settings, self._load_google_books_key())
+            build_providers(self.provider_settings, credentials=self._load_api_credentials())
         )
         self._provider_config_status.set(f"Provider settings saved to {saved_path}")
 
     def _restore_provider_defaults(self):
         self.provider_settings = ProviderSettings.defaults()
         for provider_id, variable in self._provider_variables.items():
-            variable.set(True)
+            variable.set(self.provider_settings.enabled.get(provider_id, True))
         self._reorder_provider_rows(list(self.provider_settings.order))
         self._save_provider_settings()
 
     def _load_google_books_key(self):
-        try:
-            value = self.config_store.get(("api_keys", "google_books"), "")
-            return value if isinstance(value, str) else ""
-        except (OSError, ValueError, AttributeError):
-            return ""
+        return BookLedgerApp._load_api_credentials(self).get("google_books", "")
 
-    def _apply_google_books_key(self, api_key):
+    def _load_api_credentials(self):
+        credentials = {}
+        try:
+            for provider_id in ("google_books", "bigbook", "hardcover"):
+                value = self.config_store.get(("api_keys", provider_id), "")
+                credentials[provider_id] = value if isinstance(value, str) else ""
+        except (OSError, ValueError, AttributeError):
+            return {"google_books": "", "bigbook": "", "hardcover": ""}
+        return credentials
+
+    def _apply_api_credentials(self, credentials):
+        values = dict(credentials)
         self.metadata_lookup = MetadataLookupService(
-            build_providers(self.provider_settings, api_key)
+            build_providers(self.provider_settings, credentials=values)
         )
         panel = getattr(self, "_provider_test_panel", None)
         if panel is not None:
-            panel._google_books_api_key = api_key
+            panel._api_credentials = values
+
+    def _apply_google_books_key(self, api_key):
+        credentials = self._load_api_credentials()
+        credentials["google_books"] = api_key
+        self._apply_api_credentials(credentials)
+
+    def _save_provider_credential(self, provider_id):
+        try:
+            credential = self._api_credential_vars[provider_id].get().strip()
+            self.config_store.set(("api_keys", provider_id), credential)
+            credentials = self._load_api_credentials()
+            credentials[provider_id] = credential
+            self._apply_api_credentials(credentials)
+        except (OSError, ValueError, KeyError) as exc:
+            self._api_credential_status[provider_id].set(f"Could not save {provider_id} settings: {exc}")
+            return False
+        self._api_credential_status[provider_id].set("Credential saved locally and masked.")
+        return True
+
+    def _remove_provider_credential(self, provider_id):
+        provider_names = {"bigbook": "Bigbook", "hardcover": "Hardcover"}
+        name = provider_names[provider_id]
+        if not messagebox.askyesno(
+            f"Remove {name} credential?",
+            f"Remove the saved {name} credential from BookLedger? Other API credentials will be kept.",
+            parent=self,
+        ):
+            return False
+        try:
+            existed = self.config_store.get(("api_keys", provider_id), None) is not None
+            if existed:
+                self.config_store.remove(("api_keys", provider_id))
+            self._api_credential_vars[provider_id].set("")
+            credentials = self._load_api_credentials()
+            credentials[provider_id] = ""
+            self._apply_api_credentials(credentials)
+        except (OSError, ValueError, KeyError) as exc:
+            self._api_credential_status[provider_id].set(f"Could not remove {name} credential: {exc}")
+            return False
+        self._api_credential_status[provider_id].set(
+            f"Saved {name} credential removed." if existed else f"No saved {name} credential was present."
+        )
+        return True
+
+    def _test_provider_credential(self, provider_id):
+        descriptor = next((item for item in PROVIDER_REGISTRY if item.id == provider_id), None)
+        if descriptor is None:
+            return False
+        credential = self._api_credential_vars[provider_id].get().strip()
+        self._api_credential_status[provider_id].set("Testing a sample ISBN metadata lookup…")
+
+        def worker():
+            try:
+                result = descriptor.factory(credential).lookup("9780306406157")
+                outcomes = {
+                    "authentication": "Authentication failed or credential is missing.",
+                    "authorization": "Provider denied access to the request.",
+                    "quota": "Bigbook request quota is exhausted.",
+                    "rate_limit": "Provider rate limit reached; try again later.",
+                    "timeout": "Provider lookup timed out.",
+                    "network": "Could not connect to the provider.",
+                    "provider": "Provider returned an HTTP error.",
+                    "unexpected": "Provider returned an invalid response.",
+                }
+                if result.status == "Lookup failed":
+                    message = outcomes.get(result.failure_kind, "Sample metadata lookup failed.")
+                elif result.failure_kind == "unverified":
+                    message = "Search returned records, but none matched the sample ISBN."
+                elif result.status == "No data" and result.record_found is False:
+                    message = "No sample ISBN record was found."
+                elif result.values:
+                    message = "Sample metadata lookup succeeded; some fields may be unavailable."
+                else:
+                    message = "A matching record was found, but no supported metadata was available."
+            except Exception:
+                message = "Sample metadata lookup failed."
+
+            def complete():
+                try:
+                    if self.winfo_exists():
+                        self._api_credential_status[provider_id].set(message)
+                except tk.TclError:
+                    pass
+
+            try:
+                self.after(0, complete)
+            except tk.TclError:
+                pass
+
+        try:
+            threading.Thread(target=worker, name=f"BookLedger{descriptor.name}CredentialTest", daemon=True).start()
+        except RuntimeError:
+            self._api_credential_status[provider_id].set("Could not start the sample metadata lookup.")
+            return False
+        return True
 
     def _save_google_books_key(self):
         try:
@@ -2301,7 +2479,7 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Clear Trash Incomplete", str(exc), parent=self)
 
     def purge_data(self):
-        if not messagebox.askyesno("Reset BookLedger Data?", "This permanently removes the library database, photos, Trash, posters, application settings (including metadata provider settings and the Google Books API key), and the activity log. BookLedger will create a fresh default configuration when the reset completes. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
+        if not messagebox.askyesno("Reset BookLedger Data?", "This permanently removes the library database, photos, Trash, posters, application settings (including metadata provider settings and API credentials), and the activity log. BookLedger will create a fresh default configuration when the reset completes. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
             return
         from tkinter import simpledialog
         typed = simpledialog.askstring("Confirm Purge", "Type PURGE to permanently reset BookLedger data:", parent=self)
@@ -2365,7 +2543,7 @@ class BookLedgerApp(_WindowBase):
             self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
             self.posters = PosterService(self.db, self.paths)
             self.metadata_lookup = MetadataLookupService(
-                build_providers(self.provider_settings, self._load_google_books_key())
+                build_providers(self.provider_settings)
             )
             self.status_var.set("BookLedger data and settings were reset. Root-level backups were retained.")
             self.show_page("Dashboard")

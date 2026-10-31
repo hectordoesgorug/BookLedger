@@ -40,9 +40,9 @@ def verified_isbns(*values):
 
 
 def test_registry_and_fresh_defaults_put_archive_between_google_and_booktopia():
-    assert DEFAULT_PROVIDER_IDS == ("open_library", "google_books", "archive_org", "booktopia")
+    assert DEFAULT_PROVIDER_IDS == ("open_library", "google_books", "archive_org", "booktopia", "bigbook", "hardcover")
     assert [item.name for item in PROVIDER_REGISTRY if item.implemented] == [
-        "Open Library", "Google Books", "Archive.org", "Booktopia",
+        "Open Library", "Google Books", "Archive.org", "Booktopia", "Bigbook", "Hardcover",
     ]
     settings = ProviderSettings.defaults()
     assert [provider.name for provider in build_providers(settings)] == [

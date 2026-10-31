@@ -53,6 +53,8 @@ class BookForm(tk.Toplevel):
         self.google_books_status = tk.StringVar(value="Not attempted")
         self.archive_org_status = tk.StringVar(value="Not attempted")
         self.booktopia_status = tk.StringVar(value="Not attempted")
+        self.bigbook_status = tk.StringVar(value="Not attempted")
+        self.hardcover_status = tk.StringVar(value="Not attempted")
         self.mobile_status = tk.StringVar(value="Idle — Ready")
         self.connection_outcome = tk.StringVar(value="Connected — Ready")
         self.mock_scan_isbn = tk.StringVar()
@@ -175,6 +177,12 @@ class BookForm(tk.Toplevel):
         ttk.Label(self.metadata_status_panel, text="Booktopia:", foreground="#596579").grid(row=4, column=0, sticky="w", padx=(0, 4))
         self.booktopia_label = ttk.Label(self.metadata_status_panel, textvariable=self.booktopia_status, foreground="#596579")
         self.booktopia_label.grid(row=4, column=1, sticky="w")
+        ttk.Label(self.metadata_status_panel, text="Bigbook:", foreground="#596579").grid(row=5, column=0, sticky="w", padx=(0, 4))
+        self.bigbook_label = ttk.Label(self.metadata_status_panel, textvariable=self.bigbook_status, foreground="#596579")
+        self.bigbook_label.grid(row=5, column=1, sticky="w")
+        ttk.Label(self.metadata_status_panel, text="Hardcover:", foreground="#596579").grid(row=6, column=0, sticky="w", padx=(0, 4))
+        self.hardcover_label = ttk.Label(self.metadata_status_panel, textvariable=self.hardcover_status, foreground="#596579")
+        self.hardcover_label.grid(row=6, column=1, sticky="w")
         row += 1
         self.error_summary = ttk.Label(body, text="", foreground="#b42318", wraplength=620)
         self.error_summary.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
@@ -515,7 +523,7 @@ class BookForm(tk.Toplevel):
             except Exception as exc:
                 result = MetadataResult(
                     "Lookup failed", {}, "Metadata providers", str(exc), "unexpected",
-                    provider_statuses={"Open Library": "Unexpected response error", "Google Books": "Not attempted"},
+                    provider_statuses={"Open Library": "Unexpected response error", "Google Books": "Not attempted", "Archive.org": "Not attempted", "Booktopia": "Not attempted", "Bigbook": "Not attempted", "Hardcover": "Not attempted"},
                 )
             self._schedule_ui(lambda: self._finish_lookup(operation_id, isbn, result))
 
@@ -543,6 +551,8 @@ class BookForm(tk.Toplevel):
             "Google Books": self.google_books_status,
             "Archive.org": self.archive_org_status,
             "Booktopia": self.booktopia_status,
+            "Bigbook": self.bigbook_status,
+            "Hardcover": self.hardcover_status,
         }.get(provider_name)
         if target is not None:
             target.set(status)
@@ -552,6 +562,8 @@ class BookForm(tk.Toplevel):
         self.google_books_status.set("Not attempted")
         self.archive_org_status.set("Not attempted")
         self.booktopia_status.set("Not attempted")
+        self.bigbook_status.set("Not attempted")
+        self.hardcover_status.set("Not attempted")
 
     def _finish_lookup(self, operation_id, requested_isbn, result):
         if not self._active_operation or self._active_operation[1] != operation_id:
@@ -572,6 +584,8 @@ class BookForm(tk.Toplevel):
                 "Google Books": self.google_books_status,
                 "Archive.org": self.archive_org_status,
                 "Booktopia": self.booktopia_status,
+                "Bigbook": self.bigbook_status,
+                "Hardcover": self.hardcover_status,
             }.get(provider_name)
             if target is not None:
                 target.set(status)

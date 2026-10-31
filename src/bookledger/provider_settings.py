@@ -11,6 +11,7 @@ from bookledger.provider_registry import DEFAULT_PROVIDER_IDS, PROVIDERS_BY_ID
 
 
 CONFIG_VERSION = 1
+DEFAULT_DISABLED_PROVIDER_IDS = frozenset({"bigbook", "hardcover"})
 
 
 @dataclass
@@ -20,7 +21,10 @@ class ProviderSettings:
 
     @classmethod
     def defaults(cls) -> "ProviderSettings":
-        return cls(list(DEFAULT_PROVIDER_IDS), {provider_id: True for provider_id in DEFAULT_PROVIDER_IDS})
+        return cls(
+            list(DEFAULT_PROVIDER_IDS),
+            {provider_id: provider_id not in DEFAULT_DISABLED_PROVIDER_IDS for provider_id in DEFAULT_PROVIDER_IDS},
+        )
 
     def ordered_enabled_ids(self) -> list[str]:
         return [provider_id for provider_id in self.order if self.enabled.get(provider_id, False)]
@@ -47,7 +51,7 @@ class ProviderSettings:
         valid_ids = set(DEFAULT_PROVIDER_IDS)
         order = list(dict.fromkeys(item for item in raw_order if item in valid_ids))
         order.extend(item for item in defaults.order if item not in order)
-        enabled = {provider_id: raw_enabled.get(provider_id, True) for provider_id in defaults.order}
+        enabled = {provider_id: raw_enabled.get(provider_id, defaults.enabled[provider_id]) for provider_id in defaults.order}
         return cls(order, enabled)
 
     def to_document(self, existing: object = None) -> dict:
@@ -55,7 +59,7 @@ class ProviderSettings:
         document["version"] = CONFIG_VERSION
         document["metadata_providers"] = {
             "order": [provider_id for provider_id in self.order if provider_id in PROVIDERS_BY_ID],
-            "enabled": {provider_id: bool(self.enabled.get(provider_id, True)) for provider_id in DEFAULT_PROVIDER_IDS},
+            "enabled": {provider_id: bool(self.enabled.get(provider_id, provider_id not in DEFAULT_DISABLED_PROVIDER_IDS)) for provider_id in DEFAULT_PROVIDER_IDS},
         }
         return document
 

@@ -100,6 +100,10 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
         _provider_drag_end = BookLedgerApp._provider_drag_end
         _reorder_provider_rows = BookLedgerApp._reorder_provider_rows
         _load_google_books_key = BookLedgerApp._load_google_books_key
+        _load_api_credentials = BookLedgerApp._load_api_credentials
+        _save_provider_credential = BookLedgerApp._save_provider_credential
+        _remove_provider_credential = BookLedgerApp._remove_provider_credential
+        _test_provider_credential = BookLedgerApp._test_provider_credential
 
     harness = SettingsHarness()
     harness.workspace = ttk.Frame(tk_root)
@@ -165,7 +169,7 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
     )
     assert tuple(notebook.tab(index, "text") for index in range(len(expected_tabs))) == expected_tabs
     assert {descriptor.name for descriptor in PROVIDER_REGISTRY if descriptor.implemented} == {
-        "Open Library", "Google Books", "Archive.org", "Booktopia",
+        "Open Library", "Google Books", "Archive.org", "Booktopia", "Bigbook", "Hardcover",
     }
 
     def tab_widgets(index):
@@ -178,11 +182,11 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
     assert "reserved for future development" in mobile_text
     assert not [widget for widget in tab_widgets(0) if isinstance(widget, ttk.Button)]
     metadata_text = " ".join(texts(1))
-    for name in ("Open Library", "Google Books", "Archive.org", "Booktopia", "ISBNdb", "WorldCat", "BigBook", "Hardcover", "Goodreads", "ISBN Lookup Test"):
+    for name in ("Open Library", "Google Books", "Archive.org", "Booktopia", "Bigbook", "Hardcover", "ISBNdb", "WorldCat", "Goodreads", "ISBN Lookup Test"):
         assert name in metadata_text
     assert "Internet Archive — planned; not integrated." not in metadata_text
     api_text = " ".join(texts(2))
-    for name in ("Google Books API key", "ISBNdb", "BigBook", "Hardcover", "unavailable until integrated"):
+    for name in ("Google Books API key", "Bigbook API key", "Hardcover API token"):
         assert name in api_text
     storage_text = " ".join(texts(3))
     for name in ("Back Up Now", "Export to CSV…", "Verify Database", "Restore Backup…", "Undo Delete", "Clear Trash…", "Purge Data…", "Retry Recovery", "View Log", "Clear Log…", "Enable Logging"):
@@ -483,10 +487,11 @@ def test_close_button_closes_dialog_when_idle(dialog):
     assert not dialog.winfo_exists()
 
 
-def test_nine_display_fields_use_canonical_contract_names():
+def test_display_fields_use_canonical_contract_names():
     assert FIELD_DEFINITIONS == (
         ("Title", "title"),
         ("Author", "author"),
+        ("ISBN", "isbn"),
         ("Genre", "genre"),
         ("Publisher", "publisher"),
         ("Year", "publication_year"),
@@ -505,13 +510,28 @@ def test_field_statuses_distinguish_returned_missing_and_unsupported_fields():
     statuses = diagnostic_field_statuses(result, {"title", "author", "page_count", "book_details"})
 
     assert statuses == {
-        "Title": "OK", "Author": "No Data", "Genre": "N/A", "Publisher": "N/A",
+        "Title": "OK", "Author": "No Data", "ISBN": "N/A", "Genre": "N/A", "Publisher": "N/A",
         "Year": "N/A", "Edition": "N/A", "Pages": "OK", "SRP": "N/A",
         "Book Details": "OK",
     }
     assert "A Title" not in statuses.values()
     assert FIELD_COLORS["OK"] != FIELD_COLORS["No Data"]
     assert FIELD_COLORS["N/A"] == FIELD_COLORS["No Data"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("authentication", "Authentication required or failed"),
+        ("authorization", "Access denied"),
+        ("quota", "Quota exhausted"),
+        ("rate_limit", "Rate limited"),
+    ],
+)
+def test_diagnostics_present_safe_credential_quota_and_rate_limit_outcomes(kind, expected):
+    result = MetadataResult("Lookup failed", {}, "Provider", "safe classified error", kind)
+    assert diagnostic_overall_status(result, ()) == expected
+    assert diagnostic_result_detail(result) != "safe classified error"
 
 
 @pytest.mark.parametrize(

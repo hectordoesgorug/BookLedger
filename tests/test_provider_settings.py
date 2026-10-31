@@ -13,7 +13,7 @@ def test_absent_provider_configuration_loads_defaults(tmp_path):
     store = ProviderSettingsStore(tmp_path / "config.json", tmp_path / "fallback" / "config.json")
     settings = store.load()
     assert settings.order == list(DEFAULT_PROVIDER_IDS)
-    assert settings.ordered_enabled_ids() == list(DEFAULT_PROVIDER_IDS)
+    assert settings.ordered_enabled_ids() == ["open_library", "google_books", "archive_org", "booktopia"]
 
 
 def test_provider_order_and_enabled_state_round_trip_and_preserve_unrelated_fields(tmp_path):
@@ -25,7 +25,7 @@ def test_provider_order_and_enabled_state_round_trip_and_preserve_unrelated_fiel
     settings.enabled["google_books"] = False
     store.save(settings)
     reloaded = store.load()
-    assert reloaded.order == settings.order + ["archive_org"]
+    assert reloaded.order == settings.order + ["archive_org", "bigbook", "hardcover"]
     assert reloaded.enabled["google_books"] is False
     assert json.loads(path.read_text(encoding="utf-8"))["unrelated"] == {"keep": True}
 
@@ -37,6 +37,7 @@ def test_incomplete_configuration_uses_safe_defaults_for_missing_providers(tmp_p
     assert settings.order == list(DEFAULT_PROVIDER_IDS)
     assert settings.enabled == {
         "open_library": True, "google_books": False, "archive_org": True, "booktopia": True,
+        "bigbook": False, "hardcover": False,
     }
 
 
@@ -52,9 +53,10 @@ def test_legacy_provider_order_is_preserved_and_archive_is_appended(tmp_path):
 
     settings = ProviderSettingsStore(path, tmp_path / "fallback.json").load()
 
-    assert settings.order == ["booktopia", "open_library", "google_books", "archive_org"]
+    assert settings.order == ["booktopia", "open_library", "google_books", "archive_org", "bigbook", "hardcover"]
     assert settings.enabled == {
         "open_library": False, "google_books": True, "archive_org": True, "booktopia": True,
+        "bigbook": False, "hardcover": False,
     }
 
 
@@ -64,6 +66,19 @@ def test_archive_org_enablement_controls_independent_provider_selection():
     assert [provider.name for provider in build_providers(settings)] == ["Archive.org"]
     settings.enabled["archive_org"] = False
     assert build_providers(settings) == ()
+
+
+def test_bigbook_and_hardcover_are_registered_after_existing_sources_and_default_disabled():
+    settings = ProviderSettings.defaults()
+    assert settings.order == ["open_library", "google_books", "archive_org", "booktopia", "bigbook", "hardcover"]
+    assert settings.enabled["bigbook"] is False
+    assert settings.enabled["hardcover"] is False
+    assert [provider.name for provider in build_providers(settings)] == [
+        "Open Library", "Google Books", "Archive.org", "Booktopia",
+    ]
+    settings.enabled["hardcover"] = True
+    settings.order = ["hardcover"]
+    assert [provider.name for provider in build_providers(settings, credentials={"hardcover": "token"})] == ["Hardcover"]
 
 
 def test_malformed_configuration_is_preserved_and_defaults_are_reported(tmp_path):

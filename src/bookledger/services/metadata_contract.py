@@ -111,6 +111,12 @@ class MetadataProvider:
         with urllib.request.urlopen(request, timeout=self._request_timeout()) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def _request_json_with_headers(self, url: str, headers: dict[str, str]) -> dict:
+        request_headers = {"User-Agent": "BookLedger/0.1", **headers}
+        request = urllib.request.Request(url, headers=request_headers)
+        with urllib.request.urlopen(request, timeout=self._request_timeout()) as response:
+            return json.loads(response.read().decode("utf-8"))
+
     def _failed(self, exc: Exception) -> MetadataResult:
         return MetadataResult("Lookup failed", {}, self.name, str(exc), failure_kind(exc))
 

@@ -63,6 +63,96 @@ def test_google_books_key_load_uses_canonical_configuration(tmp_path):
     assert BookLedgerApp._load_google_books_key(subject) == "synthetic-key"
 
 
+def test_new_api_credentials_load_save_and_remove_independently(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"api_keys": {"google_books": "existing-google", "hardcover": "existing-token"}}), encoding="utf-8")
+    store = AppConfigStore(config_path)
+
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    subject = SimpleNamespace(
+        config_store=store,
+        _api_credential_vars={"bigbook": Value("new-bigbook-key"), "hardcover": Value("existing-token")},
+        _api_credential_status={"bigbook": Value(""), "hardcover": Value("")},
+        provider_settings=object(),
+        _load_api_credentials=lambda: BookLedgerApp._load_api_credentials(subject),
+        _apply_api_credentials=lambda values: setattr(subject, "applied", values),
+    )
+
+    assert BookLedgerApp._save_provider_credential(subject, "bigbook")
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["api_keys"] == {
+        "google_books": "existing-google", "hardcover": "existing-token", "bigbook": "new-bigbook-key",
+    }
+    restarted = SimpleNamespace(config_store=AppConfigStore(config_path))
+    assert BookLedgerApp._load_api_credentials(restarted) == {
+        "google_books": "existing-google", "bigbook": "new-bigbook-key", "hardcover": "existing-token",
+    }
+    assert subject.applied == {
+        "google_books": "existing-google", "bigbook": "new-bigbook-key", "hardcover": "existing-token",
+    }
+
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+    assert BookLedgerApp._remove_provider_credential(subject, "bigbook")
+    removed = json.loads(config_path.read_text(encoding="utf-8"))
+    assert removed["api_keys"] == {"google_books": "existing-google", "hardcover": "existing-token"}
+
+
+def test_new_credentials_default_empty_for_legacy_config(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"version": 1, "api_keys": {"google_books": "existing"}}), encoding="utf-8")
+    subject = SimpleNamespace(config_store=AppConfigStore(config_path))
+    assert BookLedgerApp._load_api_credentials(subject) == {
+        "google_books": "existing", "bigbook": "", "hardcover": "",
+    }
+
+
+def test_provider_credential_test_runs_without_showing_secret_or_blocking_ui(monkeypatch):
+    from bookledger.services.bigbook import BigbookProvider
+    from bookledger.services.metadata_contract import MetadataResult
+
+    class ImmediateThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    observed = []
+    monkeypatch.setattr(BigbookProvider, "lookup", lambda self, _isbn: observed.append(self.api_key) or MetadataResult("Lookup failed", {}, "Bigbook", "safe", "authentication"))
+    monkeypatch.setattr(app_module.threading, "Thread", ImmediateThread)
+    status = Value("")
+    subject = SimpleNamespace(
+        _api_credential_vars={"bigbook": Value("private-secret-value")},
+        _api_credential_status={"bigbook": status},
+        after=lambda _delay, callback: callback(),
+        winfo_exists=lambda: True,
+    )
+
+    assert BookLedgerApp._test_provider_credential(subject, "bigbook")
+    assert observed == ["private-secret-value"]
+    assert status.get() == "Authentication failed or credential is missing."
+    assert "private-secret-value" not in status.get()
+
+
 def test_google_books_remove_cancel_and_invalid_config_leave_file_unchanged(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     original = '{"api_keys":{"google_books":"keep-me"},"unrelated":true}\n'

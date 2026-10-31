@@ -57,14 +57,16 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert widget.open_library_status.get() == "Not attempted"
     assert widget.google_books_status.get() == "Not attempted"
     assert widget.archive_org_status.get() == "Not attempted"
+    assert widget.bigbook_status.get() == "Not attempted"
+    assert widget.hardcover_status.get() == "Not attempted"
     assert widget.booktopia_status.get() == "Not attempted"
     provider_labels = [
         child.cget("text") for child in widget.metadata_status_panel.winfo_children()
         if isinstance(child, ttk.Label) and child.cget("text") in {
-            "Open Library:", "Google Books:", "Archive.org:", "Booktopia:",
+            "Open Library:", "Google Books:", "Archive.org:", "Booktopia:", "Bigbook:", "Hardcover:",
         }
     ]
-    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Booktopia:"]
+    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Booktopia:", "Bigbook:", "Hardcover:"]
     assert not any(
         child.cget("text") == "Fields marked * are required. Metadata lookup is optional."
         for child in widget.body.winfo_children()
@@ -236,12 +238,21 @@ def test_archive_org_provider_status_updates_during_and_after_intake_lookup(form
     assert widget.archive_org_status.get() == "Retrieving from Archive.org…"
     widget._set_lookup_provider_status(operation_id, isbn, "Archive.org", "Metadata retrieved · some fields missing")
     assert widget.archive_org_status.get() == "Metadata retrieved · some fields missing"
-
     widget._finish_lookup(operation_id, isbn, MetadataResult(
         "Retrieved", {"title": "Nightfall", "book_details": "A test synopsis."}, "Archive.org",
         provider_statuses={"Archive.org": "Metadata retrieved · some fields missing"},
     ))
     assert widget.archive_org_status.get() == "Metadata retrieved · some fields missing"
+
+
+def test_bigbook_and_hardcover_provider_status_updates_through_intake(form):
+    widget, _root, _photo = form
+    widget._set("isbn", "9780306406157")
+    widget._active_operation = ("lookup", 13, "9780306406157")
+    widget._set_lookup_provider_status(13, "9780306406157", "Bigbook", "Metadata retrieved")
+    widget._set_lookup_provider_status(13, "9780306406157", "Hardcover", "Authentication required or failed")
+    assert widget.bigbook_status.get() == "Metadata retrieved"
+    assert widget.hardcover_status.get() == "Authentication required or failed"
 
 
 def test_field_error_clears_when_value_becomes_valid(form):

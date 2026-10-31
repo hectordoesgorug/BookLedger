@@ -22,6 +22,10 @@ def _provider_outcome(result: MetadataResult) -> str:
         return {
             "timeout": "Timed out",
             "network": "Connection failed",
+            "authentication": "Authentication required or failed",
+            "authorization": "Access denied",
+            "quota": "Quota exhausted",
+            "rate_limit": "Rate limited",
             "provider": "HTTP/provider error",
             "unexpected": "Unexpected response error",
         }.get(result.failure_kind, "Unexpected response error")

@@ -19,6 +19,7 @@ DIAGNOSTIC_TIMEOUT_GRACE_MS = 50
 FIELD_DEFINITIONS = (
     ("Title", "title"),
     ("Author", "author"),
+    ("ISBN", "isbn"),
     ("Genre", "genre"),
     ("Publisher", "publisher"),
     ("Year", "publication_year"),
@@ -52,6 +53,14 @@ def _has_field_value(value) -> bool:
 def diagnostic_overall_status(result: MetadataResult, supported_fields) -> str:
     if result.failure_kind == "timeout":
         return "Timeout"
+    if result.failure_kind == "authentication":
+        return "Authentication required or failed"
+    if result.failure_kind == "authorization":
+        return "Access denied"
+    if result.failure_kind == "quota":
+        return "Quota exhausted"
+    if result.failure_kind == "rate_limit":
+        return "Rate limited"
     if result.failure_kind == "provider":
         return "HTTP error"
     if result.failure_kind == "network":
@@ -80,6 +89,14 @@ def diagnostic_result_detail(result: MetadataResult) -> str:
         if result.error and "diagnostic lookup timed out" in result.error.casefold():
             return "The diagnostic deadline expired before the provider returned a result."
         return f"The provider exceeded its {DIAGNOSTIC_TIMEOUT_SECONDS:g}-second lookup budget."
+    if result.failure_kind == "authentication":
+        return result.error if result.error in {"Bigbook API key is required.", "Hardcover API token is required.", "Hardcover invalid or expired token."} else "The provider requires a valid API credential."
+    if result.failure_kind == "authorization":
+        return "The provider denied access to this request."
+    if result.failure_kind == "quota":
+        return "Bigbook's daily request quota is exhausted."
+    if result.failure_kind == "rate_limit":
+        return "The provider rate limit was reached. Try again later."
     if result.failure_kind == "provider":
         return "The provider returned an HTTP error."
     if result.failure_kind == "network":
@@ -105,13 +122,15 @@ def elapsed_color(elapsed_seconds: float) -> str:
 class _MetadataProviderTestView:
     """Shared UI and behavior for embedded and standalone diagnostic views."""
 
-    def _initialize_test_view(self, parent, *, google_books_api_key="", providers=None, embedded=False):
+    def _initialize_test_view(self, parent, *, google_books_api_key="", credentials=None, providers=None, embedded=False):
         self._embedded = embedded
         self._providers = tuple(
             descriptor for descriptor in (providers if providers is not None else PROVIDER_REGISTRY)
         )
         self._providers_by_name = {descriptor.name: descriptor for descriptor in self._providers}
-        self._google_books_api_key = google_books_api_key
+        self._api_credentials = dict(credentials or {})
+        if google_books_api_key:
+            self._api_credentials.setdefault("google_books", google_books_api_key)
         self._operation_id = 0
         self._busy = False
         self._destroyed = False
@@ -272,11 +291,11 @@ class _MetadataProviderTestView:
         )
 
         started_at = self._started_at
-        api_key = self._google_books_api_key
+        api_credentials = dict(self._api_credentials)
 
         def work():
             try:
-                provider = descriptor.factory(api_key)
+                provider = descriptor.factory(api_credentials.get(descriptor.id, ""))
                 # Providers are freshly instantiated, so the diagnostic's
                 # budget cannot mutate normal intake or another lookup.
                 provider.timeout = DIAGNOSTIC_TIMEOUT_SECONDS
@@ -363,7 +382,7 @@ class _MetadataProviderTestView:
         self.validation_var.set(detail)
         self.validation_label.configure(
             foreground=ERROR_COLOR
-            if result.failure_kind in {"timeout", "provider", "network", "unexpected"}
+            if result.failure_kind in {"timeout", "provider", "network", "unexpected", "authentication", "authorization", "quota", "rate_limit"}
             else NEUTRAL_COLOR
         )
         self.fetch_time_var.set(f"{elapsed:.2f} seconds")
@@ -394,11 +413,12 @@ class _MetadataProviderTestView:
 class MetadataProviderTestPanel(ttk.Frame, _MetadataProviderTestView):
     """Embedded ISBN lookup diagnostic that never saves or merges a book."""
 
-    def __init__(self, parent, *, google_books_api_key: str = "", providers=None):
+    def __init__(self, parent, *, google_books_api_key: str = "", credentials=None, providers=None):
         ttk.Frame.__init__(self, parent)
         self._initialize_test_view(
             parent,
             google_books_api_key=google_books_api_key,
+            credentials=credentials,
             providers=providers,
             embedded=True,
         )
@@ -407,7 +427,7 @@ class MetadataProviderTestPanel(ttk.Frame, _MetadataProviderTestView):
 class MetadataProviderTestDialog(tk.Toplevel, _MetadataProviderTestView):
     """Standalone wrapper retained for existing callers of the diagnostic."""
 
-    def __init__(self, parent, *, google_books_api_key: str = "", providers=None):
+    def __init__(self, parent, *, google_books_api_key: str = "", credentials=None, providers=None):
         tk.Toplevel.__init__(self, parent)
         apply_application_icon(self)
         self.title("ISBN Lookup Test")
@@ -418,6 +438,7 @@ class MetadataProviderTestDialog(tk.Toplevel, _MetadataProviderTestView):
         self._initialize_test_view(
             parent,
             google_books_api_key=google_books_api_key,
+            credentials=credentials,
             providers=providers,
             embedded=False,
         )
