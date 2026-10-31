@@ -433,10 +433,12 @@ def test_matching_record_without_usable_metadata_is_a_miss():
 
 
 def test_each_metadata_provider_uses_a_five_second_request_timeout():
+    from bookledger.services.archive_org import ArchiveOrgProvider
+
     response = MagicMock()
     response.__enter__.return_value.read.return_value = b"{}"
-    for provider in (OpenLibraryProvider(), GoogleBooksProvider()):
-        with patch("bookledger.services.metadata.urllib.request.urlopen", return_value=response) as urlopen:
+    for provider in (OpenLibraryProvider(), GoogleBooksProvider(), ArchiveOrgProvider()):
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
             provider._request_json("https://example.test/lookup")
         assert urlopen.call_args.kwargs["timeout"] == 5
 

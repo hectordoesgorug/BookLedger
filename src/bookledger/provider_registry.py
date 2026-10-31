@@ -5,6 +5,7 @@ from typing import Callable
 
 from bookledger.services.google_books import GoogleBooksProvider
 from bookledger.services.metadata_contract import MetadataProvider
+from bookledger.services.archive_org import ArchiveOrgProvider
 from bookledger.services.open_library import OpenLibraryProvider
 from bookledger.services.booktopia import BooktopiaProvider
 
@@ -28,6 +29,11 @@ PROVIDER_REGISTRY = (
         "google_books", "Google Books", True,
         ("title", "author", "genre", "book_details", "publisher", "publication_year", "page_count"),
         lambda api_key: GoogleBooksProvider(api_key),
+    ),
+    ProviderDescriptor(
+        "archive_org", "Archive.org", True,
+        ("title", "author", "book_details", "publisher", "publication_year", "edition"),
+        lambda _api_key: ArchiveOrgProvider(),
     ),
     ProviderDescriptor(
         "booktopia", "Booktopia", True,

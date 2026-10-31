@@ -51,6 +51,7 @@ class BookForm(tk.Toplevel):
         self.metadata_status = tk.StringVar(value="Manual entry")
         self.open_library_status = tk.StringVar(value="Not attempted")
         self.google_books_status = tk.StringVar(value="Not attempted")
+        self.archive_org_status = tk.StringVar(value="Not attempted")
         self.booktopia_status = tk.StringVar(value="Not attempted")
         self.mobile_status = tk.StringVar(value="Idle — Ready")
         self.connection_outcome = tk.StringVar(value="Connected — Ready")
@@ -168,13 +169,12 @@ class BookForm(tk.Toplevel):
         ttk.Label(self.metadata_status_panel, text="Google Books:", foreground="#596579").grid(row=2, column=0, sticky="w", padx=(0, 4))
         self.google_books_label = ttk.Label(self.metadata_status_panel, textvariable=self.google_books_status, foreground="#596579")
         self.google_books_label.grid(row=2, column=1, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Booktopia:", foreground="#596579").grid(row=3, column=0, sticky="w", padx=(0, 4))
+        ttk.Label(self.metadata_status_panel, text="Archive.org:", foreground="#596579").grid(row=3, column=0, sticky="w", padx=(0, 4))
+        self.archive_org_label = ttk.Label(self.metadata_status_panel, textvariable=self.archive_org_status, foreground="#596579")
+        self.archive_org_label.grid(row=3, column=1, sticky="w")
+        ttk.Label(self.metadata_status_panel, text="Booktopia:", foreground="#596579").grid(row=4, column=0, sticky="w", padx=(0, 4))
         self.booktopia_label = ttk.Label(self.metadata_status_panel, textvariable=self.booktopia_status, foreground="#596579")
-        self.booktopia_label.grid(row=3, column=1, sticky="w")
-        row += 1
-        ttk.Label(body, text="Fields marked * are required. Metadata lookup is optional.", foreground="#596579").grid(
-            row=row, column=0, columnspan=4, sticky="w"
-        )
+        self.booktopia_label.grid(row=4, column=1, sticky="w")
         row += 1
         self.error_summary = ttk.Label(body, text="", foreground="#b42318", wraplength=620)
         self.error_summary.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
@@ -541,6 +541,7 @@ class BookForm(tk.Toplevel):
         target = {
             "Open Library": self.open_library_status,
             "Google Books": self.google_books_status,
+            "Archive.org": self.archive_org_status,
             "Booktopia": self.booktopia_status,
         }.get(provider_name)
         if target is not None:
@@ -549,6 +550,7 @@ class BookForm(tk.Toplevel):
     def _reset_provider_statuses(self):
         self.open_library_status.set("Not attempted")
         self.google_books_status.set("Not attempted")
+        self.archive_org_status.set("Not attempted")
         self.booktopia_status.set("Not attempted")
 
     def _finish_lookup(self, operation_id, requested_isbn, result):
@@ -568,6 +570,7 @@ class BookForm(tk.Toplevel):
             target = {
                 "Open Library": self.open_library_status,
                 "Google Books": self.google_books_status,
+                "Archive.org": self.archive_org_status,
                 "Booktopia": self.booktopia_status,
             }.get(provider_name)
             if target is not None:

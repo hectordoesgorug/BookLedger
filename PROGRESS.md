@@ -18,6 +18,7 @@
 - [x] BookLedger Mobile connection/scan UI simulation, retry rules, and 10-second scan timeout
 - [x] Open Library primary metadata lookup with Google Books fallback and per-provider timeouts
 - [x] Booktopia HTML provider activated after Open Library and Google Books; it follows matching ISBN search results and uses a canonical-redirected direct ISBN fallback on HTTP search errors, verifies product-page ISBN evidence, and merges supported missing metadata and descriptions without replacing earlier values
+- [x] Archive.org Advanced Search provider added after Google Books and before Booktopia by default, with bounded candidate checks, per-provider ISBN Lookup Test support, and legacy provider-order preservation
 - [x] Open Library no longer supplies Book Details/Synopsis from descriptions, notes, excerpts, or linked works while retaining supported bibliographic fields
 - [x] Booktopia accepts an explicitly tab-linked Description panel or a matching schema.org Book description after rejecting known bibliographic notes and retailer boilerplate; generic meta descriptions and unassociated `itemprop="description"` are ignored
 - [x] Service validation rejects non-finite or unrepresentable copy and sale prices and unapproved genres
@@ -54,7 +55,7 @@
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)
 
 ## Configurable metadata provider registry
-- [x] Central registry for Open Library, Google Books, and Booktopia with implemented status and provider field support
+- [x] Central registry for Open Library, Google Books, Archive.org, and Booktopia with implemented status and provider field support
 - [x] Settings controls for enable/disable, functional drag-and-drop priority, and Restore Defaults
 - [x] Versioned root `config.json`, per-user fallback for read-only roots, malformed-config preservation, and Purge persistence
 - [x] Configured lookup order with field-level first-value-wins merge and completion at title, author, genre, publisher, and publication year; edition, format, synopsis, and page count remain optional

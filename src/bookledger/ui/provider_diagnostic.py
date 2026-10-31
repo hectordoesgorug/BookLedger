@@ -13,6 +13,9 @@ from bookledger.ui.status_colors import ERROR_COLOR, NEUTRAL_COLOR, SUCCESS_COLO
 
 
 DIAGNOSTIC_TIMEOUT_SECONDS = 5.0
+# Give the worker one UI poll interval to publish the adapter's own timeout or
+# network result at the boundary of its five-second request budget.
+DIAGNOSTIC_TIMEOUT_GRACE_MS = 50
 FIELD_DEFINITIONS = (
     ("Title", "title"),
     ("Author", "author"),
@@ -51,16 +54,48 @@ def diagnostic_overall_status(result: MetadataResult, supported_fields) -> str:
         return "Timeout"
     if result.failure_kind == "provider":
         return "HTTP error"
-    if result.status == "Lookup failed" or result.failure_kind in {"unexpected", "network", "unverified"}:
-        return "Lookup error"
+    if result.failure_kind == "network":
+        return "Network error"
+    if result.failure_kind == "unexpected":
+        return "Invalid response"
+    if result.failure_kind == "unverified":
+        return "ISBN unconfirmed"
+    if result.failure_kind == "unavailable":
+        return "Provider unavailable"
     if result.status == "No data" and result.record_found is False:
         return "ISBN not found"
-    if result.status == "Retrieved" or (result.status == "No data" and result.record_found is True):
+    if result.status == "No data" and result.record_found is True and not result.values:
+        return "Matching record · no usable metadata"
+    if result.status == "Retrieved" or result.values:
         supported_fields = frozenset(supported_fields)
         if all(_has_field_value(result.values.get(field)) for field in supported_fields):
             return "Completed"
         return "Partial data"
     return "Lookup error"
+
+
+def diagnostic_result_detail(result: MetadataResult) -> str:
+    """Return a safe, concise reason without exposing raw provider exceptions."""
+    if result.failure_kind == "timeout":
+        if result.error and "diagnostic lookup timed out" in result.error.casefold():
+            return "The diagnostic deadline expired before the provider returned a result."
+        return f"The provider exceeded its {DIAGNOSTIC_TIMEOUT_SECONDS:g}-second lookup budget."
+    if result.failure_kind == "provider":
+        return "The provider returned an HTTP error."
+    if result.failure_kind == "network":
+        error = (result.error or "").casefold()
+        if "getaddrinfo" in error or "name resolution" in error or "name or service not known" in error:
+            return "Network error: DNS lookup failed."
+        if "connection refused" in error:
+            return "Network error: the provider refused the connection."
+        return "Network error: unable to connect to the provider."
+    if result.failure_kind == "unexpected":
+        return "The provider returned an invalid response."
+    if result.failure_kind == "unverified":
+        return "Search results were found, but none could be verified against this ISBN."
+    if result.status == "No data" and result.record_found is True and not result.values:
+        return "A matching record was found, but it contained no usable supported metadata."
+    return ""
 
 
 def elapsed_color(elapsed_seconds: float) -> str:
@@ -82,6 +117,7 @@ class _MetadataProviderTestView:
         self._destroyed = False
         self._started_at = None
         self._timeout_after_id = None
+        self._timeout_grace_used = False
         self._poll_after_id = None
         self._ui_queue = SimpleQueue()
         self._field_status_vars: dict[str, tk.StringVar] = {}
@@ -173,6 +209,7 @@ class _MetadataProviderTestView:
         if clear_isbn:
             self.isbn_var.set("")
         self.validation_var.set("")
+        self.validation_label.configure(foreground=ERROR_COLOR)
         self.overall_status_var.set("Ready")
         self.fetch_time_var.set("—")
         self.fetch_time_label.configure(foreground="#64748b")
@@ -220,6 +257,7 @@ class _MetadataProviderTestView:
         self._operation_id += 1
         operation_id = self._operation_id
         self._started_at = time.monotonic()
+        self._timeout_grace_used = False
         self.validation_var.set("")
         self.overall_status_var.set("Retrieving data")
         self.fetch_time_var.set("—")
@@ -296,6 +334,17 @@ class _MetadataProviderTestView:
         self._drain_worker_results()
         if self._destroyed or not self._busy or operation_id != self._operation_id:
             return
+        if not self._timeout_grace_used:
+            self._timeout_grace_used = True
+            try:
+                self._timeout_after_id = self.after(
+                    DIAGNOSTIC_TIMEOUT_GRACE_MS,
+                    lambda: self._finish_timeout(operation_id, descriptor),
+                )
+                return
+            except tk.TclError:
+                self._destroyed = True
+                return
         elapsed = max(time.monotonic() - self._started_at, DIAGNOSTIC_TIMEOUT_SECONDS)
         result = MetadataResult("Lookup failed", {}, descriptor.name, "Diagnostic lookup timed out", "timeout")
         self._finish_result(operation_id, descriptor, result, elapsed)
@@ -310,6 +359,13 @@ class _MetadataProviderTestView:
             self._field_status_vars[label].set(status)
             self._field_status_labels[label].configure(foreground=FIELD_COLORS[status])
         self.overall_status_var.set(diagnostic_overall_status(result, supported_fields))
+        detail = diagnostic_result_detail(result)
+        self.validation_var.set(detail)
+        self.validation_label.configure(
+            foreground=ERROR_COLOR
+            if result.failure_kind in {"timeout", "provider", "network", "unexpected"}
+            else NEUTRAL_COLOR
+        )
         self.fetch_time_var.set(f"{elapsed:.2f} seconds")
         self.fetch_time_label.configure(foreground=elapsed_color(elapsed))
         self._set_busy(False)

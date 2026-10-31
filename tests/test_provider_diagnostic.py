@@ -13,8 +13,10 @@ from bookledger import app as app_module
 from bookledger.app import BookLedgerApp
 from bookledger.provider_registry import PROVIDER_REGISTRY
 from bookledger.services.metadata_contract import MetadataResult
+from bookledger.services.archive_org import ArchiveOrgProvider
 from bookledger.ui.provider_diagnostic import (
     DIAGNOSTIC_TIMEOUT_SECONDS,
+    DIAGNOSTIC_TIMEOUT_GRACE_MS,
     FIELD_DEFINITIONS,
     FIELD_COLORS,
     MetadataProviderTestDialog,
@@ -22,6 +24,7 @@ from bookledger.ui.provider_diagnostic import (
     TIME_SLOW_COLOR,
     diagnostic_field_statuses,
     diagnostic_overall_status,
+    diagnostic_result_detail,
     elapsed_color,
 )
 
@@ -161,8 +164,8 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
         "Mobile App Setup", "Metadata Sources", "API Management", "Storage and Backup", "Poster Setup", "Preferences",
     )
     assert tuple(notebook.tab(index, "text") for index in range(len(expected_tabs))) == expected_tabs
-    assert {descriptor.name for descriptor in PROVIDER_REGISTRY} == {
-        "Open Library", "Google Books", "Booktopia",
+    assert {descriptor.name for descriptor in PROVIDER_REGISTRY if descriptor.implemented} == {
+        "Open Library", "Google Books", "Archive.org", "Booktopia",
     }
 
     def tab_widgets(index):
@@ -175,8 +178,9 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
     assert "reserved for future development" in mobile_text
     assert not [widget for widget in tab_widgets(0) if isinstance(widget, ttk.Button)]
     metadata_text = " ".join(texts(1))
-    for name in ("Open Library", "Google Books", "Booktopia", "ISBNdb", "WorldCat", "Internet Archive", "BigBook", "Hardcover", "Goodreads", "ISBN Lookup Test"):
+    for name in ("Open Library", "Google Books", "Archive.org", "Booktopia", "ISBNdb", "WorldCat", "BigBook", "Hardcover", "Goodreads", "ISBN Lookup Test"):
         assert name in metadata_text
+    assert "Internet Archive — planned; not integrated." not in metadata_text
     api_text = " ".join(texts(2))
     for name in ("Google Books API key", "ISBNdb", "BigBook", "Hardcover", "unavailable until integrated"):
         assert name in api_text
@@ -210,12 +214,19 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
     theme_selector = next(widget for widget in preference_widgets if isinstance(widget, ttk.Combobox))
     assert str(theme_selector.cget("state")) == "readonly"
     assert tuple(theme_selector.cget("values")) == tuple(label for label, _name in harness._theme_options)
+    provider_combo = next(
+        widget for widget in tab_widgets(1)
+        if isinstance(widget, ttk.Combobox)
+        and "Archive.org" in tuple(widget.cget("values"))
+    )
+    assert tuple(provider_combo.cget("values")) == tuple(item.name for item in PROVIDER_REGISTRY)
 
     # Merely changing tabs does not invoke any Settings operation.
     for index in range(len(expected_tabs)):
         notebook.select(index)
         tk_root.update_idletasks()
     assert actions == []
+
 
     buttons_by_tab = tuple(
         [widget for widget in tab_widgets(index) if isinstance(widget, ttk.Button)]
@@ -259,6 +270,24 @@ def test_settings_tabs_relocate_controls_and_render_poster_designer(tk_root):
         "retry_storage_recovery",
     ]
     assert ("help", "Google Books") in actions
+
+
+def test_archive_org_diagnostic_reports_supported_fields_and_n_a_fields():
+    descriptor = next(item for item in PROVIDER_REGISTRY if item.name == "Archive.org")
+    assert descriptor.factory("").name == "Archive.org"
+    assert descriptor.supported_fields == (
+        "title", "author", "book_details", "publisher", "publication_year", "edition",
+    )
+
+    result = MetadataResult("Retrieved", {
+        "title": "Nightfall", "author": "Isaac Asimov", "publisher": "Doubleday",
+        "publication_year": 1991, "edition": "First edition",
+        "book_details": "Useful synopsis text.",
+    }, "Archive.org")
+    statuses = diagnostic_field_statuses(result, descriptor.supported_fields)
+    assert statuses["Title"] == statuses["Author"] == statuses["Publisher"] == "OK"
+    assert statuses["Year"] == statuses["Edition"] == statuses["Book Details"] == "OK"
+    assert statuses["Genre"] == statuses["Pages"] == statuses["SRP"] == "N/A"
 
 
 def test_app_opens_diagnostic_with_existing_api_key_without_saving_settings(monkeypatch):
@@ -384,6 +413,8 @@ def test_timeout_reenables_dialog_and_ignores_late_worker_result(dialog, monkeyp
     descriptor = dialog._providers_by_name[dialog.provider_var.get()]
 
     dialog._finish_timeout(operation_id, descriptor)
+    assert dialog._busy  # One short grace interval allows an adapter result at the deadline.
+    dialog._finish_timeout(operation_id, descriptor)
 
     assert dialog.overall_status_var.get() == "Timeout"
     assert str(dialog.test_button.cget("state")) == "normal"
@@ -391,6 +422,60 @@ def test_timeout_reenables_dialog_and_ignores_late_worker_result(dialog, monkeyp
     DeferredThread.instances[0].target()
     dialog._poll_worker_results()
     assert dialog.overall_status_var.get() == "Timeout"
+
+
+def test_adapter_network_result_at_deadline_is_not_replaced_by_generic_timeout(dialog, monkeypatch):
+    DeferredThread.instances = []
+    monkeypatch.setattr("bookledger.ui.provider_diagnostic.threading.Thread", DeferredThread)
+    archive = next(item for item in PROVIDER_REGISTRY if item.name == "Archive.org")
+    dialog.provider_var.set(archive.name)
+    dialog.isbn_var.set("9780553290998")
+    dialog._start_test()
+    operation_id = dialog._operation_id
+    descriptor = dialog._providers_by_name[archive.name]
+
+    dialog._finish_timeout(operation_id, descriptor)
+    DeferredThread.instances[0].target()
+    dialog._poll_worker_results()
+
+    assert dialog.overall_status_var.get() == "Network error"
+    assert dialog.validation_var.get() == "Network error: DNS lookup failed."
+    assert not dialog._busy
+
+
+@pytest.mark.parametrize(
+    ("isbn", "title", "description", "expected_status"),
+    [
+        ("9780385504201", "The Da Vinci Code", "A thriller about a historical mystery. " * 4, "Partial data"),
+        ("9780199558292", None, None, "ISBN not found"),
+        ("9780553290998", "Nightfall", "A story by Isaac Asimov. " * 5, "Partial data"),
+    ],
+)
+def test_standalone_archive_diagnostic_runs_the_registered_adapter_for_reproduction_isbns(
+    dialog, monkeypatch, isbn, title, description, expected_status
+):
+    def request(_provider, _url):
+        if title is None:
+            return {"response": {"docs": []}}
+        return {"response": {"docs": [{
+            "identifier": isbn[-4:], "title": title, "creator": "Test Author",
+            "description": description,
+        }]}}
+
+    monkeypatch.setattr(ArchiveOrgProvider, "_request_json", request)
+    archive = next(item for item in PROVIDER_REGISTRY if item.name == "Archive.org")
+    dialog.provider_var.set(archive.name)
+    dialog.isbn_var.set(isbn)
+    monkeypatch.setattr("bookledger.ui.provider_diagnostic.threading.Thread", ImmediateThread)
+
+    dialog._start_test()
+    dialog._poll_worker_results()
+
+    assert dialog.overall_status_var.get() == expected_status
+    if title:
+        assert dialog._field_status_vars["Title"].get() == "OK"
+    else:
+        assert dialog._field_status_vars["Title"].get() == "No Data"
 
 
 def test_close_button_closes_dialog_when_idle(dialog):
@@ -434,11 +519,13 @@ def test_field_statuses_distinguish_returned_missing_and_unsupported_fields():
     [
         (MetadataResult("Retrieved", {"title": "X", "author": "Y"}), {"title", "author"}, "Completed"),
         (MetadataResult("Retrieved", {"title": "X"}), {"title", "author"}, "Partial data"),
-        (MetadataResult("No data", {}, record_found=True), {"title"}, "Partial data"),
+        (MetadataResult("No data", {}, record_found=True), {"title"}, "Matching record · no usable metadata"),
         (MetadataResult("No data", {}, record_found=False), {"title"}, "ISBN not found"),
         (MetadataResult("Lookup failed", {}, failure_kind="timeout"), {"title"}, "Timeout"),
         (MetadataResult("Lookup failed", {}, failure_kind="provider"), {"title"}, "HTTP error"),
-        (MetadataResult("Lookup failed", {}, failure_kind="unexpected"), {"title"}, "Lookup error"),
+        (MetadataResult("Lookup failed", {}, failure_kind="network"), {"title"}, "Network error"),
+        (MetadataResult("Lookup failed", {}, failure_kind="unexpected"), {"title"}, "Invalid response"),
+        (MetadataResult("No data", {}, failure_kind="unverified"), {"title"}, "ISBN unconfirmed"),
     ],
 )
 def test_overall_statuses_follow_the_approved_result_categories(result, capabilities, expected):
@@ -537,4 +624,13 @@ def test_fetch_time_uses_two_decimals_and_applies_the_three_second_color_boundar
 
 def test_diagnostic_timeout_setting_does_not_mutate_provider_class():
     assert DIAGNOSTIC_TIMEOUT_SECONDS == 5.0
+    assert DIAGNOSTIC_TIMEOUT_GRACE_MS == 50
     assert PROVIDER_REGISTRY[0].factory("").timeout == 5
+
+
+def test_diagnostic_reason_classifies_dns_without_exposing_raw_exception():
+    result = MetadataResult(
+        "Lookup failed", {}, "Archive.org", "[Errno 11001] getaddrinfo failed", "network"
+    )
+    assert diagnostic_result_detail(result) == "Network error: DNS lookup failed."
+    assert "getaddrinfo" not in diagnostic_result_detail(result)

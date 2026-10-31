@@ -803,5 +803,5 @@ def test_default_metadata_lookup_keeps_booktopia_after_primary_and_fallback():
     service = MetadataLookupService()
 
     assert [provider.name for provider in service.providers] == [
-        "Open Library", "Google Books", "Booktopia",
+        "Open Library", "Google Books", "Archive.org", "Booktopia",
     ]

@@ -1,5 +1,6 @@
 import tkinter as tk
 from types import SimpleNamespace
+from tkinter import ttk
 
 import pytest
 from PIL import Image
@@ -55,7 +56,21 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert widget._get("location") == DEFAULT_LOCATION
     assert widget.open_library_status.get() == "Not attempted"
     assert widget.google_books_status.get() == "Not attempted"
+    assert widget.archive_org_status.get() == "Not attempted"
     assert widget.booktopia_status.get() == "Not attempted"
+    provider_labels = [
+        child.cget("text") for child in widget.metadata_status_panel.winfo_children()
+        if isinstance(child, ttk.Label) and child.cget("text") in {
+            "Open Library:", "Google Books:", "Archive.org:", "Booktopia:",
+        }
+    ]
+    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Booktopia:"]
+    assert not any(
+        child.cget("text") == "Fields marked * are required. Metadata lookup is optional."
+        for child in widget.body.winfo_children()
+        if isinstance(child, ttk.Label)
+    )
+    assert int(widget.error_summary.grid_info()["row"]) == int(widget.metadata_status_panel.grid_info()["row"]) + 1
     assert tuple(widget._widgets["genre"]["values"]) == APPROVED_GENRES
     assert str(widget.refresh_button.cget("state")) == "disabled"
     assert [widget.save_button.cget("text"), widget.refresh_button.cget("text")] == ["Save Book", "Refresh"]
@@ -197,7 +212,36 @@ def test_lookup_keeps_all_provider_statuses_not_attempted_until_service_reports_
 
     assert widget.open_library_status.get() == "Not attempted"
     assert widget.google_books_status.get() == "Not attempted"
+    assert widget.archive_org_status.get() == "Not attempted"
     assert widget.booktopia_status.get() == "Not attempted"
+
+
+def test_archive_org_provider_status_updates_during_and_after_intake_lookup(form, monkeypatch):
+    widget, _root, _photo = form
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr("bookledger.ui.forms.threading.Thread", DeferredThread)
+    isbn = "9780553290998"
+    widget._set("isbn", isbn)
+    widget._lookup_metadata()
+    operation_id = widget._active_operation[1]
+
+    widget._set_lookup_provider_status(operation_id, isbn, "Archive.org", "Retrieving from Archive.org…")
+    assert widget.archive_org_status.get() == "Retrieving from Archive.org…"
+    widget._set_lookup_provider_status(operation_id, isbn, "Archive.org", "Metadata retrieved · some fields missing")
+    assert widget.archive_org_status.get() == "Metadata retrieved · some fields missing"
+
+    widget._finish_lookup(operation_id, isbn, MetadataResult(
+        "Retrieved", {"title": "Nightfall", "book_details": "A test synopsis."}, "Archive.org",
+        provider_statuses={"Archive.org": "Metadata retrieved · some fields missing"},
+    ))
+    assert widget.archive_org_status.get() == "Metadata retrieved · some fields missing"
 
 
 def test_field_error_clears_when_value_becomes_valid(form):

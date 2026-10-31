@@ -1449,7 +1449,7 @@ class BookLedgerApp(_WindowBase):
 
         planned = ttk.LabelFrame(parent, text="Planned metadata integrations", padding=16)
         planned.grid(row=1, column=0, sticky="ew", padx=(0, 8), pady=(8, 0))
-        for name in ("ISBNdb", "WorldCat", "Internet Archive", "BigBook", "Hardcover", "Goodreads"):
+        for name in ("ISBNdb", "WorldCat", "BigBook", "Hardcover", "Goodreads"):
             ttk.Label(planned, text=f"{name} — planned; not integrated.", wraplength=560).pack(anchor="w", pady=2)
 
         diagnostic = ttk.LabelFrame(parent, text="ISBN Lookup Test", padding=10)

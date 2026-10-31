@@ -25,7 +25,7 @@ def test_provider_order_and_enabled_state_round_trip_and_preserve_unrelated_fiel
     settings.enabled["google_books"] = False
     store.save(settings)
     reloaded = store.load()
-    assert reloaded.order == settings.order
+    assert reloaded.order == settings.order + ["archive_org"]
     assert reloaded.enabled["google_books"] is False
     assert json.loads(path.read_text(encoding="utf-8"))["unrelated"] == {"keep": True}
 
@@ -35,7 +35,35 @@ def test_incomplete_configuration_uses_safe_defaults_for_missing_providers(tmp_p
     path.write_text(json.dumps({"version": 1, "metadata_providers": {"enabled": {"google_books": False}}}), encoding="utf-8")
     settings = ProviderSettingsStore(path, tmp_path / "fallback.json").load()
     assert settings.order == list(DEFAULT_PROVIDER_IDS)
-    assert settings.enabled == {"open_library": True, "google_books": False, "booktopia": True}
+    assert settings.enabled == {
+        "open_library": True, "google_books": False, "archive_org": True, "booktopia": True,
+    }
+
+
+def test_legacy_provider_order_is_preserved_and_archive_is_appended(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "metadata_providers": {
+            "order": ["booktopia", "open_library", "google_books"],
+            "enabled": {"open_library": False, "google_books": True, "booktopia": True},
+        },
+    }), encoding="utf-8")
+
+    settings = ProviderSettingsStore(path, tmp_path / "fallback.json").load()
+
+    assert settings.order == ["booktopia", "open_library", "google_books", "archive_org"]
+    assert settings.enabled == {
+        "open_library": False, "google_books": True, "archive_org": True, "booktopia": True,
+    }
+
+
+def test_archive_org_enablement_controls_independent_provider_selection():
+    settings = ProviderSettings.defaults()
+    settings.order = ["archive_org"]
+    assert [provider.name for provider in build_providers(settings)] == ["Archive.org"]
+    settings.enabled["archive_org"] = False
+    assert build_providers(settings) == ()
 
 
 def test_malformed_configuration_is_preserved_and_defaults_are_reported(tmp_path):
@@ -82,6 +110,7 @@ def test_read_only_portable_root_saves_to_per_user_fallback(tmp_path, monkeypatc
 
 
 def test_disabled_booktopia_is_not_queried_for_a_missing_synopsis(monkeypatch):
+    from bookledger.services.archive_org import ArchiveOrgProvider
     from bookledger.services.booktopia import BooktopiaProvider
     from bookledger.services.metadata import GoogleBooksProvider, OpenLibraryProvider
 
@@ -95,17 +124,18 @@ def test_disabled_booktopia_is_not_queried_for_a_missing_synopsis(monkeypatch):
             }, self.name)
         return MetadataResult("No data", {}, self.name)
 
-    for provider_type in (OpenLibraryProvider, GoogleBooksProvider, BooktopiaProvider):
+    for provider_type in (OpenLibraryProvider, GoogleBooksProvider, ArchiveOrgProvider, BooktopiaProvider):
         monkeypatch.setattr(provider_type, "lookup", fake_lookup)
     settings = ProviderSettings.defaults()
     settings.enabled["booktopia"] = False
     providers = build_providers(settings)
-    assert [provider.name for provider in providers] == ["Open Library", "Google Books"]
+    assert [provider.name for provider in providers] == ["Open Library", "Google Books", "Archive.org"]
     MetadataLookupService(providers).lookup("9780306406157")
-    assert called == ["Open Library", "Google Books"]
+    assert called == ["Open Library", "Google Books", "Archive.org"]
 
 
 def test_only_enabled_booktopia_is_invoked_or_reported_as_active(monkeypatch):
+    from bookledger.services.archive_org import ArchiveOrgProvider
     from bookledger.services.booktopia import BooktopiaProvider
     from bookledger.services.metadata import GoogleBooksProvider, OpenLibraryProvider
 
@@ -118,12 +148,12 @@ def test_only_enabled_booktopia_is_invoked_or_reported_as_active(monkeypatch):
             "page_count": 300, "format": "Paperback",
         }, self.name)
 
-    for provider_type in (OpenLibraryProvider, GoogleBooksProvider, BooktopiaProvider):
+    for provider_type in (OpenLibraryProvider, GoogleBooksProvider, ArchiveOrgProvider, BooktopiaProvider):
         monkeypatch.setattr(provider_type, "lookup", fake_lookup)
 
     settings = ProviderSettings.defaults()
     settings.order = ["google_books", "booktopia", "open_library"]
-    settings.enabled.update({"open_library": False, "google_books": False, "booktopia": True})
+    settings.enabled.update({"open_library": False, "google_books": False, "archive_org": False, "booktopia": True})
     providers = build_providers(settings)
     statuses = []
     result = MetadataLookupService(providers).lookup(
