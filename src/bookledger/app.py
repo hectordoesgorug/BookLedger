@@ -1,6 +1,7 @@
 from __future__ import annotations
 import csv
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import subprocess
 import tkinter as tk
@@ -34,15 +35,18 @@ from bookledger.resources import (
     resource_path,
     resolve_managed_logo,
     store_shop_logo,
+    remove_obsolete_shop_logo,
 )
 from bookledger.services.photos import PhotoService
 from bookledger.services.lifecycle import CopyLifecycleService
+from bookledger.services.activity_log import log_activity
 from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
+from bookledger.ui.scrolling import MouseWheelRouter
 from bookledger.services.posters import PosterService
-from bookledger.ui.poster_designer import PosterDesigner
+from bookledger.ui.poster_designer import PosterDesigner, create_poster_for_copy
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
-from bookledger.ui.status_colors import INVENTORY_STATUS_COLORS, status_message_color
+from bookledger.ui.status_colors import ERROR_COLOR, INVENTORY_STATUS_COLORS, NEUTRAL_COLOR, SUCCESS_COLOR, WARNING_COLOR, status_message_color
 
 CATALOG_CARD_WIDTH = 320
 CATALOG_CARD_GAP = 14
@@ -153,6 +157,7 @@ class BookLedgerApp(_WindowBase):
         else:
             super().__init__()
         apply_application_icon(self)
+        self._mousewheel_router = MouseWheelRouter(self)
         self.paths = AppPaths()
         self.paths.prepare()
         self.db = Database(self.paths.database)
@@ -220,7 +225,7 @@ class BookLedgerApp(_WindowBase):
         self._logging_enabled = self._read_logging_enabled()
         self._logging_warning = self._configure_optional_logging(self._logging_enabled) if self._logging_enabled else ""
         if self._logging_enabled and not self._logging_warning:
-            self._optional_logger.info("application_started")
+            self._log_event("application_started")
         self.reports = ReportService(self.db)
         self.photos = PhotoService(self.paths.photos, self.paths.trash)
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
@@ -236,6 +241,8 @@ class BookLedgerApp(_WindowBase):
         self._configure_style()
         self._build_shell()
         self.show_page("Dashboard")
+        self.protocol("WM_DELETE_WINDOW", self._close_application)
+        self.report_callback_exception = self._report_callback_exception
         self.bind_all("<Control-n>", lambda _e: self.open_add_form())
         self.bind_all("<Control-f>", lambda _e: self.search_entry.focus_set())
         self.bind_all("<F5>", lambda _e: self.refresh_current())
@@ -451,6 +458,7 @@ class BookLedgerApp(_WindowBase):
         )
         if not selected:
             return False
+        old_reference = self.config_store.get(("preferences", "shop_logo_path"), "")
         stored_path = None
         try:
             stored_path = store_shop_logo(selected, self.paths.assets)
@@ -467,10 +475,13 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Could not change logo", str(exc), parent=self)
             return False
         self.status_var.set("Shop logo updated.")
+        if old_reference and old_reference != reference:
+            remove_obsolete_shop_logo(self.paths.data, old_reference)
         return True
 
     def _clear_shop_logo(self):
-        """Restore the bundled logo without deleting managed backup assets."""
+        """Restore the bundled logo and retire only the old managed custom logo."""
+        old_reference = self.config_store.get(("preferences", "shop_logo_path"), "")
         try:
             self.config_store.set(("preferences", "shop_logo_path"), "")
             self._refresh_brand_logo()
@@ -478,6 +489,7 @@ class BookLedgerApp(_WindowBase):
             self.status_var.set(f"Could not clear shop logo: {exc}")
             return False
         self.status_var.set("Default shop logo restored.")
+        remove_obsolete_shop_logo(self.paths.data, old_reference)
         return True
 
     def _clear_shop_url(self):
@@ -534,57 +546,51 @@ class BookLedgerApp(_WindowBase):
     def _build_about_page(self):
         """Show an offline, vertically scrollable guide based on current UI behavior."""
         self.status_var.set("Ready")
-        container = ttk.Frame(self.workspace)
-        container.pack(fill="both", expand=True)
-        container.columnconfigure(0, weight=1)
-        container.rowconfigure(0, weight=1)
-
-        canvas = tk.Canvas(container, highlightthickness=0, borderwidth=0)
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        content = ttk.Frame(canvas, padding=(4, 2, 18, 20))
-        window_id = canvas.create_window((0, 0), window=content, anchor="nw")
-        content.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
-        wrapped_labels = []
-
-        ttk.Label(content, text="BookLedger User Guide", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(2, 4))
-        for heading, paragraphs in ABOUT_GUIDE_SECTIONS:
-            ttk.Label(content, text=heading, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(14, 5))
-            for paragraph in paragraphs:
-                label = ttk.Label(content, text=paragraph, justify="left", anchor="w", wraplength=720)
-                label.pack(fill="x", anchor="w", pady=(0, 7))
-                wrapped_labels.append(label)
-
-        ttk.Separator(content).pack(fill="x", pady=(10, 8))
-        app_info = ttk.Label(
-            content,
-            text=f"{APP_NAME} {__version__} · Local book collection and inventory manager.",
-            foreground="#64748b",
-            wraplength=720,
-            anchor="w",
+        ttk.Label(self.workspace, text="BookLedger User Guide", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 8))
+        frame = ttk.Frame(self.workspace)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, wrap="word", height=24, relief="flat", borderwidth=0, padx=8, pady=4, font=("Segoe UI", 10))
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        text.tag_configure("heading", font=("Segoe UI", 12, "bold"), spacing1=13, spacing3=5)
+        text.tag_configure("body", spacing3=7)
+        text.tag_configure("bullet", lmargin1=14, lmargin2=28, spacing3=7)
+        text.tag_configure("bold", font=("Segoe UI", 10, "bold"))
+        for tag, color in (("success", SUCCESS_COLOR), ("warning", WARNING_COLOR), ("error", ERROR_COLOR), ("neutral", NEUTRAL_COLOR)):
+            text.tag_configure(tag, foreground=color)
+        bold_labels = (
+            "Acquisitions", "Add a book", "Catalog", "Add Book", "Dashboard", "Choose Photo", "Save Book",
+            "Title", "Author", "Genre", "Format", "Condition", "Location", "Price (PHP)", "ISBN",
+            "Look Up ISBN", "Inventory", "Edit Book", "Sale History", "Reports", "Settings", "Preferences",
+            "Back Up Now", "Restore Backup…", "Create Poster", "Poster Setup", "Clear Trash",
         )
-        app_info.pack(fill="x", anchor="w")
-        wrapped_labels.append(app_info)
-
-        def resize_content(event):
-            canvas.itemconfigure(window_id, width=event.width)
-            wraplength = max(180, event.width - 28)
-            for label in wrapped_labels:
-                label.configure(wraplength=wraplength)
-
-        canvas.bind("<Configure>", resize_content)
-
-        def on_mousewheel(event):
-            if event.delta:
-                canvas.yview_scroll(int(-event.delta / 120), "units")
-                return "break"
-            return None
-
-        for widget in (canvas, content, *content.winfo_children()):
-            widget.bind("<MouseWheel>", on_mousewheel, add="+")
+        for heading, paragraphs in ABOUT_GUIDE_SECTIONS:
+            text.insert("end", heading + "\n", "heading")
+            for paragraph in paragraphs:
+                status_section = heading == "Statuses and Messages"
+                content = f"•  {paragraph}" if status_section else paragraph
+                start = text.index("end-1c")
+                text.insert("end", content + "\n", "bullet" if status_section else "body")
+                end = text.index("end-1c")
+                if status_section:
+                    lowered = paragraph.casefold()
+                    tag = "error" if any(word in lowered for word in ("failed", "error")) else "warning" if any(word in lowered for word in ("timeout", "unconfirmed", "partially", "cannot", "warning")) else "success" if any(word in lowered for word in ("retrieved", "completed", "success")) else "neutral"
+                    text.tag_add(tag, start, end)
+                for label in bold_labels:
+                    offset = start
+                    while True:
+                        found = text.search(label, offset, stopindex=end, nocase=False)
+                        if not found:
+                            break
+                        text.tag_add("bold", found, f"{found}+{len(label)}c")
+                        offset = f"{found}+{len(label)}c"
+        text.insert("end", f"\n{APP_NAME} {__version__} · Local book collection and inventory manager.\n", "neutral")
+        text.configure(state="disabled")
+        wheel_router = getattr(self, "_mousewheel_router", None)
+        if wheel_router is not None:
+            wheel_router.register(text, frame)
 
     def refresh_current(self):
         self.show_page(self.current_page)
@@ -603,6 +609,7 @@ class BookLedgerApp(_WindowBase):
         actions.pack(fill="x", pady=(0, 18))
         ttk.Button(actions, text="＋  Add a book", style="Primary.TButton", command=self.open_add_form).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Open catalog", command=lambda: self.show_page("Catalog")).pack(side="left", padx=8)
+        ttk.Button(actions, text="Open Poster Folder", command=self._open_poster_folder).pack(side="left", padx=8)
         ttk.Button(actions, text="Back up now", command=self.create_backup).pack(side="left", padx=8)
         recent = ttk.LabelFrame(self.workspace, text="Recently added copies", padding=12)
         recent.pack(fill="both", expand=True)
@@ -721,6 +728,9 @@ class BookLedgerApp(_WindowBase):
         canvas = self.catalog_canvas
         cards = self.catalog_cards
         window = self._catalog_window
+        wheel_router = getattr(self, "_mousewheel_router", None)
+        if wheel_router is not None:
+            wheel_router.register(canvas, parent)
         cards.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
         self._catalog_card_widgets = []
         self._catalog_grid_columns = 0
@@ -939,7 +949,11 @@ class BookLedgerApp(_WindowBase):
             return
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="View Details", command=lambda cid=copy_id: self.open_copy_details(cid))
-        menu.add_command(label="Create Poster", command=lambda cid=int(copy_id): self._create_poster(cid))
+        menu.add_command(
+            label="Create Poster",
+            state="disabled" if row["status"] == "Sold" else "normal",
+            command=lambda cid=int(copy_id): self._create_poster(cid),
+        )
         for status in ("Available", "Listed", "Not for Sale", "Sold"):
             menu.add_command(
                 label=f"Mark as {status}",
@@ -954,7 +968,18 @@ class BookLedgerApp(_WindowBase):
             menu.grab_release()
 
     def _create_poster(self, copy_id):
-        self.poster_designer.create_poster(int(copy_id))
+        saved = create_poster_for_copy(
+            self,
+            service=self.posters,
+            catalog=self.catalog,
+            paths=self.paths,
+            config_store=self.config_store,
+            copy_id=int(copy_id),
+            on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier),
+        )
+        if saved and getattr(self, "current_page", None) in {"Catalog", "Inventory"}:
+            self.refresh_current()
+        return saved
 
     def _change_copy_status(self, copy_id, target_status):
         row = self.catalog.get_copy(int(copy_id))
@@ -980,9 +1005,13 @@ class BookLedgerApp(_WindowBase):
             else:
                 self.catalog.change_status(int(copy_id), target_status, void_reason=void_reason)
         except (ValueError, KeyError, sqlite3.DatabaseError) as exc:
+            self._log_event("inventory_status_change_failed", copy_id=int(copy_id))
             messagebox.showerror("Status Change Failed", str(exc), parent=self)
             return
         self._after_save(f"{row['copy_code']} marked {target_status}.")
+        event = "sale_recorded" if target_status == "Sold" else "sale_voided" if current == "Sold" else "inventory_status_changed"
+        if hasattr(self, "_log_event"):
+            self._log_event(event, copy_id=int(copy_id))
 
     def _ask_sale_void_reason(self, row, target_status):
         dialog = tk.Toplevel(self)
@@ -1037,8 +1066,12 @@ class BookLedgerApp(_WindowBase):
         if confirmed:
             try:
                 self.lifecycle.trash_copy(int(copy_id))
+                if hasattr(self, "_log_event"):
+                    self._log_event("physical_copy_deleted", copy_id=int(copy_id))
+                    self._log_event("book_deleted", copy_id=int(copy_id))
                 self._after_save(f"{row['copy_code']} moved to Trash.")
             except Exception as exc:
+                self._log_event("physical_copy_delete_failed", copy_id=int(copy_id))
                 messagebox.showerror("Delete Failed", f"The copy was not safely moved to Trash: {exc}", parent=self)
 
     def _clear_filters(self):
@@ -1307,6 +1340,9 @@ class BookLedgerApp(_WindowBase):
         canvas.configure(yscrollcommand=scroll.set)
         canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        wheel_router = getattr(self, "_mousewheel_router", None)
+        if wheel_router is not None:
+            wheel_router.register(canvas, chart_frame)
         canvas.bind("<Configure>", lambda _event: self._draw_genre_chart(canvas))
         self._genre_canvas = canvas
         self._draw_genre_chart(canvas)
@@ -1519,11 +1555,16 @@ class BookLedgerApp(_WindowBase):
     def _build_poster_setup(self, parent):
         self.poster_designer = PosterDesigner(
             parent, service=self.posters, config_store=self.config_store,
-            catalog=self.catalog, paths=self.paths,
+            catalog=self.catalog, paths=self.paths, on_open_folder=self._open_poster_folder,
+            mousewheel_router=self._mousewheel_router,
+            on_activity=lambda event, identifier: self._log_event(
+                event, **({"template_id": identifier} if event.startswith("poster_template_") else {"copy_id": identifier})
+            ),
         )
         self.poster_designer.pack(fill="both", expand=True)
 
     def _build_preferences(self, parent):
+        self._value_list_editors = {}
         parent.columnconfigure((0, 1), weight=1, uniform="preferences")
         parent.rowconfigure((0, 1), weight=1, uniform="preferences_rows")
         self._build_value_list_editor(
@@ -1584,6 +1625,9 @@ class BookLedgerApp(_WindowBase):
         window_id = canvas.create_window((0, 0), window=rows, anchor="nw")
         canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window_id, width=event.width))
         canvas.configure(yscrollcommand=scrollbar.set)
+        wheel_router = getattr(self, "_mousewheel_router", None)
+        if wheel_router is not None:
+            wheel_router.register(canvas, list_frame)
         canvas.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
         list_frame.columnconfigure(0, weight=1)
@@ -1598,6 +1642,7 @@ class BookLedgerApp(_WindowBase):
         def refresh():
             for child in rows.winfo_children():
                 child.destroy()
+            editor_rows = {}
             for index, value in enumerate(list_values()):
                 item = ttk.Frame(rows)
                 item.grid(row=index, column=0, sticky="ew", pady=1)
@@ -1613,6 +1658,13 @@ class BookLedgerApp(_WindowBase):
                 )
                 rename_button.grid(row=0, column=1, padx=2)
                 delete_button.grid(row=0, column=2, padx=2)
+                handle = ttk.Label(item, text="⠿", cursor="fleur", foreground="#64748b", padding=(5, 0))
+                handle.grid(row=0, column=3, padx=(2, 4))
+                editor_rows[value] = item
+                for widget in (name_label, handle):
+                    widget.bind("<ButtonPress-1>", lambda event, list_kind=kind, name=value: self._value_drag_start(event, list_kind, name))
+                    widget.bind("<B1-Motion>", self._value_drag_motion)
+                    widget.bind("<ButtonRelease-1>", self._value_drag_end)
                 if count:
                     explanation = f"Cannot delete this {kind} because one or more books are assigned to it. Rename it to migrate the assignments, or update those books first."
                     delete_button._tooltip_bounds = panel
@@ -1642,6 +1694,10 @@ class BookLedgerApp(_WindowBase):
 
                 rename_button.configure(command=begin_rename)
             canvas.yview_moveto(0)
+            self._value_list_editors[kind] = {
+                "rows": editor_rows, "values": list(editor_rows), "list": list_values,
+                "canvas": canvas, "status": status_var, "title": title, "refresh": refresh,
+            }
 
         def add():
             try:
@@ -1666,6 +1722,57 @@ class BookLedgerApp(_WindowBase):
 
         ttk.Button(add_row, text="Add New", command=add).pack(side="left", padx=(6, 0))
         refresh()
+
+    def _value_drag_start(self, _event, kind, value):
+        self._value_drag = (kind, value)
+
+    def _value_drag_motion(self, event):
+        drag = getattr(self, "_value_drag", None)
+        if not drag:
+            return
+        kind, moving = drag
+        editor = self._value_list_editors.get(kind)
+        if not editor or moving not in editor["values"]:
+            return
+        values = list(editor["values"])
+        target_y = event.y_root
+        for value in values:
+            if value == moving:
+                continue
+            row = editor["rows"].get(value)
+            if row is not None and target_y < row.winfo_rooty() + row.winfo_height() / 2:
+                values.remove(moving)
+                values.insert(values.index(value), moving)
+                break
+        else:
+            values.remove(moving)
+            values.append(moving)
+        self._reorder_value_rows(kind, values)
+
+    def _reorder_value_rows(self, kind, values):
+        editor = self._value_list_editors.get(kind)
+        if not editor:
+            return
+        editor["values"] = list(values)
+        for index, value in enumerate(values):
+            editor["rows"][value].grid_configure(row=index)
+
+    def _value_drag_end(self, _event=None):
+        drag = getattr(self, "_value_drag", None)
+        self._value_drag = None
+        if not drag:
+            return
+        kind, _moving = drag
+        editor = self._value_list_editors.get(kind)
+        if not editor:
+            return
+        key = {"genre": "genres", "format": "formats", "location": "locations"}[kind]
+        try:
+            self.config_store.set(("preferences", key), editor["values"])
+            editor["status"].set(f"{editor['title']} order saved.")
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            editor["status"].set(f"Could not save {editor['title']} order: {exc}")
+            editor["refresh"]()
 
     def _show_hover_tooltip(self, event, message):
         self._hide_hover_tooltip()
@@ -1856,7 +1963,9 @@ class BookLedgerApp(_WindowBase):
         )
 
     def open_add_form(self):
-        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup, on_saved=lambda: self._after_save("Book saved."))
+        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup,
+                 mousewheel_router=self._mousewheel_router,
+                 on_saved=lambda: self._after_save("Book saved."), on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier))
 
     def open_selected_edit(self, copy_id=None):
         if copy_id is None:
@@ -1879,7 +1988,9 @@ class BookLedgerApp(_WindowBase):
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")
             return
-        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=getattr(self, "metadata_lookup", None), on_saved=lambda: self._after_save("Book updated."), existing=row)
+        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=getattr(self, "metadata_lookup", None),
+                 mousewheel_router=getattr(self, "_mousewheel_router", None),
+                 on_saved=lambda: self._after_save("Book updated."), on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier), existing=row)
 
     def _sale_history_text(self, history):
         if not history:
@@ -1933,6 +2044,9 @@ class BookLedgerApp(_WindowBase):
         text.configure(yscrollcommand=scrollbar.set)
         text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        wheel_router = getattr(self, "_mousewheel_router", None)
+        if wheel_router is not None:
+            wheel_router.register(text, text_frame)
         for label, value in fields:
             if value not in (None, ""):
                 text.insert("end", f"{label}: {value}\n\n")
@@ -2022,12 +2136,33 @@ class BookLedgerApp(_WindowBase):
         if not enabled:
             return ""
         try:
-            handler = logging.FileHandler(self.paths.root / "log.txt", mode="a", encoding="utf-8", delay=False)
+            path = getattr(self.paths, "log_file", self.paths.root / "log.txt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            legacy = self.paths.root / "log.txt"
+            if not path.exists() and legacy.is_file():
+                shutil.copy2(legacy, path)
+            handler = RotatingFileHandler(path, mode="a", maxBytes=1_000_000, backupCount=5, encoding="utf-8", delay=False)
             handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
             logger.addHandler(handler)
             return ""
         except OSError as exc:
-            return f"Could not open log.txt for writing: {exc}"
+            return f"Could not open the activity log for writing: {exc}"
+
+    def _log_event(self, event, **details):
+        if getattr(self, "_logging_enabled", False):
+            level = logging.WARNING if event.endswith("_failed") else logging.INFO
+            log_activity(self._optional_logger, event, level=level, **details)
+
+    def _report_callback_exception(self, exc_type, _exc, _traceback):
+        if getattr(self, "_logging_enabled", False):
+            self._optional_logger.error("unexpected_exception type=%s", getattr(exc_type, "__name__", "Exception"))
+
+    def _close_application(self):
+        self._log_event("application_closed")
+        for handler in tuple(getattr(self, "_optional_logger", logging.getLogger()).handlers):
+            self._optional_logger.removeHandler(handler)
+            handler.close()
+        self.destroy()
 
     def _toggle_logging(self):
         requested = bool(self.logging_var.get())
@@ -2051,12 +2186,12 @@ class BookLedgerApp(_WindowBase):
         self.clear_log_button.configure(state=state)
         self.logging_status_var.set("Logging is enabled." if requested else "Logging is off.")
         if requested:
-            self._optional_logger.info("diagnostic_logging_enabled")
+            log_activity(self._optional_logger, "diagnostic_logging_enabled")
 
     def view_log(self):
         if not self._logging_enabled:
             return
-        path = self.paths.root / "log.txt"
+        path = getattr(self.paths, "log_file", self.paths.root / "log.txt")
         if not path.is_file():
             messagebox.showinfo("Diagnostic log", "No log file has been created yet.", parent=self)
             return
@@ -2074,10 +2209,10 @@ class BookLedgerApp(_WindowBase):
         if not self._logging_enabled:
             return
         if not messagebox.askyesno(
-            "Clear diagnostic log?", "Clear the contents of log.txt? The log file will remain in place.", parent=self
+            "Clear diagnostic log?", "Clear the activity log and its rotated history?", parent=self
         ):
             return
-        path = self.paths.root / "log.txt"
+        path = getattr(self.paths, "log_file", self.paths.root / "log.txt")
         try:
             active_handlers = [
                 handler for handler in self._optional_logger.handlers
@@ -2095,6 +2230,8 @@ class BookLedgerApp(_WindowBase):
                         handler.release()
             else:
                 path.write_text("", encoding="utf-8")
+            for index in range(1, 6):
+                Path(f"{path}.{index}").unlink(missing_ok=True)
             self.logging_status_var.set("Diagnostic log cleared.")
         except OSError as exc:
             messagebox.showerror("Could not clear log", f"The diagnostic log could not be cleared: {exc}", parent=self)
@@ -2102,9 +2239,11 @@ class BookLedgerApp(_WindowBase):
     def create_backup(self):
         try:
             path = self.backups.create_backup()
+            self._log_event("backup_created")
             self.status_var.set(f"Backup created: {path.name}")
             messagebox.showinfo("Backup complete", f"Backup saved to:\n{path}", parent=self)
         except Exception as exc:
+            self._log_event("backup_creation_failed")
             messagebox.showerror("Backup failed", str(exc), parent=self)
 
     def restore_backup(self):
@@ -2119,10 +2258,12 @@ class BookLedgerApp(_WindowBase):
             return
         try:
             recovery = self.backups.restore_backup(path)
+            self._log_event("backup_restored")
             self.status_var.set(f"Restored backup: {Path(path).name}")
             self.refresh_current()
             messagebox.showinfo("Restore complete", f"The snapshot was restored and validated. Recovery point: {recovery.name}\n\nRestart BookLedger to apply restored configuration settings.", parent=self)
         except Exception as exc:
+            self._log_event("backup_restore_failed")
             messagebox.showerror("Restore failed", f"The backup could not be restored: {exc}", parent=self)
 
     def verify_database(self):
@@ -2160,27 +2301,79 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Clear Trash Incomplete", str(exc), parent=self)
 
     def purge_data(self):
-        if not messagebox.askyesno("Reset BookLedger Data?", "This removes the database, photos, Trash, locations, and other data under the portable data folder. Application configuration, including metadata provider settings and the Google Books API key, remains in config.json. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
+        if not messagebox.askyesno("Reset BookLedger Data?", "This permanently removes the library database, photos, Trash, posters, application settings (including metadata provider settings and the Google Books API key), and the activity log. BookLedger will create a fresh default configuration when the reset completes. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):
             return
         from tkinter import simpledialog
         typed = simpledialog.askstring("Confirm Purge", "Type PURGE to permanently reset BookLedger data:", parent=self)
         if typed != "PURGE":
             return
+        was_logging_enabled = bool(getattr(self, "_logging_enabled", False))
+        if was_logging_enabled:
+            self._log_event("purge_started")
+        # Close the rotating handler before deleting its file, and keep logging
+        # disabled until the purge and configuration reset have both finished.
+        self._configure_optional_logging(False)
+        self._logging_enabled = False
         try:
-            self.lifecycle.purge()
+            config_paths = {
+                Path(self.config_store.canonical_path),
+                Path(self.config_store.active_path),
+            }
+            fallback_path = getattr(self.config_store, "fallback_path", None)
+            if fallback_path is not None:
+                config_paths.add(Path(fallback_path))
+            self.lifecycle.purge(config_paths=config_paths, log_paths=(self.paths.log_file,))
             self.paths.prepare()
             self.db = Database(self.paths.database)
+            # Recreate a default BookLedger configuration with the one-time
+            # migration markers set, so a retained legacy profile key cannot
+            # silently repopulate settings that Purge just reset.
+            self.config_store = AppConfigStore(
+                self.paths.provider_config, self.paths.provider_config_fallback()
+            )
+            self.config_store.set(("migration_state", "configuration_v1"), True)
+            self.config_store.set(("migration_state", "google_books_legacy_checked"), True)
+            self.config_store.set(("api_keys", "google_books"), "")
+            self.config_store.set(("logging", "enabled"), False)
+            self._configuration_warnings = self.config_store.migrate_legacy_settings(
+                self.db,
+                self.paths.google_books_config,
+                self.paths._profile_google_books_config(),
+            )
+            available_themes = getattr(self, "_available_theme_names", ())
+            if available_themes:
+                default_theme = "flatly" if "flatly" in available_themes else available_themes[0]
+                try:
+                    apply_theme_to_style(self.theme_style, default_theme)
+                    self._active_theme = default_theme
+                    self.config_store.set(("preferences", "theme"), default_theme)
+                except Exception:
+                    pass
+            self.provider_settings_store = ProviderSettingsStore(
+                self.paths.provider_config,
+                self.paths.provider_config_fallback(),
+                config_store=self.config_store,
+            )
+            self.provider_settings = self.provider_settings_store.load()
+            self._logging_enabled = False
+            self._logging_warning = ""
+            self._configure_optional_logging(False)
             self.catalog = CatalogService(self.db, self.paths.data, config_store=self.config_store)
             self.photos = PhotoService(self.paths.photos, self.paths.trash)
             self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
             self.verifier = VerificationService(self.db, self.paths.data)
             self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
+            self.posters = PosterService(self.db, self.paths)
             self.metadata_lookup = MetadataLookupService(
                 build_providers(self.provider_settings, self._load_google_books_key())
             )
-            self.status_var.set("BookLedger data was purged. Root-level backups were retained.")
+            self.status_var.set("BookLedger data and settings were reset. Root-level backups were retained.")
             self.show_page("Dashboard")
         except Exception as exc:
+            if was_logging_enabled:
+                warning = self._configure_optional_logging(True)
+                self._logging_enabled = not bool(warning)
+            self._log_event("purge_failed")
             messagebox.showerror("Purge Incomplete", f"BookLedger could not complete the purge. The data folder may be partially reset: {exc}", parent=self)
 
     def _open_path(self, path: Path):
@@ -2189,9 +2382,21 @@ class BookLedgerApp(_WindowBase):
                 import os
                 os.startfile(path)
             else:
-                messagebox.showinfo("Data folder", str(path), parent=self)
+                opener = "open" if sys.platform == "darwin" else "xdg-open"
+                subprocess.Popen([opener, str(path)])
+            return True
         except Exception as exc:
             messagebox.showerror("Could not open folder", str(exc), parent=self)
+            return False
+
+    def _open_poster_folder(self):
+        try:
+            self.paths.posters.mkdir(parents=True, exist_ok=True)
+            self.paths.posters.resolve().relative_to(self.paths.data.resolve())
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Could not open poster folder", str(exc), parent=self)
+            return False
+        return self._open_path(self.paths.posters)
 
     @staticmethod
     def money(minor):

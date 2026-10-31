@@ -17,6 +17,7 @@ from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageOps
 
 _SVG_TOKEN = re.compile(r"[AaCcHhLlMmSsVvZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")
 _ARGUMENTS = {"a": 7, "c": 6, "h": 1, "l": 2, "m": 2, "s": 4, "v": 1}
+_MANAGED_LOGO = re.compile(r"^shop-logo-[0-9a-f]{20}\.png$", re.IGNORECASE)
 
 
 def resource_path(*parts: str) -> Path:
@@ -90,6 +91,21 @@ def store_shop_logo(source_path: str | Path, assets_dir: str | Path) -> Path:
             except OSError:
                 pass
         raise
+
+
+def remove_obsolete_shop_logo(data_dir: str | Path, reference, *, active_references=()) -> bool:
+    """Remove only an unreferenced, content-addressed custom logo we manage."""
+    path = resolve_managed_logo(data_dir, reference)
+    if path is None or not _MANAGED_LOGO.fullmatch(path.name) or path.is_symlink():
+        return False
+    references = {item for item in active_references if isinstance(item, str) and item}
+    if reference in references:
+        return False
+    try:
+        path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
 
 
 def normalize_shop_url(value: str) -> str | None:

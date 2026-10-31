@@ -8,15 +8,157 @@ from PIL import Image, ImageTk
 from bookledger.services.posters import POSTER_FIELDS, PosterService, title_for_poster
 
 
+def _show_dialog(dialog, title, message, parent):
+    try:
+        if parent.winfo_exists():
+            dialog(title, message, parent=parent)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _notify_activity(callback, event, identifier):
+    if callback:
+        try:
+            callback(event, identifier)
+        except Exception:
+            pass
+
+
+def create_poster_for_copy(parent, *, service, catalog, paths, config_store, copy_id, on_activity=None):
+    """Create a poster through stable application services, independent of page widgets."""
+    try:
+        row = catalog.get_copy(int(copy_id)) if catalog else None
+    except Exception as exc:
+        _show_dialog(messagebox.showerror, "Could not create poster", str(exc), parent)
+        _notify_activity(on_activity, "poster_generation_failed", int(copy_id))
+        return None
+    if row is None:
+        _show_dialog(messagebox.showerror, "Create Poster", "That physical copy could not be found.", parent)
+        return None
+    if row.get("status") == "Sold":
+        _show_dialog(messagebox.showerror, "Create Poster", "A poster cannot be generated for a Sold copy. Change its status first if the sale was recorded by mistake.", parent)
+        return None
+    confirmed_not_for_sale = False
+    if row.get("status") == "Not for Sale":
+        confirmed_not_for_sale = bool(_ask_not_for_sale_confirmation(parent, row))
+        if not confirmed_not_for_sale:
+            return None
+    try:
+        templates = service.list_templates()
+        template_id = config_store.get(("preferences", "poster_template_id")) if config_store else None
+        template = next((item for item in templates if item["id"] == template_id), None)
+        template = template or (templates[0] if templates else None)
+    except Exception as exc:
+        _show_dialog(messagebox.showerror, "Could not create poster", str(exc), parent)
+        _notify_activity(on_activity, "poster_generation_failed", int(copy_id))
+        return None
+    if not template:
+        _show_dialog(messagebox.showinfo, "Create Poster", "Create or select a poster template first in Settings → Poster Setup.", parent)
+        return None
+    try:
+        service.resolve_background(template["background_ref"])
+        shortened = None
+        if len(str(row.get("title") or "").strip()) > 50 and any(el.get("field") == "Title" for el in template["elements"]):
+            shortened = simpledialog.askstring(
+                "Shorten poster title",
+                "This title exceeds 50 characters. Enter a shorter title for this poster only:",
+                parent=parent,
+            )
+            if shortened is None:
+                return None
+            title_for_poster(row["title"], shortened)
+        output = paths.posters / f"{row['copy_code']}.png"
+        replacing = output.exists()
+        if replacing and not messagebox.askyesno("Replace poster", f"{output.name} already exists. Replace it?", parent=parent):
+            return None
+
+        # Modal dialogs run a nested event loop, so validate the canonical
+        # physical-copy status again before rendering. A callback captured
+        # earlier must not create posters for copies that became Sold.
+        current = catalog.get_copy(int(row["copy_id"]))
+        if current is None:
+            _show_dialog(messagebox.showerror, "Create Poster", "That physical copy could not be found.", parent)
+            return None
+        if current.get("status") == "Sold":
+            _show_dialog(messagebox.showerror, "Create Poster", "A poster cannot be generated for a Sold copy. Change its status first if the sale was recorded by mistake.", parent)
+            return None
+        if current.get("status") == "Not for Sale" and not confirmed_not_for_sale:
+            if not _ask_not_for_sale_confirmation(parent, current):
+                return None
+            confirmed_not_for_sale = True
+
+        previous_poster = output.read_bytes() if replacing else None
+        saved = service.export(template, row, shortened_title=shortened)
+        # Export first; only a completed poster may affect inventory status.
+        status_changed = False
+        try:
+            refreshed = catalog.get_copy(int(row["copy_id"]))
+            if refreshed is None or refreshed.get("status") == "Sold":
+                raise RuntimeError("The copy became Sold while the poster was being created; its status was left unchanged.")
+            if refreshed.get("status") in {"Available", "Not for Sale"}:
+                catalog.change_status(int(row["copy_id"]), "Listed")
+                status_changed = True
+        except Exception:
+            _restore_poster(output, previous_poster)
+            raise
+        if status_changed:
+            _notify_activity(on_activity, "inventory_status_changed", int(row["copy_id"]))
+        _notify_activity(on_activity, "poster_replaced" if replacing else "poster_generated", int(row["copy_id"]))
+        _show_dialog(
+            messagebox.showinfo,
+            "Poster created",
+            f"Poster {'replaced' if replacing else 'saved'}:\n{saved.name}\n\nFolder: {saved.parent}",
+            parent,
+        )
+        return saved
+    except Exception as exc:
+        _notify_activity(on_activity, "poster_generation_failed", int(copy_id))
+        _show_dialog(messagebox.showerror, "Could not create poster", str(exc), parent)
+        return None
+
+
+def _ask_not_for_sale_confirmation(parent, row):
+    return messagebox.askyesno(
+        "List this copy?",
+        f"Creating a poster for {row.get('copy_code', 'this copy')} will remove its Not for Sale status and change it to Listed after the poster is created. Continue?",
+        parent=parent,
+    )
+
+
+def _restore_poster(output, previous_poster):
+    if previous_poster is None:
+        output.unlink(missing_ok=True)
+    else:
+        import os
+        import tempfile
+
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{output.stem}-restore-", suffix=".png", dir=output.parent)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(previous_poster)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, output)
+        except Exception:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+
+
 class PosterDesigner(ttk.Frame):
     """Freeform poster template editor with normalized, portable coordinates."""
 
-    def __init__(self, parent, *, service: PosterService, config_store=None, catalog=None, paths=None):
+    def __init__(self, parent, *, service: PosterService, config_store=None, catalog=None, paths=None, on_open_folder=None, on_activity=None, mousewheel_router=None):
         super().__init__(parent)
         self.service = service
         self.config_store = config_store
         self.catalog = catalog
         self.paths = paths or service.paths
+        self._dialog_parent = parent.winfo_toplevel()
+        self.on_open_folder = on_open_folder
+        self.on_activity = on_activity
+        self.mousewheel_router = mousewheel_router
         self.background_ref = ""
         self.background = None
         self.elements: list[dict] = []
@@ -37,21 +179,34 @@ class PosterDesigner(ttk.Frame):
         ttk.Button(toolbar, text="Upload Background", command=self.upload_background).pack(side="left", padx=(0, 6))
         ttk.Button(toolbar, text="Save as New Template", command=self.save_template).pack(side="left", padx=6)
         ttk.Button(toolbar, text="Discard Template", command=self.discard_template).pack(side="left", padx=6)
+        if self.on_open_folder:
+            ttk.Button(toolbar, text="Open Poster Folder", command=self.on_open_folder).pack(side="left", padx=6)
         ttk.Label(toolbar, text="Select Template").pack(side="left", padx=(18, 5))
         self.template_choice = tk.StringVar()
         self.template_combo = ttk.Combobox(toolbar, textvariable=self.template_choice, state="readonly", width=15)
         self.template_combo.pack(side="left")
         self.template_combo.bind("<<ComboboxSelected>>", self._select_template)
 
-        fields = ttk.LabelFrame(self, text="Add field", padding=8)
+        fields = ttk.LabelFrame(self, text="Add field", padding=4)
         fields.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
+        palette_canvas = tk.Canvas(fields, width=178, highlightthickness=0)
+        palette_scrollbar = ttk.Scrollbar(fields, orient="vertical", command=palette_canvas.yview)
+        palette = ttk.Frame(palette_canvas, padding=4)
+        palette_window = palette_canvas.create_window((0, 0), window=palette, anchor="nw")
+        palette.bind("<Configure>", lambda _event: palette_canvas.configure(scrollregion=palette_canvas.bbox("all")))
+        palette_canvas.bind("<Configure>", lambda event: palette_canvas.itemconfigure(palette_window, width=event.width))
+        palette_canvas.configure(yscrollcommand=palette_scrollbar.set)
+        palette_canvas.pack(side="left", fill="both", expand=True)
+        palette_scrollbar.pack(side="right", fill="y")
+        if self.mousewheel_router is not None:
+            self.mousewheel_router.register(palette_canvas, fields)
         for field in POSTER_FIELDS:
-            button = ttk.Button(fields, text=field, width=18)
+            button = ttk.Button(palette, text=field, width=18)
             button.pack(fill="x", pady=2)
             button.bind("<ButtonPress-1>", lambda event, name=field: self._field_press(name, event))
             button.bind("<B1-Motion>", self._field_motion)
             button.bind("<ButtonRelease-1>", self._field_release)
-        ttk.Label(fields, text="Drag a field onto the canvas, or click to add it.", wraplength=150).pack(anchor="w", pady=(8, 0))
+        ttk.Label(palette, text="Drag a field onto the canvas, or click to add it.", wraplength=150).pack(anchor="w", pady=(8, 0))
 
         center = ttk.Frame(self)
         center.grid(row=1, column=1, sticky="nsew")
@@ -155,6 +310,7 @@ class PosterDesigner(ttk.Frame):
             return
         try:
             row = self.service.save_template(self.background_ref, self.elements)
+            _notify_activity(self.on_activity, "poster_template_saved", row.get("id"))
             self.reload_templates(row["id"])
             self.status.set(f"Saved {row['name']}.")
         except Exception as exc:
@@ -168,6 +324,7 @@ class PosterDesigner(ttk.Frame):
         if not messagebox.askyesno("Discard template", f"Delete {row['name']}? This cannot be undone.", parent=self.winfo_toplevel()):
             return
         self.service.discard_template(row["id"])
+        _notify_activity(self.on_activity, "poster_template_discarded", row.get("id"))
         self.reload_templates()
         self.status.set(f"Discarded {row['name']}.")
 
@@ -320,33 +477,21 @@ class PosterDesigner(ttk.Frame):
             self._draw_scene()
 
     def create_poster(self, copy_id: int):
-        if not self.catalog:
-            messagebox.showerror("Create Poster", "Catalog data is unavailable.", parent=self.winfo_toplevel())
-            return
-        row = self.catalog.get_copy(int(copy_id))
-        template = self.selected_template()
-        if row is None:
-            messagebox.showerror("Create Poster", "That physical copy could not be found.", parent=self.winfo_toplevel())
-            return
-        if not template:
-            messagebox.showinfo("Create Poster", "Create or select a poster template first in Settings → Poster Setup.", parent=self.winfo_toplevel())
-            return
-        try:
-            # Fail before prompting about replacement if the saved design is broken.
-            self.service.resolve_background(template["background_ref"])
-            shortened = None
-            if len(str(row.get("title") or "").strip()) > 50 and any(el.get("field") == "Title" for el in template["elements"]):
-                shortened = simpledialog.askstring("Shorten poster title", "This title exceeds 50 characters. Enter a shorter title for this poster only:", parent=self.winfo_toplevel())
-                if shortened is None:
-                    self.status.set("Poster creation cancelled.")
-                    return
-                title_for_poster(row["title"], shortened)
-            output = self.paths.posters / f"{row['copy_code']}.png"
-            if output.exists() and not messagebox.askyesno("Replace poster", f"{output.name} already exists. Replace it?", parent=self.winfo_toplevel()):
-                self.status.set("Poster replacement cancelled; the existing poster was kept.")
-                return
-            saved = self.service.export(template, row, shortened_title=shortened)
-            messagebox.showinfo("Poster created", f"Poster saved to:\n{saved}", parent=self.winfo_toplevel())
-            self.status.set(f"Created {saved.name}.")
-        except Exception as exc:
-            messagebox.showerror("Could not create poster", str(exc), parent=self.winfo_toplevel())
+        saved = create_poster_for_copy(
+            self._dialog_parent,
+            service=self.service,
+            catalog=self.catalog,
+            paths=self.paths,
+            config_store=self.config_store,
+            copy_id=copy_id,
+            on_activity=self.on_activity,
+        )
+        if saved:
+            try:
+                self.status.set(f"Created {saved.name}.")
+            except tk.TclError:
+                pass
+
+    @staticmethod
+    def _show_dialog(dialog, title, message, *, parent):
+        return _show_dialog(dialog, title, message, parent)

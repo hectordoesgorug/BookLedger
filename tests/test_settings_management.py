@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -144,11 +145,11 @@ def test_export_inventory_csv_reports_file_errors(tmp_path, monkeypatch):
 def test_optional_logging_persists_toggle_and_clear_keeps_file(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     config_store = AppConfigStore(config_path)
-    path = tmp_path / "log.txt"
+    path = tmp_path / "data" / "logs" / "bookledger.log"
     logger = logging.getLogger("bookledger.optional_diagnostics")
     subject = SimpleNamespace(
         config_store=config_store,
-        paths=SimpleNamespace(root=tmp_path),
+        paths=SimpleNamespace(root=tmp_path, log_file=path),
         _optional_logger=logger,
         _logging_enabled=False,
         logging_var=Value(True),
@@ -162,6 +163,9 @@ def test_optional_logging_persists_toggle_and_clear_keeps_file(tmp_path, monkeyp
         BookLedgerApp._toggle_logging(subject)
         assert subject._logging_enabled is True
         assert path.is_file()
+        handler = next(handler for handler in logger.handlers if isinstance(handler, RotatingFileHandler))
+        assert handler.maxBytes == 1_000_000
+        assert handler.backupCount == 5
         logger.info("test diagnostic")
         assert config_store.get(("logging", "enabled")) is True
         assert "test diagnostic" in path.read_text(encoding="utf-8")
@@ -187,3 +191,18 @@ def test_logging_disabled_by_default_and_configuration_failure_is_nonfatal():
             raise OSError("unavailable")
 
     assert not BookLedgerApp._read_logging_enabled(SimpleNamespace(config_store=BrokenConfiguration()))
+
+
+def test_activity_logger_keeps_only_safe_numeric_identifiers():
+    import io
+    from bookledger.services.activity_log import log_activity
+
+    logger = logging.Logger("activity-test")
+    stream = io.StringIO()
+    logger.addHandler(logging.StreamHandler(stream))
+    log_activity(logger, "provider_lookup_failed", copy_id=42, api_key="secret-token", title="private title")
+    message = stream.getvalue()
+    assert "provider_lookup_failed" in message
+    assert "copy_id=42" in message
+    assert "secret-token" not in message
+    assert "private title" not in message

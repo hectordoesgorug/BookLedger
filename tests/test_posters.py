@@ -102,7 +102,7 @@ def test_template_rejects_nonfinite_or_out_of_bounds_geometry(tmp_path):
         service.save_template(reference, [{"field": "Title", "x": float("nan"), "y": 0.1, "w": 0.4, "h": 0.2}])
 
 
-def test_background_falls_back_to_managed_data_when_application_assets_is_not_a_directory(tmp_path):
+def test_background_is_always_saved_under_managed_data_assets(tmp_path):
     root = tmp_path / "portable"
     (root / "assets").parent.mkdir(parents=True)
     (root / "assets").write_text("blocks the application asset directory", encoding="utf-8")
@@ -112,8 +112,8 @@ def test_background_falls_back_to_managed_data_when_application_assets_is_not_a_
     source = tmp_path / "background.jpg"
     Image.new("RGB", (100, 100), "white").save(source)
     reference, destination = service.add_background(source)
-    assert reference.startswith("data/poster_backgrounds/")
-    assert destination.parent == paths.poster_background_fallback
+    assert reference.startswith("assets/")
+    assert destination.parent == paths.assets
 
 
 def test_render_exports_canonical_copy_png_at_social_size(tmp_path):
@@ -136,7 +136,7 @@ def test_render_exports_canonical_copy_png_at_social_size(tmp_path):
         assert min(poster.size) >= 1080
 
 
-def test_backup_includes_managed_fallback_backgrounds(tmp_path):
+def test_backup_includes_managed_backgrounds_under_data_assets(tmp_path):
     root = tmp_path / "portable"
     (root / "assets").parent.mkdir(parents=True)
     (root / "assets").write_text("not an assets directory", encoding="utf-8")
@@ -144,21 +144,21 @@ def test_backup_includes_managed_fallback_backgrounds(tmp_path):
     source = tmp_path / "background.png"
     Image.new("RGB", (400, 500), "white").save(source)
     reference, destination = service.add_background(source)
-    assert reference.startswith("data/poster_backgrounds/")
+    assert reference.startswith("assets/")
     template = service.save_template(reference, [])
     backup = BackupService(db, paths.data, paths.backups, paths.provider_config)
     archive = backup.create_backup()
     valid, reason = backup.verify_archive(archive)
     assert valid, reason
     with zipfile.ZipFile(archive) as snapshot:
-        assert f"data/poster_backgrounds/{destination.name}" in snapshot.namelist()
+        assert f"data/assets/{destination.name}" in snapshot.namelist()
     service.discard_template(template["id"])
     backup.restore_backup(archive)
     assert destination.is_file()
     assert service.list_templates()[0]["background_ref"] == reference
 
 
-def test_restore_remaps_application_background_to_fallback_when_assets_are_read_only(tmp_path, monkeypatch):
+def test_restore_keeps_background_references_portable_and_does_not_write_bundled_assets(tmp_path, monkeypatch):
     root = tmp_path / "portable"
     paths, db, _catalog, service, _copy_id = _setup(root)
     source = tmp_path / "background.png"
@@ -167,19 +167,39 @@ def test_restore_remaps_application_background_to_fallback_when_assets_are_read_
     template = service.save_template(reference, [])
     backup = BackupService(db, paths.data, paths.backups, paths.provider_config)
     archive = backup.create_backup()
-    real_mkstemp = backups_module.tempfile.mkstemp
-
-    def deny_asset_writes(*args, **kwargs):
-        if Path(kwargs.get("dir", "")).resolve() == (root / "assets").resolve():
-            raise PermissionError("simulated read-only application assets")
-        return real_mkstemp(*args, **kwargs)
-
-    monkeypatch.setattr(backups_module.tempfile, "mkstemp", deny_asset_writes)
+    bundled_assets = root / "assets"
+    bundled_assets.mkdir()
+    marker = bundled_assets / "icon.ico"
+    marker.write_bytes(b"bundled")
     backup.restore_backup(archive)
     restored = service.get_template(template["id"])
-    assert restored["background_ref"].startswith("data/poster_backgrounds/")
+    assert restored["background_ref"].startswith("assets/")
     assert service.resolve_background(restored["background_ref"]).is_file()
     assert original.is_file()
+    assert marker.read_bytes() == b"bundled"
+
+
+def test_restore_promotes_legacy_root_asset_background_into_data_assets(tmp_path):
+    root = tmp_path / "portable"
+    paths, db, _catalog, service, _copy_id = _setup(root)
+    source = tmp_path / "background.png"
+    Image.new("RGB", (400, 500), "white").save(source)
+    reference, managed = service.add_background(source)
+    template = service.save_template(reference, [])
+    bundled = root / "assets"
+    bundled.mkdir()
+    legacy = bundled / managed.name
+    managed.replace(legacy)
+    backup = BackupService(db, paths.data, paths.backups, paths.provider_config)
+    archive = backup.create_backup()
+    with zipfile.ZipFile(archive) as snapshot:
+        assert f"application_assets/{legacy.name}" in snapshot.namelist()
+    service.discard_template(template["id"])
+    backup.restore_backup(archive)
+    restored = service.get_template(template["id"])
+    assert restored["background_ref"] == f"assets/{legacy.name}"
+    assert (paths.assets / legacy.name).is_file()
+    assert service.resolve_background(restored["background_ref"]) == paths.assets / legacy.name
 
 
 def test_backup_restore_includes_templates_backgrounds_and_posters_preserving_unrelated_files(tmp_path):
@@ -192,17 +212,20 @@ def test_backup_restore_includes_templates_backgrounds_and_posters_preserving_un
     catalog.get_copy(copy_id)
     poster_path = paths.posters / f"BL-{copy_id:06d}.png"
     Image.new("RGB", (1080, 1350), "white").save(poster_path)
+    (root / "assets").mkdir()
     unrelated_asset = root / "assets" / "icon.ico"
     unrelated_asset.write_bytes(b"bundled icon")
     unrelated_poster = paths.posters / "notes.txt"
     unrelated_poster.write_text("keep", encoding="utf-8")
     backup = BackupService(db, paths.data, paths.backups, paths.provider_config)
     archive_path = backup.create_backup()
+    asset_added_after_snapshot = paths.assets / "user-note.txt"
+    asset_added_after_snapshot.write_text("preserve through restore", encoding="utf-8")
     with zipfile.ZipFile(archive_path) as archive:
         names = set(archive.namelist())
-        assert f"application_assets/{background.name}" in names
+        assert f"data/assets/{background.name}" in names
         assert f"posters/{poster_path.name}" in names
-        assert "data/poster_backgrounds" not in names
+        assert not any(name.startswith("data/poster_backgrounds/") for name in names)
         snap_db = sqlite3.connect(":memory:")
         snap_db.deserialize(archive.read("data/bookledger.sqlite3"))
         assert snap_db.execute("SELECT name FROM poster_templates").fetchone()[0] == template["name"]
@@ -213,6 +236,7 @@ def test_backup_restore_includes_templates_backgrounds_and_posters_preserving_un
     assert background.is_file()
     assert poster_path.is_file()
     assert unrelated_asset.read_bytes() == b"bundled icon"
+    assert asset_added_after_snapshot.read_text(encoding="utf-8") == "preserve through restore"
     assert unrelated_poster.read_text(encoding="utf-8") == "keep"
     assert service.list_templates()[0]["name"] == "Preset 1"
     assert recovery.is_file()
@@ -226,13 +250,17 @@ def test_purge_removes_only_managed_poster_files(tmp_path):
     _reference, background = service.add_background(bg_source)
     generated = paths.posters / "BL-000001.png"
     Image.new("RGB", (10, 10), "white").save(generated)
+    (root / "assets").mkdir()
     unrelated_asset = root / "assets" / "keep.json"
     unrelated_asset.write_text("{}", encoding="utf-8")
+    user_asset = paths.assets / "keep.txt"
+    user_asset.write_text("keep", encoding="utf-8")
     unrelated_output = paths.posters / "keep.txt"
     unrelated_output.write_text("keep", encoding="utf-8")
     CopyLifecycleService(db, paths.data).purge()
     assert not background.exists()
     assert not generated.exists()
     assert unrelated_asset.is_file()
+    assert user_asset.read_text(encoding="utf-8") == "keep"
     assert unrelated_output.read_text(encoding="utf-8") == "keep"
 

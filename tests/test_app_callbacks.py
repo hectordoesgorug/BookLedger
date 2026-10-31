@@ -529,6 +529,10 @@ def test_preferences_delete_tooltip_has_no_info_icon_and_preserves_row_geometry(
     subject = SimpleNamespace(
         _show_hover_tooltip=lambda event, message: BookLedgerApp._show_hover_tooltip(root, event, message),
         _hide_hover_tooltip=lambda event=None: BookLedgerApp._hide_hover_tooltip(root, event),
+        _value_drag_motion=lambda event: None,
+        _value_drag_start=lambda *args: None,
+        _value_drag_end=lambda event=None: None,
+        _value_list_editors={},
     )
     try:
         def geometry(widget):
@@ -943,18 +947,18 @@ def test_custom_shop_logo_selection_is_saved_as_a_relative_portable_asset(tmp_pa
     second_reference = store.get(("preferences", "shop_logo_path"))
     assert second_reference != first_reference
     assert (data / second_reference).is_file()
-    assert first_path.is_file()
+    assert not first_path.exists()
 
 
-def test_clear_shop_logo_restores_default_persists_and_keeps_managed_asset(tmp_path, monkeypatch):
+def test_clear_shop_logo_restores_default_persists_and_removes_managed_asset(tmp_path, monkeypatch):
     data = tmp_path / "data"
     assets = data / "assets"
     assets.mkdir(parents=True)
-    custom_logo = assets / "shop-logo-kept.png"
+    custom_logo = assets / "shop-logo-2e720614474dd67a3196.png"
     Image.new("RGB", (100, 50), "blue").save(custom_logo)
     config_path = tmp_path / "config.json"
     store = AppConfigStore(config_path)
-    store.set(("preferences", "shop_logo_path"), "assets/shop-logo-kept.png")
+    store.set(("preferences", "shop_logo_path"), f"assets/{custom_logo.name}")
     refreshes = []
 
     class Status:
@@ -970,7 +974,7 @@ def test_clear_shop_logo_restores_default_persists_and_keeps_managed_asset(tmp_p
 
     assert BookLedgerApp._clear_shop_logo(subject)
     assert refreshes == [True]
-    assert custom_logo.is_file()
+    assert not custom_logo.exists()
     assert AppConfigStore(config_path).get(("preferences", "shop_logo_path"), "") == ""
 
     # A fresh store models restart: an empty selection loads the bundled default.
@@ -1018,6 +1022,181 @@ def test_clear_shop_link_persists_across_restart_and_sidebar_logo_does_not_open_
     monkeypatch.setattr(app_module.webbrowser, "open", lambda *args, **kwargs: opened.append((args, kwargs)) or True)
     assert not BookLedgerApp._open_shop_link(restarted)
     assert opened == []
+
+
+@pytest.mark.parametrize("kind,key", [("genre", "genres"), ("location", "locations"), ("format", "formats")])
+def test_preference_list_drag_order_persists_independently(kind, key):
+    class Row:
+        def __init__(self, top):
+            self.top = top
+            self.row = None
+
+        def winfo_rooty(self):
+            return self.top
+
+        def winfo_height(self):
+            return 10
+
+        def grid_configure(self, **kwargs):
+            self.row = kwargs["row"]
+
+    class Status:
+        def set(self, _value):
+            pass
+
+    class Config:
+        def __init__(self):
+            self.saved = None
+
+        def set(self, path, value):
+            self.saved = (path, list(value))
+
+    values = ["First", "Second", "Third"]
+    rows = {value: Row(index * 10) for index, value in enumerate(values)}
+    app = SimpleNamespace(
+        _value_drag=(kind, "First"),
+        _value_list_editors={kind: {"rows": rows, "values": values.copy(), "status": Status(), "title": kind.title()}},
+        config_store=Config(),
+    )
+    app._reorder_value_rows = lambda selected_kind, ordered: BookLedgerApp._reorder_value_rows(app, selected_kind, ordered)
+    BookLedgerApp._value_drag_motion(app, SimpleNamespace(y_root=24))
+    assert app._value_list_editors[kind]["values"] == ["Second", "First", "Third"]
+    BookLedgerApp._value_drag_end(app)
+    assert app.config_store.saved == (("preferences", key), ["Second", "First", "Third"])
+
+
+def test_poster_creation_uses_stable_parent_and_shows_filename(tmp_path, monkeypatch):
+    from bookledger.ui.poster_designer import PosterDesigner
+
+    class Parent:
+        def winfo_exists(self):
+            return True
+
+    output = tmp_path / "BL-000007.png"
+    saved = []
+    dialogs = []
+    class Service:
+        def list_templates(self):
+            return [{"id": 1, "background_ref": "assets/template_background_1.png", "elements": []}]
+
+        def resolve_background(self, _reference):
+            return tmp_path / "background.png"
+
+        def export(self, *_args, **_kwargs):
+            output.write_bytes(b"png")
+            saved.append(output)
+            return output
+
+    parent = Parent()
+    designer = SimpleNamespace(
+        _dialog_parent=parent,
+        on_activity=None,
+        catalog=SimpleNamespace(get_copy=lambda _copy_id: {"copy_id": 7, "copy_code": "BL-000007", "title": "Book"}),
+        config_store=SimpleNamespace(get=lambda _path: 1),
+        service=Service(), paths=SimpleNamespace(posters=tmp_path),
+        status=SimpleNamespace(set=lambda _value: None),
+        _show_dialog=PosterDesigner._show_dialog,
+    )
+    monkeypatch.setattr("bookledger.ui.poster_designer.messagebox.showinfo", lambda title, message, **kwargs: dialogs.append((title, message, kwargs["parent"])))
+    PosterDesigner.create_poster(designer, 7)
+    assert saved == [output]
+    assert dialogs[0][0] == "Poster created"
+    assert output.name in dialogs[0][1]
+    assert dialogs[0][2] is parent
+
+
+def test_open_poster_folder_creates_and_opens_the_centralized_directory(tmp_path):
+    posters = tmp_path / "data" / "posters"
+    opened = []
+    app = SimpleNamespace(paths=SimpleNamespace(data=posters.parent, posters=posters), _open_path=lambda path: opened.append(path) or True)
+    assert BookLedgerApp._open_poster_folder(app)
+    assert posters.is_dir()
+    assert opened == [posters]
+
+
+def test_purge_resets_config_closes_logging_and_reinitializes_application(tmp_path, monkeypatch):
+    import tkinter.simpledialog as simpledialog
+    from bookledger.paths import AppPaths
+    from bookledger.db.database import Database
+    from bookledger.services.lifecycle import CopyLifecycleService
+
+    paths = AppPaths(tmp_path / "BookLedger")
+    paths.prepare()
+    db = Database(paths.database)
+    fallback = tmp_path / "profile" / "BookLedger" / "config.json"
+    config = AppConfigStore(paths.provider_config, fallback)
+    config.set(("api_keys", "google_books"), "purge-secret")
+    config.set(("preferences", "shop_url"), "https://example.invalid/shop")
+    paths.log_file.write_text("previous activity", encoding="utf-8")
+    actions = []
+
+    confirmations = []
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda title, message, **_kwargs: confirmations.append((title, message)) or True)
+    monkeypatch.setattr(simpledialog, "askstring", lambda *_args, **_kwargs: "PURGE")
+    monkeypatch.setattr(app_module.messagebox, "showerror", lambda *_args, **_kwargs: pytest.fail("purge should complete"))
+    subject = SimpleNamespace(
+        paths=paths, db=db, config_store=config, lifecycle=CopyLifecycleService(db, paths.data),
+        _logging_enabled=True, _configure_optional_logging=lambda enabled: actions.append(("logging", enabled)) or "",
+        _log_event=lambda event, **_kwargs: actions.append(("event", event)),
+        status_var=SimpleNamespace(set=lambda value: actions.append(("status", value))),
+        show_page=lambda name: actions.append(("page", name)),
+        _load_google_books_key=lambda: "",
+    )
+
+    BookLedgerApp.purge_data(subject)
+
+    assert not paths.log_file.exists()
+    assert paths.provider_config.is_file()
+    assert subject.config_store.get(("api_keys", "google_books")) == ""
+    assert subject.config_store.get(("preferences", "shop_url"), "") == ""
+    assert subject.config_store.get(("logging", "enabled")) is False
+    assert subject.catalog.counts()["Total copies"] == 0
+    assert subject.posters.list_templates() == []
+    assert subject._logging_enabled is False
+    assert "settings" in confirmations[0][1].casefold()
+    assert "reset" in confirmations[0][1].casefold()
+    assert actions[:2] == [("event", "purge_started"), ("logging", False)]
+    assert ("page", "Dashboard") in actions
+
+
+def test_sold_copy_context_menu_disables_create_poster(monkeypatch):
+    class Menu:
+        def __init__(self, *_args, **_kwargs):
+            self.commands = []
+
+        def add_command(self, **kwargs):
+            self.commands.append(kwargs)
+
+        def tk_popup(self, *_args):
+            pass
+
+        def grab_release(self):
+            pass
+
+    menu = Menu()
+    monkeypatch.setattr(app_module.tk, "Menu", lambda *_args, **_kwargs: menu)
+    subject = SimpleNamespace(
+        catalog=SimpleNamespace(get_copy=lambda _copy_id: {"copy_id": 7, "status": "Sold"}),
+        status_var=SimpleNamespace(set=lambda _value: None),
+    )
+
+    BookLedgerApp.show_copy_context_menu(subject, 7, 10, 20)
+
+    create_poster = next(command for command in menu.commands if command["label"] == "Create Poster")
+    assert create_poster["state"] == "disabled"
+
+
+def test_create_poster_callback_does_not_use_settings_page_widget(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app_module, "create_poster_for_copy", lambda parent, **kwargs: calls.append((parent, kwargs)) or "saved.png")
+    app = SimpleNamespace(
+        posters=object(), catalog=object(), paths=object(), config_store=object(),
+        _log_event=lambda event, **details: None,
+        poster_designer=SimpleNamespace(create_poster=lambda *_args: pytest.fail("stale Settings widget must not be used")),
+    )
+    assert BookLedgerApp._create_poster(app, 12) == "saved.png"
+    assert calls[0][0] is app
+    assert calls[0][1]["copy_id"] == 12
 
 
 @pytest.mark.parametrize("logo_state", ["missing", "unreadable"])

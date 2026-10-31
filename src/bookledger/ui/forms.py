@@ -29,6 +29,8 @@ class BookForm(tk.Toplevel):
         service: CatalogService,
         photo_service,
         on_saved,
+        on_activity=None,
+        mousewheel_router=None,
         existing=None,
         existing_book_id=None,
         metadata_lookup: MetadataLookupService | None = None,
@@ -39,6 +41,8 @@ class BookForm(tk.Toplevel):
         self.service = service
         self.photo_service = photo_service
         self.on_saved = on_saved
+        self.on_activity = on_activity
+        self.mousewheel_router = mousewheel_router
         self.existing = existing
         self.existing_book_id = existing_book_id
         self.metadata_lookup = metadata_lookup or MetadataLookupService()
@@ -105,6 +109,8 @@ class BookForm(tk.Toplevel):
         body.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
         self._form_canvas_window = canvas.create_window((0, 0), window=body, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        if self.mousewheel_router is not None:
+            self.mousewheel_router.register(canvas, form_side)
         canvas.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
         canvas.bind("<Configure>", lambda event: canvas.itemconfigure(self._form_canvas_window, width=event.width))
@@ -586,6 +592,8 @@ class BookForm(tk.Toplevel):
         else:
             self.metadata_status.set(f"Metadata unavailable · {result.source or 'Metadata Providers'}")
             self.metadata_source = result.source
+        if self.on_activity and (result.failure_kind or result.status in {"Lookup failed", "No data"}):
+            self.on_activity("provider_lookup_failed", None)
         self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
         self._active_operation = None
         self._update_control_states()
@@ -752,12 +760,15 @@ class BookForm(tk.Toplevel):
                 isbn_override=self.isbn_override.get(),
                 existing_book_id=existing_book_id,
             )
+            if existing_book_id is None:
+                self._new_book_record_created = True
             return True
         except ValidationError as exc:
             self._populate_validation(exc.errors)
             return False
 
     def _save(self):
+        self._new_book_record_created = False
         payload = self._payload()
         errors = self.service.validate(payload, isbn_override=self.isbn_override.get())
         if errors:
@@ -802,6 +813,14 @@ class BookForm(tk.Toplevel):
                     return
             elif not self._save_copy(payload):
                 return
+        if self.on_activity:
+            if self.existing:
+                self.on_activity("book_edited", int(self.existing["copy_id"]))
+                self.on_activity("physical_copy_edited", int(self.existing["copy_id"]))
+            else:
+                self.on_activity("physical_copy_added", None)
+                if self._new_book_record_created:
+                    self.on_activity("book_added", None)
         self.on_saved()
         self.photo_service.discard_staged(self.photo_path.get())
         self._close()

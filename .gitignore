@@ -11,16 +11,12 @@ env/
 # Local data and backups
 BookLedger_Data.migrated/
 config.json
-log.txt
 data/
 backups/
-posters/
-assets/template_background_*
 *.db
 *.sqlite
 *.sqlite3
 *.bak
-*.png
 
 # Build output
 build/

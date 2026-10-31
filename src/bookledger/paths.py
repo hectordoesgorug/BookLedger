@@ -49,7 +49,15 @@ class AppPaths:
 
     @property
     def posters(self) -> Path:
-        return self.root / "posters"
+        return self.data / "posters"
+
+    @property
+    def logs(self) -> Path:
+        return self.data / "logs"
+
+    @property
+    def log_file(self) -> Path:
+        return self.logs / "bookledger.log"
 
     @property
     def backups(self) -> Path:
@@ -90,8 +98,14 @@ class AppPaths:
             raise RuntimeError(
                 f"Both portable and legacy databases exist. Resolve the conflict before starting: {self.database} and {legacy_db}"
             )
-        for folder in (self.data, self.photos, self.trash, self.assets, self.poster_background_fallback, self.backups):
+        for folder in (self.data, self.photos, self.trash, self.assets, self.posters, self.logs, self.backups):
             folder.mkdir(parents=True, exist_ok=True)
+        # Retire only the obsolete empty folder. Non-empty installations remain
+        # readable by PosterService and are included in backups until migrated.
+        try:
+            self.poster_background_fallback.rmdir()
+        except OSError:
+            pass
         if legacy_db.exists():
             self._migrate_legacy(legacy_db)
         # Prove the selected writable root is writable now, with a managed probe.

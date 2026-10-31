@@ -216,8 +216,13 @@ class CopyLifecycleService:
             raise RuntimeError("Trash records were cleared, but photo cleanup needs retry: " + "; ".join(failures))
         return len(rows)
 
-    def purge(self) -> None:
-        """Remove managed data only; never target the root backups directory."""
+    def purge(self, *, config_paths=(), log_paths=()) -> None:
+        """Remove managed data and explicitly supplied BookLedger config/log files.
+
+        Backup archives are outside the data directory and are never targeted.
+        Configuration and log paths are supplied by the application so this
+        service never guesses at another application's files.
+        """
         root = self.data_dir.resolve()
         expected_root = self._data_path.parent.resolve() / "data"
         if (
@@ -227,25 +232,69 @@ class CopyLifecycleService:
             or self.db.path.parent.resolve() != root
         ):
             raise RuntimeError(f"Refusing to purge unexpected managed directory: {root}")
+        configured_files = tuple(Path(path) for path in (*tuple(config_paths), *tuple(log_paths)))
+        for path in configured_files:
+            name = path.name.casefold()
+            if name == "config.json":
+                resolved_parent = path.parent.resolve()
+                allowed_parent = resolved_parent == root.parent or resolved_parent.name.casefold() == "bookledger"
+            elif name == "bookledger.log":
+                allowed_parent = path.parent.resolve() == (root / "logs").resolve()
+            else:
+                allowed_parent = False
+            if not allowed_parent or path.is_symlink() or (path.exists() and not path.is_file()):
+                raise RuntimeError(f"Refusing to purge an unexpected configuration or log path: {path}")
         for child in root.iterdir():
             resolved = child.resolve()
             resolved.relative_to(root)
+            if child.name.casefold() in {"assets", "logs"} and child.is_dir() and not child.is_symlink():
+                if child.name.casefold() == "assets":
+                    managed = re.compile(r"^(?:template_background_\d+\.(?:png|jpe?g|webp)|shop-logo-[0-9a-f]{20}\.png|google_books\.json)$", re.IGNORECASE)
+                    for path in child.iterdir():
+                        if managed.fullmatch(path.name) and path.is_file() and not path.is_symlink():
+                            path.unlink()
+                try:
+                    child.rmdir()
+                except OSError:
+                    pass
+                continue
+            if child.name.casefold() == "posters" and child.is_dir() and not child.is_symlink():
+                for path in child.iterdir():
+                    if re.fullmatch(r"BL-\d{6,}\.png", path.name, re.IGNORECASE) and path.is_file() and not path.is_symlink():
+                        path.unlink()
+                try:
+                    child.rmdir()
+                except OSError:
+                    pass
+                continue
+            if child.name.casefold() == "poster_backgrounds" and child.is_dir() and not child.is_symlink():
+                for path in child.iterdir():
+                    if re.fullmatch(r"template_background_\d+\.(?:png|jpe?g|webp)", path.name, re.IGNORECASE) and path.is_file() and not path.is_symlink():
+                        path.unlink()
+                try:
+                    child.rmdir()
+                except OSError:
+                    pass
+                continue
             if child.is_dir() and not child.is_symlink():
                 shutil.rmtree(child)
             else:
                 child.unlink()
-        # Poster outputs and application-assets backgrounds live outside data/.
-        # Remove only filenames reserved by PosterService, keeping unrelated files.
+        # Older versions wrote generated backgrounds and posters beside the app.
+        # Retire only their reserved names; bundled assets and other files stay put.
         app_root = root.parent
-        background_pattern = re.compile(r"^template_background_\d+\.(?:png|jpe?g|webp)$", re.IGNORECASE)
-        poster_pattern = re.compile(r"^BL-\d{6,}\.png$", re.IGNORECASE)
-        for directory, pattern in ((app_root / "assets", background_pattern), (app_root / "posters", poster_pattern)):
+        for directory, pattern in (
+            (app_root / "assets", re.compile(r"template_background_\d+\.(?:png|jpe?g|webp)", re.IGNORECASE)),
+            (app_root / "posters", re.compile(r"BL-\d{6,}\.png", re.IGNORECASE)),
+        ):
             if not directory.is_dir() or directory.is_symlink():
                 continue
             for path in directory.iterdir():
                 if pattern.fullmatch(path.name) and path.is_file() and not path.is_symlink():
                     path.unlink()
-            if directory.name == "posters" and not any(directory.iterdir()):
+            if directory.name.casefold() == "posters" and not any(directory.iterdir()):
                 directory.rmdir()
+        for path in configured_files:
+            path.unlink(missing_ok=True)
         self.db.path.parent.mkdir(parents=True, exist_ok=True)
         # Reinitialization happens through the app after the existing DB is removed.

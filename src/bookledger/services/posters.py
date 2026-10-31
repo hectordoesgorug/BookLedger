@@ -69,12 +69,11 @@ class PosterService:
     def __init__(self, db, paths):
         self.db = db
         self.paths = paths
-        if self.paths.posters.is_symlink() or self.paths.poster_background_fallback.is_symlink():
+        if self.paths.posters.is_symlink() or self.paths.assets.is_symlink():
             raise RuntimeError("Poster storage must use ordinary folders inside the portable application data.")
-        self.paths.posters.resolve().relative_to(self.paths.root.resolve())
-        self.paths.poster_background_fallback.resolve().relative_to(self.paths.data.resolve())
+        self.paths.posters.resolve().relative_to(self.paths.data.resolve())
+        self.paths.assets.resolve().relative_to(self.paths.data.resolve())
         self.paths.posters.mkdir(parents=True, exist_ok=True)
-        self.paths.poster_background_fallback.mkdir(parents=True, exist_ok=True)
 
     def list_templates(self) -> list[dict]:
         with self.db.connect() as conn:
@@ -98,7 +97,7 @@ class PosterService:
         return result
 
     def _background_dirs(self):
-        return (self.paths.root / "assets", self.paths.poster_background_fallback)
+        return (self.paths.assets, self.paths.poster_background_fallback, self.paths.root / "assets")
 
     def resolve_background(self, reference: str) -> Path:
         if not isinstance(reference, str) or "\\" in reference:
@@ -107,7 +106,10 @@ class PosterService:
         if rel.is_absolute() or ".." in rel.parts or not BACKGROUND_NAME.match(rel.name):
             raise ValueError("The saved background reference is invalid.")
         if rel.parts == ("assets", rel.name):
-            raw_base = self.paths.root / "assets"
+            # `assets/...` is the canonical relative reference beneath data/.
+            # Older installations stored poster backgrounds in root /assets.
+            candidates = (self.paths.assets, self.paths.root / "assets")
+            raw_base = next((base for base in candidates if (base / rel.name).is_file()), self.paths.assets)
             raw_candidate = raw_base / rel.name
             if raw_base.is_symlink() or raw_candidate.is_symlink():
                 raise ValueError("Linked poster background paths are not allowed.")
@@ -135,22 +137,17 @@ class PosterService:
             original.load()
             image = ImageOps.exif_transpose(original).copy()
             suffix = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}[original.format]
-        destination_dir = None
-        for directory in self._background_dirs():
-            try:
-                if directory.is_symlink():
-                    continue
-                directory.resolve().relative_to(self.paths.root.resolve())
-                directory.mkdir(parents=True, exist_ok=True)
-                fd, probe = tempfile.mkstemp(prefix=".poster-write-", dir=directory)
-                os.close(fd)
-                Path(probe).unlink()
-                destination_dir = directory
-                break
-            except OSError:
-                continue
-        if destination_dir is None:
-            raise OSError("BookLedger cannot write a poster background to the application assets or managed data folder.")
+        destination_dir = self.paths.assets
+        if destination_dir.is_symlink():
+            raise OSError("Poster backgrounds cannot be written through a linked assets folder.")
+        destination_dir.resolve().relative_to(self.paths.data.resolve())
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            fd, probe = tempfile.mkstemp(prefix=".poster-write-", dir=destination_dir)
+            os.close(fd)
+            Path(probe).unlink()
+        except OSError as exc:
+            raise OSError("BookLedger cannot write poster backgrounds to its managed data/assets folder.") from exc
         used = set()
         for directory in self._background_dirs():
             if directory.is_dir():
@@ -173,7 +170,7 @@ class PosterService:
             except Exception:
                 destination.unlink(missing_ok=True)
                 raise
-        ref = f"assets/{destination.name}" if destination_dir == self.paths.root / "assets" else f"data/poster_backgrounds/{destination.name}"
+        ref = f"assets/{destination.name}"
         return ref, destination
 
     def save_template(self, background_ref: str, elements: list[dict]) -> dict:

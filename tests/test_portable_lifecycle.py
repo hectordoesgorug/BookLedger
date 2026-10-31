@@ -33,6 +33,22 @@ def test_portable_paths_are_rooted_and_do_not_depend_on_current_directory(tmp_pa
     assert paths.photos == root / "data" / "photos"
     assert paths.trash == root / "data" / "trash"
     assert paths.backups == root / "backups"
+    assert paths.posters == root / "data" / "posters"
+    assert paths.logs == root / "data" / "logs"
+    assert paths.log_file == paths.logs / "bookledger.log"
+    assert not paths.poster_background_fallback.exists()
+
+
+def test_paths_remove_only_an_empty_obsolete_poster_background_folder(tmp_path):
+    paths = AppPaths(tmp_path / "portable")
+    paths.poster_background_fallback.mkdir(parents=True)
+    paths.prepare()
+    assert not paths.poster_background_fallback.exists()
+    paths.poster_background_fallback.mkdir()
+    marker = paths.poster_background_fallback / "keep.txt"
+    marker.write_text("legacy data", encoding="utf-8")
+    paths.prepare()
+    assert marker.read_text(encoding="utf-8") == "legacy data"
 
 
 def test_frozen_paths_use_executable_directory_not_working_directory(tmp_path, monkeypatch):
@@ -198,3 +214,64 @@ def test_purge_removes_only_data_and_preserves_root_backups(tmp_path):
     CopyLifecycleService(db, data).purge()
     assert list(data.iterdir()) == []
     assert backup.read_bytes() == b"keep"
+
+
+def test_purge_removes_config_and_log_then_fresh_bookledger_services_initialize(tmp_path):
+    from bookledger.provider_settings import ProviderSettingsStore
+    from bookledger.services.posters import PosterService
+
+    paths = AppPaths(tmp_path / "BookLedger")
+    paths.prepare()
+    db = Database(paths.database)
+    fallback = tmp_path / "profile" / "BookLedger" / "config.json"
+    config = AppConfigStore(paths.provider_config, fallback)
+    config.set(("preferences", "shop_url"), "https://example.invalid/shop")
+    config.set(("api_keys", "google_books"), "purge-test-key")
+    fallback.parent.mkdir(parents=True)
+    fallback.write_text('{"logging":{"enabled":true}}', encoding="utf-8")
+    paths.log_file.write_text("activity", encoding="utf-8")
+    backup = paths.backups / "keep.zip"
+    backup.write_bytes(b"backup")
+
+    CopyLifecycleService(db, paths.data).purge(
+        config_paths=(config.canonical_path, config.fallback_path),
+        log_paths=(paths.log_file,),
+    )
+
+    assert not paths.provider_config.exists()
+    assert not fallback.exists()
+    assert not paths.log_file.exists()
+    assert backup.read_bytes() == b"backup"
+
+    paths.prepare()
+    fresh_db = Database(paths.database)
+    fresh_config = AppConfigStore(paths.provider_config, fallback)
+    fresh_config.set(("migration_state", "configuration_v1"), True)
+    fresh_config.set(("migration_state", "google_books_legacy_checked"), True)
+    fresh_config.set(("api_keys", "google_books"), "")
+    fresh_config.set(("logging", "enabled"), False)
+    fresh_config.migrate_legacy_settings(fresh_db, paths.google_books_config, None)
+    providers = ProviderSettingsStore(paths.provider_config, fallback, config_store=fresh_config).load()
+    catalog = CatalogService(fresh_db, paths.data, config_store=fresh_config)
+    posters = PosterService(fresh_db, paths)
+    assert paths.provider_config.is_file()
+    assert fresh_config.get(("api_keys", "google_books")) == ""
+    assert providers.enabled
+    assert catalog.counts()["Total copies"] == 0
+    assert posters.list_templates() == []
+    assert not paths.log_file.exists()
+
+
+def test_purge_rejects_unrelated_configuration_paths_before_deleting_data(tmp_path):
+    paths = AppPaths(tmp_path / "BookLedger")
+    paths.prepare()
+    db = Database(paths.database)
+    unrelated = tmp_path / "OtherApp" / "config.json"
+    unrelated.parent.mkdir()
+    unrelated.write_text('{"keep":true}', encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="unexpected configuration or log path"):
+        CopyLifecycleService(db, paths.data).purge(config_paths=(unrelated,))
+
+    assert paths.database.is_file()
+    assert unrelated.is_file()
