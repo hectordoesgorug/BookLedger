@@ -8,27 +8,33 @@ Notes
 
 -   These items are deferred, not confirmed resolved.
 -   Sales and Reports are explicitly out of scope for the current phase.
--   Continue with the configurable metadata source/provider registry
-    independently.
+-   Keep the future enhancements below separate from the upcoming deliverables.
 -   Do not commit or push changes unless explicitly authorized.
+
+Upcoming Deliverables
+
+1.  Expand Metadata Sources List
+    -   Immediate next development deliverable.
+2.  Portable Windows EXE Investigation
+    -   Investigation and planning first; this does not authorize packaging or
+        application-architecture changes.
+3.  Mobile Companion App Planning
+    -   Plan a separate companion app for ISBN barcode scanning and book
+        photography, not a full mobile version of BookLedger.
 
 Future Enhancements / Backlog
 
 These items are future enhancements and are not part of the current implementation scope.
 
-1.  Basic Text Summarizer
-    -   Add a basic text summarizer for poster summaries.
-2.  About, Tooltips, and Legends
+1.  About, Tooltips, and Legends
     -   Add an About section or tab.
     -   Introduce relevant tooltips.
     -   Provide legends explaining status meanings and other indicators where helpful.
-3.  Bulk Metadata Download
+2.  Bulk Metadata Download
     -   Allow rapid successive book intake without waiting for metadata retrieval on every entry.
     -   Support downloading the corresponding metadata in bulk afterward.
     -   Preserve ISBN-to-book matching and existing metadata-merging safeguards.
-4.  Poster Creation
-    -   Explore a canvas-based poster design workspace and designer for creating book-sale posters.
-5. Merge Libraries
+3.  Merge Libraries
     -   Consider a future Merge Libraries feature: allow importing a BookLedger backup into the current library without replacing it.
     -   Explore UUID-based record matching, `BL-` display-ID collision handling, duplicate ISBN review with per-copy keep/discard choices, and safe handling of sales, photos, deletions, and transaction history.
     -   Deferred; for now, transfer the latest verified backup by USB and restore it before starting work on the other PC.
