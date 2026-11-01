@@ -1,4 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+
+import 'capture/camera_permission.dart';
+import 'capture/isbn_scanner_screen.dart';
+import 'capture/photo_camera_view.dart';
+import 'capture/single_entry_workflow.dart';
 
 void main() {
   runApp(const MyApp());
@@ -217,24 +225,274 @@ class _EntryCard extends StatelessWidget {
 
 enum CaptureMode { single, bulk }
 
-class CaptureScreen extends StatelessWidget {
+class CaptureScreen extends StatefulWidget {
   const CaptureScreen({required this.mode, this.queueTarget, super.key});
 
   final CaptureMode mode;
   final int? queueTarget;
 
-  bool get _isBulk => mode == CaptureMode.bulk;
+  @override
+  State<CaptureScreen> createState() => _CaptureScreenState();
+}
+
+class _CaptureScreenState extends State<CaptureScreen> {
+  late final SingleEntryWorkflow _workflow;
+
+  bool get _isBulk => widget.mode == CaptureMode.bulk;
+
+  @override
+  void initState() {
+    super.initState();
+    _workflow = SingleEntryWorkflow()..addListener(_onWorkflowChanged);
+  }
+
+  void _onWorkflowChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _workflow
+      ..removeListener(_onWorkflowChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  Future<void> _openScanner() async {
+    if (!await requestCaptureCameraPermission(
+      context,
+      purpose: 'scan a book ISBN',
+    )) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    final isbn = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(builder: (_) => const IsbnScannerScreen()),
+    );
+    if (!mounted || isbn == null) {
+      return;
+    }
+    final isValidIsbn = await _workflow.scanIsbn(isbn);
+    if (!mounted) {
+      return;
+    }
+    if (!isValidIsbn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That is not a valid ISBN.')),
+      );
+    }
+  }
+
+  Future<void> _openPhotoCamera() async {
+    if (!await requestCaptureCameraPermission(
+      context,
+      purpose: 'photograph the book cover',
+    )) {
+      return;
+    }
+    if (mounted) {
+      _workflow.beginPhotoCapture();
+    }
+  }
+
+  void _saveCaptureStep() {
+    if (_workflow.stage == SingleCaptureStage.isbnScanned) {
+      _workflow.saveIsbn();
+    } else if (_workflow.stage == SingleCaptureStage.photoCaptured) {
+      _workflow.savePhoto();
+    }
+  }
+
+  Future<void> _clearCapture() async {
+    if (!_workflow.hasCaptureData) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear this capture?'),
+        content: const Text(
+          'The scanned ISBN and any captured photo will be discarded.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep capture'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _workflow.clear();
+    }
+  }
+
+  Future<void> _handlePhotoCaptured(String path) async {
+    if (!await _workflow.photoCaptured(path)) {
+      try {
+        await File(path).delete();
+      } on FileSystemException {
+        // The capture was no longer active; remove its temporary file if present.
+      }
+    }
+  }
+
+  List<String> get _labels => <String>[
+    'Scan',
+    'Take Photo',
+    'Retake',
+    'Save',
+    _isBulk ? 'Queue' : 'Send',
+    'Clear',
+  ];
+
+  bool _buttonEnabled(int index) {
+    if (_isBulk) {
+      return index == 0;
+    }
+
+    switch (index) {
+      case 0:
+        return !_workflow.photoCameraActive;
+      case 1:
+        return _workflow.stage == SingleCaptureStage.isbnSaved;
+      case 2:
+        return _workflow.stage == SingleCaptureStage.photoCaptured ||
+            _workflow.stage == SingleCaptureStage.paired;
+      case 3:
+        return _workflow.stage == SingleCaptureStage.isbnScanned ||
+            _workflow.stage == SingleCaptureStage.photoCaptured;
+      case 4:
+        return false;
+      case 5:
+        return _workflow.hasCaptureData;
+      default:
+        return false;
+    }
+  }
+
+  void _onCaptureButtonPressed(int index) {
+    if (_isBulk) {
+      return;
+    }
+
+    switch (index) {
+      case 0:
+        unawaited(_openScanner());
+      case 1:
+      case 2:
+        unawaited(_openPhotoCamera());
+      case 3:
+        _saveCaptureStep();
+      case 5:
+        unawaited(_clearCapture());
+    }
+  }
+
+  String _stageDescription() {
+    switch (_workflow.stage) {
+      case SingleCaptureStage.empty:
+        return '';
+      case SingleCaptureStage.isbnScanned:
+        return 'ISBN scanned. Save it to continue.';
+      case SingleCaptureStage.isbnSaved:
+        return 'ISBN saved. Take a photo of the front cover.';
+      case SingleCaptureStage.photoCamera:
+        return 'Camera active. Frame the front cover and take a photo.';
+      case SingleCaptureStage.photoCaptured:
+        return 'Photo captured. Save to pair it with this ISBN.';
+      case SingleCaptureStage.paired:
+        return 'Capture ready for transfer.';
+    }
+  }
+
+  Widget _captureCanvas(BuildContext context) {
+    if (!_isBulk && _workflow.photoCameraActive) {
+      return PhotoCameraView(
+        onCaptured: _handlePhotoCaptured,
+        onCancel: _workflow.cancelPhotoCapture,
+      );
+    }
+
+    final photoPath = _isBulk ? null : _workflow.photoPath;
+    if (photoPath != null) {
+      return Image.file(
+        File(photoPath),
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => const Center(
+          child: Icon(
+            Icons.broken_image_outlined,
+            color: Colors.white,
+            size: 42,
+          ),
+        ),
+      );
+    }
+
+    return Semantics(label: 'Camera preview area', child: SizedBox.expand());
+  }
+
+  Widget _captureStatus(BuildContext context) {
+    final isbn = _workflow.displayedIsbn;
+    if (_isBulk || isbn == null) {
+      return const SizedBox.shrink();
+    }
+
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _workflow.stage == SingleCaptureStage.paired
+                ? Icons.check_circle_outline
+                : Icons.info_outline,
+            color: colors.onSecondaryContainer,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isbn,
+                  key: const ValueKey('captured-isbn'),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: colors.onSecondaryContainer,
+                  ),
+                ),
+                Text(
+                  _stageDescription(),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: colors.onSecondaryContainer),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final labels = <String>[
-      'Scan',
-      'Take Photo',
-      'Retake',
-      'Save',
-      _isBulk ? 'Queue' : 'Send',
-      'Clear',
-    ];
     return Scaffold(
       appBar: AppBar(title: Text(_isBulk ? 'Bulk Entry' : 'Single Entry')),
       body: SafeArea(
@@ -252,26 +510,26 @@ class CaptureScreen extends StatelessWidget {
                     ),
                     const Spacer(),
                     Text(
-                      '0 / ${queueTarget ?? 5}',
+                      '0 / ${widget.queueTarget ?? 5}',
                       key: const ValueKey('queue-counter'),
                       style: Theme.of(context).textTheme.titleMedium
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
-              ),
+              )
+            else
+              _captureStatus(context),
             Expanded(
               child: Container(
                 width: double.infinity,
                 margin: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: Colors.black,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Semantics(
-                  label: 'Camera preview area',
-                  child: SizedBox.expand(),
-                ),
+                child: _captureCanvas(context),
               ),
             ),
             Padding(
@@ -279,7 +537,7 @@ class CaptureScreen extends StatelessWidget {
               child: GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: labels.length,
+                itemCount: _labels.length,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
                   mainAxisExtent: 62,
@@ -287,9 +545,11 @@ class CaptureScreen extends StatelessWidget {
                   crossAxisSpacing: 10,
                 ),
                 itemBuilder: (context, index) {
-                  final enabled = index == 0;
+                  final enabled = _buttonEnabled(index);
                   return ElevatedButton(
-                    onPressed: enabled ? () {} : null,
+                    onPressed: enabled
+                        ? () => _onCaptureButtonPressed(index)
+                        : null,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       shape: RoundedRectangleBorder(
@@ -298,7 +558,7 @@ class CaptureScreen extends StatelessWidget {
                     ),
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
-                      child: Text(labels[index]),
+                      child: Text(_labels[index]),
                     ),
                   );
                 },
