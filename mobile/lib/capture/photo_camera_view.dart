@@ -5,13 +5,17 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'camera_photo_storage.dart';
+
 class PhotoCameraView extends StatefulWidget {
   const PhotoCameraView({
+    required this.captureRequestId,
     required this.onCaptured,
     required this.onCancel,
     super.key,
   });
 
+  final int captureRequestId;
   final Future<void> Function(String path) onCaptured;
   final VoidCallback onCancel;
 
@@ -24,6 +28,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
   CameraController? _controller;
   bool _loading = true;
   bool _takingPhoto = false;
+  bool _captureRequestedWhileLoading = false;
   bool _appResumed = true;
   String? _errorMessage;
   int _cameraGeneration = 0;
@@ -33,6 +38,14 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_initializeCamera());
+  }
+
+  @override
+  void didUpdateWidget(covariant PhotoCameraView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.captureRequestId != oldWidget.captureRequestId) {
+      unawaited(_takePhoto());
+    }
   }
 
   @override
@@ -108,6 +121,12 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       }
       if (mounted && generation == _cameraGeneration) {
         setState(() => _loading = false);
+        if (_errorMessage != null) {
+          _captureRequestedWhileLoading = false;
+        } else if (_captureRequestedWhileLoading) {
+          _captureRequestedWhileLoading = false;
+          unawaited(_takePhoto());
+        }
       }
     }
   }
@@ -134,7 +153,11 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
 
   Future<void> _takePhoto() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || _takingPhoto) {
+    if (_takingPhoto) {
+      return;
+    }
+    if (controller == null || !controller.value.isInitialized) {
+      _captureRequestedWhileLoading = _loading;
       return;
     }
 
@@ -146,11 +169,12 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     try {
       final captured = await controller.takePicture();
       final temporaryDirectory = await getTemporaryDirectory();
-      final filename =
-          'bookledger_capture_${DateTime.now().microsecondsSinceEpoch}.jpg';
-      final destination = File('${temporaryDirectory.path}/$filename');
-      await File(captured.path).copy(destination.path);
-      storedPath = destination.path;
+      // Preview scaling is display-only; retain the original camera JPEG bytes.
+      final storedPhoto = await storeOriginalCameraPhoto(
+        File(captured.path),
+        temporaryDirectory,
+      );
+      storedPath = storedPhoto.path;
 
       try {
         await File(captured.path).delete();
@@ -210,7 +234,23 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       fit: StackFit.expand,
       children: [
         if (controller != null && controller.value.isInitialized)
-          CameraPreview(controller)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final aspectRatio = controller.value.aspectRatio;
+              return ClipRect(
+                child: SizedBox.expand(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: constraints.maxHeight * aspectRatio,
+                      height: constraints.maxHeight,
+                      child: CameraPreview(controller),
+                    ),
+                  ),
+                ),
+              );
+            },
+          )
         else
           ColoredBox(
             color: Colors.black,
@@ -254,19 +294,6 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
             icon: const Icon(Icons.close),
           ),
         ),
-        if (controller != null && controller.value.isInitialized)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 16,
-            child: Center(
-              child: FilledButton.icon(
-                onPressed: _takingPhoto ? null : _takePhoto,
-                icon: const Icon(Icons.camera_alt),
-                label: Text(_takingPhoto ? 'Taking photo…' : 'Take photo'),
-              ),
-            ),
-          ),
       ],
     );
   }

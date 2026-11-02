@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/capture/camera_photo_storage.dart';
 import 'package:mobile/capture/single_entry_workflow.dart';
 
 Future<Directory> _temporaryCaptureDirectory() =>
@@ -17,7 +18,8 @@ Future<SingleEntryWorkflow> _savedIsbnWorkflow() async {
   expect(await workflow.scanIsbn('9780306406157'), isTrue);
   expect(workflow.stage, SingleCaptureStage.isbnScanned);
   expect(workflow.saveIsbn(), isTrue);
-  expect(workflow.stage, SingleCaptureStage.isbnSaved);
+  expect(workflow.stage, SingleCaptureStage.photoCamera);
+  expect(workflow.photoCameraActive, isTrue);
   return workflow;
 }
 
@@ -60,15 +62,29 @@ void main() {
       },
     );
 
-    test('saving ISBN enables a separate photo-camera state', () async {
+    test('saving ISBN immediately starts photo-camera mode', () async {
       final workflow = await _savedIsbnWorkflow();
       addTearDown(workflow.dispose);
 
-      expect(workflow.beginPhotoCapture(), isTrue);
+      expect(workflow.photoCameraActive, isTrue);
       expect(workflow.stage, SingleCaptureStage.photoCamera);
       expect(workflow.displayedIsbn, '9780306406157');
       workflow.cancelPhotoCapture();
       expect(workflow.stage, SingleCaptureStage.isbnSaved);
+    });
+
+    test('scanner stays in capture state until valid scan or exit', () async {
+      final workflow = SingleEntryWorkflow();
+      addTearDown(workflow.dispose);
+
+      expect(workflow.beginIsbnScan(), isTrue);
+      expect(workflow.scannerActive, isTrue);
+      expect(workflow.beginIsbnScan(), isFalse);
+      expect(await workflow.scanIsbn('9780306406158'), isFalse);
+      expect(workflow.scannerActive, isTrue);
+      expect(await workflow.scanIsbn('9780306406157'), isTrue);
+      expect(workflow.scannerActive, isFalse);
+      expect(workflow.stage, SingleCaptureStage.isbnScanned);
     });
 
     test('captured photo remains unpaired until explicitly saved', () async {
@@ -81,7 +97,7 @@ void main() {
         await directory.delete(recursive: true);
       });
 
-      expect(workflow.beginPhotoCapture(), isTrue);
+      expect(workflow.photoCameraActive, isTrue);
       expect(await workflow.photoCaptured(photo.path), isTrue);
       expect(workflow.stage, SingleCaptureStage.photoCaptured);
       expect(workflow.pairedIsbn, isNull);
@@ -103,13 +119,17 @@ void main() {
           await directory.delete(recursive: true);
         });
 
-        workflow.beginPhotoCapture();
+        expect(workflow.photoCameraActive, isTrue);
         await workflow.photoCaptured(firstPhoto.path);
         workflow.savePhoto();
 
         expect(workflow.beginPhotoCapture(), isTrue);
         expect(workflow.stage, SingleCaptureStage.photoCamera);
         expect(workflow.displayedIsbn, '9780306406157');
+        expect(await File(firstPhoto.path).exists(), isTrue);
+        workflow.cancelPhotoCapture();
+        expect(await File(firstPhoto.path).exists(), isTrue);
+        expect(workflow.beginPhotoCapture(), isTrue);
         expect(await workflow.photoCaptured(replacementPhoto.path), isTrue);
         expect(await File(firstPhoto.path).exists(), isFalse);
         expect(workflow.photoPath, replacementPhoto.path);
@@ -130,7 +150,7 @@ void main() {
           await directory.delete(recursive: true);
         });
 
-        workflow.beginPhotoCapture();
+        expect(workflow.photoCameraActive, isTrue);
         await workflow.photoCaptured(photo.path);
         workflow.savePhoto();
 
@@ -155,7 +175,7 @@ void main() {
           await directory.delete(recursive: true);
         });
 
-        workflow.beginPhotoCapture();
+        expect(workflow.photoCameraActive, isTrue);
         await workflow.photoCaptured(photo.path);
         workflow.savePhoto();
         await workflow.clear();
@@ -173,10 +193,34 @@ void main() {
       final workflow = await _savedIsbnWorkflow();
       addTearDown(workflow.dispose);
 
-      expect(workflow.beginPhotoCapture(), isTrue);
+      expect(workflow.photoCameraActive, isTrue);
       await workflow.clear();
       expect(workflow.stage, SingleCaptureStage.empty);
       expect(workflow.photoCameraActive, isFalse);
+    });
+
+    test('temporary storage preserves the camera JPEG bytes exactly', () async {
+      final directory = await _temporaryCaptureDirectory();
+      final originalBytes = <int>[
+        0xFF,
+        0xD8,
+        0xFF,
+        0xE0,
+        0x00,
+        0x10,
+        0x10,
+        0x00,
+        0xFF,
+        0xD9,
+      ];
+      final original = File('${directory.path}/camera-output.jpg');
+      await original.writeAsBytes(originalBytes);
+      addTearDown(() => directory.delete(recursive: true));
+
+      final stored = await storeOriginalCameraPhoto(original, directory);
+
+      expect(await stored.readAsBytes(), originalBytes);
+      expect(stored.parent.path, directory.path);
     });
 
     test('does not pair a photo unless an ISBN was saved first', () async {

@@ -19,6 +19,7 @@ class SingleEntryWorkflow extends ChangeNotifier {
   String? _savedIsbn;
   String? _photoPath;
   String? _pairedIsbn;
+  bool _scannerActive = false;
   bool _photoCameraActive = false;
   bool _disposed = false;
 
@@ -44,8 +45,28 @@ class SingleEntryWorkflow extends ChangeNotifier {
   String? get displayedIsbn => _savedIsbn ?? _scannedIsbn;
   String? get photoPath => _photoPath;
   String? get pairedIsbn => _pairedIsbn;
+  bool get scannerActive => _scannerActive;
   bool get photoCameraActive => _photoCameraActive;
   bool get hasCaptureData => stage != SingleCaptureStage.empty;
+
+  bool beginIsbnScan() {
+    if (_scannerActive || _photoCameraActive) {
+      return false;
+    }
+
+    _scannerActive = true;
+    _notifyListeners();
+    return true;
+  }
+
+  void cancelIsbnScan() {
+    if (!_scannerActive) {
+      return;
+    }
+
+    _scannerActive = false;
+    _notifyListeners();
+  }
 
   Future<bool> scanIsbn(String rawValue) async {
     final isbn = IsbnValidator.normalizeAndValidate(rawValue);
@@ -54,6 +75,7 @@ class SingleEntryWorkflow extends ChangeNotifier {
     }
 
     final previousPhotoPath = _photoPath;
+    _scannerActive = false;
     _scannedIsbn = isbn;
     _savedIsbn = null;
     _photoPath = null;
@@ -70,6 +92,7 @@ class SingleEntryWorkflow extends ChangeNotifier {
     }
 
     _savedIsbn = _scannedIsbn;
+    _photoCameraActive = true;
     _notifyListeners();
     return true;
   }
@@ -79,6 +102,7 @@ class SingleEntryWorkflow extends ChangeNotifier {
       return false;
     }
 
+    _scannerActive = false;
     _photoCameraActive = true;
     _notifyListeners();
     return true;
@@ -125,6 +149,7 @@ class SingleEntryWorkflow extends ChangeNotifier {
     _savedIsbn = null;
     _photoPath = null;
     _pairedIsbn = null;
+    _scannerActive = false;
     _photoCameraActive = false;
     _notifyListeners();
     await _deletePhoto(previousPhotoPath);
@@ -162,6 +187,8 @@ class SingleEntryWorkflow extends ChangeNotifier {
     _disposed = true;
     _deletePhotoLater(_photoPath);
     _photoPath = null;
+    _scannerActive = false;
+    _photoCameraActive = false;
     super.dispose();
   }
 }

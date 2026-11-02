@@ -4,17 +4,25 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'isbn_validator.dart';
 
-class IsbnScannerScreen extends StatefulWidget {
-  const IsbnScannerScreen({super.key});
+class IsbnScannerPreview extends StatefulWidget {
+  const IsbnScannerPreview({
+    required this.onIsbnCaptured,
+    required this.onCancel,
+    super.key,
+  });
+
+  final ValueChanged<String> onIsbnCaptured;
+  final VoidCallback onCancel;
 
   @override
-  State<IsbnScannerScreen> createState() => _IsbnScannerScreenState();
+  State<IsbnScannerPreview> createState() => _IsbnScannerPreviewState();
 }
 
-class _IsbnScannerScreenState extends State<IsbnScannerScreen> {
+class _IsbnScannerPreviewState extends State<IsbnScannerPreview> {
   late final MobileScannerController _controller;
   DateTime? _lastInvalidFeedback;
   bool _handlingValidBarcode = false;
+  bool _closing = false;
 
   @override
   void initState() {
@@ -28,19 +36,18 @@ class _IsbnScannerScreenState extends State<IsbnScannerScreen> {
   }
 
   Future<void> _handleBarcode(BarcodeCapture capture) async {
-    if (_handlingValidBarcode) {
+    if (_handlingValidBarcode || _closing) {
       return;
     }
 
     for (final barcode in capture.barcodes) {
-      final rawValue = barcode.rawValue;
-      final isbn = IsbnValidator.normalizeAndValidate(rawValue);
+      final isbn = IsbnValidator.normalizeAndValidate(barcode.rawValue);
       if (isbn != null) {
         _handlingValidBarcode = true;
         try {
           await _controller.stop();
         } catch (_) {
-          // Leaving this route also disposes the scanner controller.
+          // Disposing this preview also releases the scanner if stopping fails.
         }
         if (!mounted) {
           return;
@@ -48,7 +55,7 @@ class _IsbnScannerScreenState extends State<IsbnScannerScreen> {
         await SystemSound.play(SystemSoundType.alert);
         await HapticFeedback.mediumImpact();
         if (mounted) {
-          Navigator.of(context).pop(isbn);
+          widget.onIsbnCaptured(isbn);
         }
         return;
       }
@@ -71,6 +78,21 @@ class _IsbnScannerScreenState extends State<IsbnScannerScreen> {
             ),
           );
       }
+    }
+  }
+
+  Future<void> _cancel() async {
+    if (_closing) {
+      return;
+    }
+    _closing = true;
+    try {
+      await _controller.stop();
+    } catch (_) {
+      // Disposing this preview also releases the scanner if stopping fails.
+    }
+    if (mounted) {
+      widget.onCancel();
     }
   }
 
@@ -131,45 +153,50 @@ class _IsbnScannerScreenState extends State<IsbnScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Scan ISBN')),
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: _handleBarcode,
-            errorBuilder: _errorMessage,
-          ),
-          IgnorePointer(
-            child: Center(
-              child: Container(
-                width: 300,
-                height: 120,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white, width: 2),
-                  borderRadius: BorderRadius.circular(16),
-                ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        MobileScanner(
+          controller: _controller,
+          onDetect: _handleBarcode,
+          errorBuilder: _errorMessage,
+        ),
+        IgnorePointer(
+          child: Center(
+            child: Container(
+              width: 300,
+              height: 120,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(16),
               ),
             ),
           ),
-          const Positioned(
-            left: 20,
-            right: 20,
-            bottom: 28,
-            child: Text(
-              'Center the book barcode in the frame',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                shadows: [Shadow(blurRadius: 4, color: Colors.black)],
-              ),
+        ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: IconButton.filledTonal(
+            tooltip: 'Exit ISBN scanning',
+            onPressed: _cancel,
+            icon: const Icon(Icons.close),
+          ),
+        ),
+        const Positioned(
+          left: 20,
+          right: 20,
+          bottom: 28,
+          child: Text(
+            'Center the book barcode in the frame',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              shadows: [Shadow(blurRadius: 4, color: Colors.black)],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

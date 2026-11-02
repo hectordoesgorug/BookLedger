@@ -237,6 +237,7 @@ class CaptureScreen extends StatefulWidget {
 
 class _CaptureScreenState extends State<CaptureScreen> {
   late final SingleEntryWorkflow _workflow;
+  int _photoCaptureRequestId = 0;
 
   bool get _isBulk => widget.mode == CaptureMode.bulk;
 
@@ -267,24 +268,24 @@ class _CaptureScreenState extends State<CaptureScreen> {
     )) {
       return;
     }
-    if (!mounted) {
-      return;
+    if (mounted) {
+      _workflow.beginIsbnScan();
     }
+  }
 
-    final isbn = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(builder: (_) => const IsbnScannerScreen()),
-    );
-    if (!mounted || isbn == null) {
-      return;
-    }
+  Future<void> _acceptScannedIsbn(String isbn) async {
     final isValidIsbn = await _workflow.scanIsbn(isbn);
-    if (!mounted) {
+    if (!mounted || isValidIsbn) {
       return;
     }
-    if (!isValidIsbn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That is not a valid ISBN.')),
-      );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('That is not a valid ISBN.')));
+  }
+
+  void _requestPhotoCapture() {
+    if (_workflow.photoCameraActive) {
+      setState(() => _photoCaptureRequestId++);
     }
   }
 
@@ -363,15 +364,18 @@ class _CaptureScreenState extends State<CaptureScreen> {
 
     switch (index) {
       case 0:
-        return !_workflow.photoCameraActive;
+        return !_workflow.photoCameraActive && !_workflow.scannerActive;
       case 1:
-        return _workflow.stage == SingleCaptureStage.isbnSaved;
+        return _workflow.photoCameraActive;
       case 2:
-        return _workflow.stage == SingleCaptureStage.photoCaptured ||
-            _workflow.stage == SingleCaptureStage.paired;
+        return !_workflow.photoCameraActive &&
+            !_workflow.scannerActive &&
+            (_workflow.stage == SingleCaptureStage.photoCaptured ||
+                _workflow.stage == SingleCaptureStage.paired);
       case 3:
-        return _workflow.stage == SingleCaptureStage.isbnScanned ||
-            _workflow.stage == SingleCaptureStage.photoCaptured;
+        return !_workflow.scannerActive &&
+            (_workflow.stage == SingleCaptureStage.isbnScanned ||
+                _workflow.stage == SingleCaptureStage.photoCaptured);
       case 4:
         return false;
       case 5:
@@ -390,6 +394,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
       case 0:
         unawaited(_openScanner());
       case 1:
+        _requestPhotoCapture();
       case 2:
         unawaited(_openPhotoCamera());
       case 3:
@@ -400,6 +405,9 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 
   String _stageDescription() {
+    if (_workflow.scannerActive) {
+      return 'Scan an ISBN to replace the current capture.';
+    }
     switch (_workflow.stage) {
       case SingleCaptureStage.empty:
         return '';
@@ -417,8 +425,15 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 
   Widget _captureCanvas(BuildContext context) {
+    if (!_isBulk && _workflow.scannerActive) {
+      return IsbnScannerPreview(
+        onIsbnCaptured: (isbn) => unawaited(_acceptScannedIsbn(isbn)),
+        onCancel: _workflow.cancelIsbnScan,
+      );
+    }
     if (!_isBulk && _workflow.photoCameraActive) {
       return PhotoCameraView(
+        captureRequestId: _photoCaptureRequestId,
         onCaptured: _handlePhotoCaptured,
         onCancel: _workflow.cancelPhotoCapture,
       );
@@ -428,7 +443,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
     if (photoPath != null) {
       return Image.file(
         File(photoPath),
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => const Center(
           child: Icon(
             Icons.broken_image_outlined,
@@ -540,7 +555,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
                 itemCount: _labels.length,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 3,
-                  mainAxisExtent: 62,
+                  mainAxisExtent: 56,
                   mainAxisSpacing: 10,
                   crossAxisSpacing: 10,
                 ),
