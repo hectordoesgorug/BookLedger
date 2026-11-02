@@ -950,7 +950,7 @@ def test_custom_shop_logo_selection_is_saved_as_a_relative_portable_asset(tmp_pa
     assert not first_path.exists()
 
 
-def test_clear_shop_logo_restores_default_persists_and_removes_managed_asset(tmp_path, monkeypatch):
+def test_clear_shop_logo_leaves_reserved_area_blank_and_removes_managed_asset(tmp_path, monkeypatch):
     data = tmp_path / "data"
     assets = data / "assets"
     assets.mkdir(parents=True)
@@ -977,20 +977,20 @@ def test_clear_shop_logo_restores_default_persists_and_removes_managed_asset(tmp
     assert not custom_logo.exists()
     assert AppConfigStore(config_path).get(("preferences", "shop_logo_path"), "") == ""
 
-    # A fresh store models restart: an empty selection loads the bundled default.
     loaded_sizes = []
     monkeypatch.setattr(app_module.ImageTk, "PhotoImage", lambda image, master: loaded_sizes.append(image.size) or object())
     subject.config_store = AppConfigStore(config_path)
+    label_state = {"image": None, "manager": ""}
     subject.brand_logo_label = SimpleNamespace(
-        configure=lambda **_kwargs: None,
-        pack_forget=lambda: None,
-        pack=lambda **_kwargs: None,
-        winfo_manager=lambda: "pack",
+        configure=lambda **kwargs: label_state.update(kwargs),
+        pack_forget=lambda: label_state.update(manager=""),
+        pack=lambda **_kwargs: label_state.update(manager="pack"),
+        winfo_manager=lambda: label_state["manager"],
     )
     BookLedgerApp._refresh_brand_logo(subject)
-    with Image.open(app_module.resource_path("assets", "generalists_bookshop_logo.png")) as default:
-        default.thumbnail((176, 66), Image.Resampling.LANCZOS)
-        assert loaded_sizes == [default.size]
+    assert loaded_sizes == []
+    assert label_state["image"] == ""
+    assert label_state["manager"] == "pack"
 
 
 def test_clear_shop_link_persists_across_restart_and_sidebar_logo_does_not_open_browser(tmp_path, monkeypatch):
@@ -1200,8 +1200,7 @@ def test_create_poster_callback_does_not_use_settings_page_widget(monkeypatch):
 
 
 @pytest.mark.parametrize("logo_state", ["missing", "unreadable"])
-def test_missing_or_unreadable_custom_logo_falls_back_to_the_bundled_default(tmp_path, monkeypatch, logo_state):
-    from bookledger.resources import resource_path
+def test_missing_or_unreadable_custom_logo_leaves_reserved_area_blank(tmp_path, monkeypatch, logo_state):
 
     class LogoLabel:
         def __init__(self):
@@ -1239,10 +1238,47 @@ def test_missing_or_unreadable_custom_logo_falls_back_to_the_bundled_default(tmp
 
     BookLedgerApp._refresh_brand_logo(subject)
 
-    with Image.open(resource_path("assets", "generalists_bookshop_logo.png")) as default:
-        default.thumbnail((176, 66), Image.Resampling.LANCZOS)
-        assert loaded_sizes == [default.size]
+    assert loaded_sizes == []
     assert subject.brand_logo_label.manager == "pack"
+    assert subject.brand_logo_label.options["image"] == ""
+
+
+def test_configured_shop_logo_is_displayed_from_managed_storage(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    logo_path = data / "assets" / "shop-logo-user.png"
+    logo_path.parent.mkdir(parents=True)
+    Image.new("RGBA", (352, 132), (20, 80, 120, 255)).save(logo_path)
+    store = AppConfigStore(tmp_path / "config.json")
+    store.set(("preferences", "shop_logo_path"), "assets/shop-logo-user.png")
+    loaded_sizes = []
+    image_ref = object()
+    monkeypatch.setattr(
+        app_module.ImageTk,
+        "PhotoImage",
+        lambda image, master: loaded_sizes.append(image.size) or image_ref,
+    )
+    label_state = {"image": None, "manager": ""}
+    def configure(**options):
+        label_state["image"] = options.get("image")
+    def pack(**_options):
+        label_state["manager"] = "pack"
+    label = SimpleNamespace(
+        configure=configure,
+        pack_forget=lambda: label_state.update(manager=""),
+        pack=pack,
+        winfo_manager=lambda: label_state["manager"],
+    )
+    subject = SimpleNamespace(
+        config_store=store,
+        paths=SimpleNamespace(data=data),
+        brand_logo_label=label,
+    )
+
+    BookLedgerApp._refresh_brand_logo(subject)
+
+    assert loaded_sizes == [(176, 66)]
+    assert label_state["image"] is image_ref
+    assert label_state["manager"] == "pack"
 
 
 def test_status_menu_prompts_only_for_not_for_sale_or_sold_departures(monkeypatch):

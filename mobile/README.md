@@ -1,10 +1,10 @@
-# BookLedger Mobile
+ # BookLedger Mobile
 
-Flutter companion application for capturing book ISBNs and front-cover photographs for future transfer to BookLedger desktop.
+Flutter companion application for session-only book capture and local pairing with BookLedger desktop.
 
-Single Entry includes camera-based ISBN scanning and front-cover capture. ISBNs must pass ISBN-10 or ISBN-13 check-digit validation. Photos remain in app-private temporary storage for the active capture session.
+Single Entry scans ISBNs and captures front-cover photographs. Bulk Entry queues independently identified ISBN/photo captures in app-private temporary storage, with capacity from 5 to 20. A batch can be finished early by holding Queue. Send marks it ready locally; book/photo transfer is not implemented.
 
-Bulk Entry supports a session-only queue of independently identified ISBN/photo captures, with a configurable capacity of 5 to 20 books. Photos are removed when the capture session ends. A batch can be finished early by holding Queue, and Send marks a batch ready locally. Desktop pairing and transfer are not implemented; the desktop application remains the source of truth.
+Mobile App Setup pairs to the desktop over the local network using QR or manual IPv4 entry. The device token is stored in Android secure storage. HTTP traffic is unencrypted, so pair only on a trusted network. Reconnection tries the last endpoint, then DNS-SD/mDNS discovery, then saved addresses. QR and manual entry remain available when multicast discovery is unavailable. Windows hotspot discovery has not been physically verified.
 
 ## Development
 

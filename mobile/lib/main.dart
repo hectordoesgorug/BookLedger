@@ -11,13 +11,38 @@ import 'capture/photo_camera_view.dart';
 import 'capture/queue_action_button.dart';
 import 'capture/share_photo_button.dart';
 import 'capture/single_entry_workflow.dart';
+import 'connection/mobile_connection_controller.dart';
+import 'connection/mobile_setup_screen.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MyApp extends StatefulWidget {
+  const MyApp({this.connectionController, super.key});
+
+  final MobileConnectionController? connectionController;
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final MobileConnectionController _connectionController;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectionController =
+        widget.connectionController ?? MobileConnectionController();
+    unawaited(_connectionController.initialize());
+  }
+
+  @override
+  void dispose() {
+    _connectionController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +62,7 @@ class MyApp extends StatelessWidget {
           centerTitle: false,
         ),
       ),
-      home: const HomeScreen(),
+      home: HomeScreen(connectionController: _connectionController),
     );
   }
 }
@@ -45,7 +70,9 @@ class MyApp extends StatelessWidget {
 enum _HomeMenuAction { about, settings, exit }
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({this.connectionController, super.key});
+
+  final MobileConnectionController? connectionController;
 
   void _openPlaceholder(BuildContext context, String title) {
     Navigator.of(context).push(
@@ -58,7 +85,16 @@ class HomeScreen extends StatelessWidget {
       case _HomeMenuAction.about:
         _openPlaceholder(context, 'About');
       case _HomeMenuAction.settings:
-        _openPlaceholder(context, 'Settings');
+        if (connectionController == null) {
+          _openPlaceholder(context, 'Settings');
+        } else {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  MobileSetupScreen(controller: connectionController!),
+            ),
+          );
+        }
       case _HomeMenuAction.exit:
         showDialog<void>(
           context: context,
@@ -81,14 +117,21 @@ class HomeScreen extends StatelessWidget {
   void _openSingleEntry(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const CaptureScreen(mode: CaptureMode.single),
+        builder: (_) => CaptureScreen(
+          mode: CaptureMode.single,
+          connectionController: connectionController,
+        ),
       ),
     );
   }
 
   void _openBulkEntry(BuildContext context) {
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const QueueSizeScreen()));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            QueueSizeScreen(connectionController: connectionController),
+      ),
+    );
   }
 
   @override
@@ -161,7 +204,7 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
             ),
-            const ConnectionStatus(),
+            ConnectionStatus(controller: connectionController),
           ],
         ),
       ),
@@ -235,6 +278,7 @@ class CaptureScreen extends StatefulWidget {
     this.queueTarget,
     this.bulkQueue,
     this.workflow,
+    this.connectionController,
     super.key,
   });
 
@@ -242,6 +286,7 @@ class CaptureScreen extends StatefulWidget {
   final int? queueTarget;
   final BulkCaptureQueue? bulkQueue;
   final SingleEntryWorkflow? workflow;
+  final MobileConnectionController? connectionController;
 
   @override
   State<CaptureScreen> createState() => _CaptureScreenState();
@@ -741,7 +786,7 @@ class _CaptureScreenState extends State<CaptureScreen>
                 ),
               ),
             const SizedBox(height: 12),
-            const ConnectionStatus(),
+            ConnectionStatus(controller: widget.connectionController),
           ],
         ),
       ),
@@ -750,7 +795,9 @@ class _CaptureScreenState extends State<CaptureScreen>
 }
 
 class QueueSizeScreen extends StatefulWidget {
-  const QueueSizeScreen({super.key});
+  const QueueSizeScreen({this.connectionController, super.key});
+
+  final MobileConnectionController? connectionController;
 
   @override
   State<QueueSizeScreen> createState() => _QueueSizeScreenState();
@@ -764,8 +811,11 @@ class _QueueSizeScreenState extends State<QueueSizeScreen> {
   void _continue() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            CaptureScreen(mode: CaptureMode.bulk, queueTarget: _queueSize),
+        builder: (_) => CaptureScreen(
+          mode: CaptureMode.bulk,
+          queueTarget: _queueSize,
+          connectionController: widget.connectionController,
+        ),
       ),
     );
   }
@@ -826,10 +876,63 @@ class _QueueSizeScreenState extends State<QueueSizeScreen> {
 }
 
 class ConnectionStatus extends StatelessWidget {
-  const ConnectionStatus({super.key});
+  const ConnectionStatus({this.controller, super.key});
+
+  final MobileConnectionController? controller;
+
+  String _label(MobileConnectionStatus status) => switch (status) {
+    MobileConnectionStatus.notPaired => 'Not paired',
+    MobileConnectionStatus.pairing => 'Pairing',
+    MobileConnectionStatus.connecting => 'Connecting',
+    MobileConnectionStatus.connected => 'Connected',
+    MobileConnectionStatus.disconnected => 'Disconnected',
+    MobileConnectionStatus.desktopUnavailable => 'Desktop unavailable',
+    MobileConnectionStatus.pairingRejected => 'Pairing rejected',
+    MobileConnectionStatus.authenticationRejected => 'Pairing no longer valid',
+    MobileConnectionStatus.serviceError => 'Connection error',
+  };
+
+  Color _color(BuildContext context, MobileConnectionStatus status) =>
+      switch (status) {
+        MobileConnectionStatus.connected => Colors.green,
+        MobileConnectionStatus.pairing || MobileConnectionStatus.connecting =>
+          Theme.of(context).colorScheme.primary,
+        MobileConnectionStatus.disconnected ||
+        MobileConnectionStatus.desktopUnavailable => Colors.orange,
+        MobileConnectionStatus.pairingRejected ||
+        MobileConnectionStatus.authenticationRejected ||
+        MobileConnectionStatus.serviceError => Colors.red,
+        MobileConnectionStatus.notPaired => Theme.of(
+          context,
+        ).colorScheme.outline,
+      };
 
   @override
   Widget build(BuildContext context) {
+    final connectionController = controller;
+    if (connectionController == null) {
+      return _buildStatus(
+        context,
+        MobileConnectionStatus.notPaired,
+        'Not paired',
+      );
+    }
+    return AnimatedBuilder(
+      animation: connectionController,
+      builder: (context, _) => _buildStatus(
+        context,
+        connectionController.status,
+        connectionController.message,
+      ),
+    );
+  }
+
+  Widget _buildStatus(
+    BuildContext context,
+    MobileConnectionStatus status,
+    String? message,
+  ) {
+    final label = _label(status);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
@@ -841,17 +944,17 @@ class ConnectionStatus extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.circle,
-            size: 10,
-            color: Theme.of(context).colorScheme.outline,
-          ),
+          Icon(Icons.circle, size: 10, color: _color(context, status)),
           const SizedBox(width: 10),
-          Text(
-            'Not connected',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
+          Expanded(
+            child: Text(
+              message == null || message.isEmpty ? label : '$label · $message',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],

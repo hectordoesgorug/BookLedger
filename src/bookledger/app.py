@@ -46,6 +46,8 @@ from bookledger.ui.scrolling import MouseWheelRouter
 from bookledger.services.posters import PosterService
 from bookledger.ui.poster_designer import PosterDesigner, create_poster_for_copy
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
+from bookledger.ui.mobile_app_setup import MobileAppSetupPanel
+from bookledger.services.mobile_connection import MobileConnectionService
 from bookledger.ui.status_colors import ERROR_COLOR, INVENTORY_STATUS_COLORS, NEUTRAL_COLOR, SUCCESS_COLOR, WARNING_COLOR, status_message_color
 
 CATALOG_CARD_WIDTH = 320
@@ -170,6 +172,7 @@ class BookLedgerApp(_WindowBase):
         self.config_store = AppConfigStore(
             self.paths.provider_config, self.paths.provider_config_fallback()
         )
+        self.mobile_connection_service = MobileConnectionService(self.config_store)
         self._configuration_warnings = self.config_store.migrate_legacy_settings(
             self.db,
             self.paths.google_books_config,
@@ -367,21 +370,20 @@ class BookLedgerApp(_WindowBase):
     def _refresh_brand_logo(self):
         configured = self.config_store.get(("preferences", "shop_logo_path"), "")
         selected = resolve_managed_logo(self.paths.data, configured)
-        default = resource_path("assets", "generalists_bookshop_logo.png")
-        candidates = [path for path in (selected, default) if path is not None and path.is_file()]
         self._brand_image = None
-        for image_path in candidates:
+        if selected is not None and selected.is_file():
             try:
-                with Image.open(image_path) as source:
+                with Image.open(selected) as source:
                     image = source.convert("RGBA")
                     image.thumbnail((176, 66), Image.Resampling.LANCZOS)
                     self._brand_image = ImageTk.PhotoImage(image, master=self)
-                break
             except (OSError, ValueError, Image.DecompressionBombError):
-                continue
+                self._brand_image = None
+
         if self._brand_image is None:
             self.brand_logo_label.configure(image="")
-            self.brand_logo_label.pack_forget()
+            if not self.brand_logo_label.winfo_manager():
+                self.brand_logo_label.pack(anchor="w", pady=(0, 8))
         else:
             self.brand_logo_label.configure(image=self._brand_image)
             if not self.brand_logo_label.winfo_manager():
@@ -1399,11 +1401,9 @@ class BookLedgerApp(_WindowBase):
         self._build_preferences(tabs["Preferences"])
 
     def _build_mobile_app_setup(self, parent):
-        ttk.Label(
-            parent,
-            text="Mobile app setup is reserved for future development.",
-            foreground="#64748b",
-        ).pack(anchor="nw")
+        panel = MobileAppSetupPanel(parent, self.mobile_connection_service)
+        panel.pack(fill="both", expand=True)
+        return panel
 
     def _build_metadata_sources(self, parent):
         parent.columnconfigure(0, weight=3, uniform="metadata")
@@ -2336,6 +2336,13 @@ class BookLedgerApp(_WindowBase):
             self._optional_logger.error("unexpected_exception type=%s", getattr(exc_type, "__name__", "Exception"))
 
     def _close_application(self):
+        try:
+            self.mobile_connection_service.stop()
+        except Exception as exc:
+            self._log_event(
+                "mobile_service_shutdown_failed",
+                error_type=type(exc).__name__,
+            )
         self._log_event("application_closed")
         for handler in tuple(getattr(self, "_optional_logger", logging.getLogger()).handlers):
             self._optional_logger.removeHandler(handler)

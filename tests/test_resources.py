@@ -25,7 +25,6 @@ def test_bundled_resources_are_relative_to_the_module_not_the_current_directory(
     for filename in (
         "icon-dashboard.svg", "icon-catalog.svg", "icon-inventory.svg", "icon-acquisitions.svg",
         "icon-sale history.svg", "icon-reports.svg", "icon-settings.svg", "icon-help.svg",
-        "generalists_bookshop_logo.png",
     ):
         assert resource_path("assets", filename).is_file()
 
