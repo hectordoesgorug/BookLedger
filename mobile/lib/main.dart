@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'capture/camera_permission.dart';
+import 'capture/captured_photo_preview.dart';
 import 'capture/isbn_scanner_screen.dart';
 import 'capture/photo_camera_view.dart';
+import 'capture/share_photo_button.dart';
 import 'capture/single_entry_workflow.dart';
 
 void main() {
@@ -441,17 +443,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
 
     final photoPath = _isBulk ? null : _workflow.photoPath;
     if (photoPath != null) {
-      return Image.file(
-        File(photoPath),
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => const Center(
-          child: Icon(
-            Icons.broken_image_outlined,
-            color: Colors.white,
-            size: 42,
-          ),
-        ),
-      );
+      return CapturedPhotoPreview(file: File(photoPath));
     }
 
     return Semantics(label: 'Camera preview area', child: SizedBox.expand());
@@ -509,7 +501,16 @@ class _CaptureScreenState extends State<CaptureScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_isBulk ? 'Bulk Entry' : 'Single Entry')),
+      appBar: AppBar(
+        title: Text(_isBulk ? 'Bulk Entry' : 'Single Entry'),
+        actions: [
+          SharePhotoButton(
+            file: !_isBulk && _workflow.photoPath != null
+                ? File(_workflow.photoPath!)
+                : null,
+          ),
+        ],
+      ),
       body: SafeArea(
         top: false,
         child: Column(

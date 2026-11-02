@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'camera_photo_storage.dart';
+import 'photo_camera_configuration.dart';
 
 class PhotoCameraView extends StatefulWidget {
   const PhotoCameraView({
@@ -29,6 +31,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
   bool _loading = true;
   bool _takingPhoto = false;
   bool _captureRequestedWhileLoading = false;
+  bool _cameraInitializationInFlight = false;
   bool _appResumed = true;
   String? _errorMessage;
   int _cameraGeneration = 0;
@@ -64,7 +67,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         });
       }
       if (controller != null) {
-        unawaited(controller.dispose());
+        unawaited(_disposeCameraController(controller));
       }
     } else if (state == AppLifecycleState.resumed) {
       _appResumed = true;
@@ -73,9 +76,14 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
   }
 
   Future<void> _initializeCamera() async {
-    if (!mounted || !_appResumed || _loading && _controller != null) {
+    if (!mounted ||
+        !_appResumed ||
+        _cameraInitializationInFlight ||
+        _takingPhoto ||
+        _controller?.value.isInitialized == true) {
       return;
     }
+    _cameraInitializationInFlight = true;
     final generation = ++_cameraGeneration;
     setState(() {
       _loading = true;
@@ -98,12 +106,30 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         );
       }
 
+      final selectedCamera = backCameras.first;
       candidate = CameraController(
-        backCameras.first,
-        ResolutionPreset.high,
+        selectedCamera,
+        photoCameraResolutionPreset,
         enableAudio: false,
       );
       await candidate.initialize();
+
+      // Use the widest zoom level this camera exposes. Clamp to 1x because
+      // CameraController's cross-platform contract defines zoom from 1x up.
+      final minZoom = await candidate.getMinZoomLevel();
+      final maxZoom = await candidate.getMaxZoomLevel();
+      final widestSupportedZoom = widestSupportedZoomLevel(
+        minimum: minZoom,
+        maximum: maxZoom,
+      );
+      await candidate.setZoomLevel(widestSupportedZoom);
+      developer.log(
+        'Photo camera ${selectedCamera.name} (${selectedCamera.lensType}), '
+        'preview ${candidate.value.previewSize}, '
+        'zoom range $minZoom–$maxZoom; selected $widestSupportedZoom.',
+        name: 'BookLedger.camera',
+      );
+
       if (!mounted || generation != _cameraGeneration || !_appResumed) {
         await candidate.dispose();
         return;
@@ -111,21 +137,38 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
 
       _controller = candidate;
       candidate = null;
-    } on CameraException catch (error) {
+    } on CameraException catch (error, stackTrace) {
+      developer.log(
+        'Photo camera initialization failed (${error.code}).',
+        name: 'BookLedger.camera',
+        error: error,
+        stackTrace: stackTrace,
+      );
       _errorMessage = _cameraErrorText(error);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      developer.log(
+        'Photo camera initialization failed.',
+        name: 'BookLedger.camera',
+        error: error,
+        stackTrace: stackTrace,
+      );
       _errorMessage = 'The camera could not be initialized.';
     } finally {
       if (candidate != null) {
-        await candidate.dispose();
+        await _disposeCameraController(candidate);
       }
-      if (mounted && generation == _cameraGeneration) {
-        setState(() => _loading = false);
-        if (_errorMessage != null) {
-          _captureRequestedWhileLoading = false;
-        } else if (_captureRequestedWhileLoading) {
-          _captureRequestedWhileLoading = false;
-          unawaited(_takePhoto());
+      _cameraInitializationInFlight = false;
+      if (mounted) {
+        if (generation == _cameraGeneration) {
+          setState(() => _loading = false);
+          if (_errorMessage != null) {
+            _captureRequestedWhileLoading = false;
+          } else if (_captureRequestedWhileLoading) {
+            _captureRequestedWhileLoading = false;
+            unawaited(_takePhoto());
+          }
+        } else if (_appResumed && _controller == null) {
+          unawaited(_initializeCamera());
         }
       }
     }
@@ -143,11 +186,16 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     }
   }
 
-  Future<void> _releaseCamera() async {
-    final controller = _controller;
-    _controller = null;
-    if (controller != null) {
+  Future<void> _disposeCameraController(CameraController controller) async {
+    try {
       await controller.dispose();
+    } catch (error, stackTrace) {
+      developer.log(
+        'Photo camera disposal failed.',
+        name: 'BookLedger.camera',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -166,6 +214,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       _errorMessage = null;
     });
     String? storedPath;
+    var photoHandedToWorkflow = false;
     try {
       final captured = await controller.takePicture();
       final temporaryDirectory = await getTemporaryDirectory();
@@ -182,14 +231,26 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         // The camera plugin's temporary file may already have been removed.
       }
 
-      await _releaseCamera();
       if (!mounted) {
         await _deleteFile(storedPath);
         return;
       }
+      // The parent replaces this camera widget with the captured image. Let the
+      // widget dispose the controller after it leaves the tree, avoiding a
+      // frame that still renders a disposed CameraPreview.
+      photoHandedToWorkflow = true;
       await widget.onCaptured(storedPath);
-    } catch (_) {
-      if (storedPath != null) {
+      if (mounted) {
+        setState(() => _takingPhoto = false);
+      }
+    } catch (error, stackTrace) {
+      developer.log(
+        'Photo capture or handoff failed.',
+        name: 'BookLedger.camera',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (storedPath != null && !photoHandedToWorkflow) {
         await _deleteFile(storedPath);
       }
       if (mounted) {
@@ -222,7 +283,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     final controller = _controller;
     _controller = null;
     if (controller != null) {
-      unawaited(controller.dispose());
+      unawaited(_disposeCameraController(controller));
     }
     super.dispose();
   }
@@ -235,7 +296,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       children: [
         if (controller != null && controller.value.isInitialized)
           ColoredBox(
-            color: Colors.black,
+            color: Theme.of(context).colorScheme.surface,
             child: ClipRect(child: Center(child: CameraPreview(controller))),
           )
         else

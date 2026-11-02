@@ -1,9 +1,28 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:mobile/capture/captured_photo_preview.dart';
 import 'package:mobile/main.dart';
 
 void main() {
+  testWidgets('captured photo preview contains the full camera frame', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 400,
+          height: 300,
+          child: CapturedPhotoPreview(file: File('missing-camera-photo.jpg')),
+        ),
+      ),
+    );
+
+    expect(tester.widget<Image>(find.byType(Image)).fit, BoxFit.contain);
+  });
+
   testWidgets('home menu and single entry show the foundation UI', (
     WidgetTester tester,
   ) async {
@@ -39,6 +58,7 @@ void main() {
     expect(find.text('Send'), findsOneWidget);
     expect(find.text('Clear'), findsOneWidget);
     expect(find.text('Not connected'), findsOneWidget);
+    expect(find.text('Share Photo'), findsNothing);
 
     for (final label in [
       'Scan',
@@ -72,6 +92,7 @@ void main() {
     expect(find.text('0 / 5'), findsOneWidget);
     expect(find.text('Send'), findsNothing);
     expect(find.text('Not connected'), findsOneWidget);
+    expect(find.text('Share Photo'), findsNothing);
 
     for (final label in [
       'Scan',

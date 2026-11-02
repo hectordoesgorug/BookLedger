@@ -1,8 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import 'isbn_validator.dart';
+import 'isbn_scan_feedback.dart';
 
 class IsbnScannerPreview extends StatefulWidget {
   const IsbnScannerPreview({
@@ -41,7 +43,10 @@ class _IsbnScannerPreviewState extends State<IsbnScannerPreview> {
     }
 
     for (final barcode in capture.barcodes) {
-      final isbn = IsbnValidator.normalizeAndValidate(barcode.rawValue);
+      final isbn = normalizeIsbnAndPlaySuccessBeep(
+        barcode.rawValue,
+        playBeep: playIsbnSuccessBeep,
+      );
       if (isbn != null) {
         _handlingValidBarcode = true;
         try {
@@ -52,9 +57,8 @@ class _IsbnScannerPreviewState extends State<IsbnScannerPreview> {
         if (!mounted) {
           return;
         }
-        await SystemSound.play(SystemSoundType.alert);
-        await HapticFeedback.mediumImpact();
         if (mounted) {
+          unawaited(HapticFeedback.mediumImpact());
           widget.onIsbnCaptured(isbn);
         }
         return;
