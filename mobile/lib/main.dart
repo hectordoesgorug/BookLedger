@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'capture/bulk_capture_queue.dart';
 import 'capture/camera_permission.dart';
 import 'capture/captured_photo_preview.dart';
 import 'capture/isbn_scanner_screen.dart';
 import 'capture/photo_camera_view.dart';
+import 'capture/queue_action_button.dart';
 import 'capture/share_photo_button.dart';
 import 'capture/single_entry_workflow.dart';
 
@@ -228,25 +230,58 @@ class _EntryCard extends StatelessWidget {
 enum CaptureMode { single, bulk }
 
 class CaptureScreen extends StatefulWidget {
-  const CaptureScreen({required this.mode, this.queueTarget, super.key});
+  const CaptureScreen({
+    required this.mode,
+    this.queueTarget,
+    this.bulkQueue,
+    this.workflow,
+    super.key,
+  });
 
   final CaptureMode mode;
   final int? queueTarget;
+  final BulkCaptureQueue? bulkQueue;
+  final SingleEntryWorkflow? workflow;
 
   @override
   State<CaptureScreen> createState() => _CaptureScreenState();
 }
 
-class _CaptureScreenState extends State<CaptureScreen> {
+class _CaptureScreenState extends State<CaptureScreen>
+    with WidgetsBindingObserver {
   late final SingleEntryWorkflow _workflow;
+  late final bool _ownsWorkflow;
+  BulkCaptureQueue? _bulkQueue;
+  late final bool _ownsBulkQueue;
   int _photoCaptureRequestId = 0;
+  bool _queueing = false;
 
   bool get _isBulk => widget.mode == CaptureMode.bulk;
+  bool get _batchReady => _bulkQueue?.isBatchReady ?? false;
+  bool get _canFinishBatch =>
+      _isBulk &&
+      !_batchReady &&
+      !_queueing &&
+      _bulkQueue!.count > 0 &&
+      !_workflow.hasCaptureData &&
+      !_workflow.scannerActive &&
+      !_workflow.photoCameraActive;
 
   @override
   void initState() {
     super.initState();
-    _workflow = SingleEntryWorkflow()..addListener(_onWorkflowChanged);
+    WidgetsBinding.instance.addObserver(this);
+    _ownsWorkflow = widget.workflow == null;
+    _workflow = widget.workflow ?? SingleEntryWorkflow();
+    _workflow.addListener(_onWorkflowChanged);
+    _ownsBulkQueue = widget.bulkQueue == null;
+    if (_isBulk) {
+      _bulkQueue = widget.bulkQueue;
+      _bulkQueue ??= BulkCaptureQueue(
+        capacity: widget.queueTarget ?? BulkCaptureQueue.minimumCapacity,
+      );
+      _bulkQueue!.addListener(_onWorkflowChanged);
+    }
   }
 
   void _onWorkflowChanged() {
@@ -256,10 +291,24 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isBulk && state == AppLifecycleState.detached) {
+      unawaited(_bulkQueue?.clearSession() ?? Future<void>.value());
+      unawaited(_workflow.clear());
+    }
+  }
+
+  @override
   void dispose() {
-    _workflow
-      ..removeListener(_onWorkflowChanged)
-      ..dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _workflow.removeListener(_onWorkflowChanged);
+    if (_ownsWorkflow) {
+      _workflow.dispose();
+    }
+    _bulkQueue?.removeListener(_onWorkflowChanged);
+    if (_ownsBulkQueue) {
+      _bulkQueue?.dispose();
+    }
     super.dispose();
   }
 
@@ -345,9 +394,68 @@ class _CaptureScreenState extends State<CaptureScreen> {
       try {
         await File(path).delete();
       } on FileSystemException {
-        // The capture was no longer active; remove its temporary file if present.
+        // The capture was no longer active; remove its temporary file
+        // if present.
       }
     }
+  }
+
+  Future<void> _queueCurrentCapture() async {
+    final queue = _bulkQueue;
+    final isbn = _workflow.pairedIsbn;
+    final photoPath = _workflow.photoPath;
+    if (!_isBulk ||
+        queue == null ||
+        queue.isBatchReady ||
+        _queueing ||
+        isbn == null ||
+        photoPath == null ||
+        _workflow.stage != SingleCaptureStage.paired) {
+      return;
+    }
+
+    setState(() => _queueing = true);
+    try {
+      await queue.addCapture(isbn: isbn, photoPath: photoPath);
+      if (mounted) {
+        _workflow.resetAfterSuccessfulQueue();
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Could not add this capture. Its ISBN and photo are still '
+                'available.',
+              ),
+            ),
+          );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _queueing = false);
+      }
+    }
+  }
+
+  void _finishBatchEarly() {
+    if (_bulkQueue?.finishEarly() == true) {
+      _showQueueMessage('Batch ready. Transfer is not available yet.');
+    }
+  }
+
+  void _showSendUnavailable() {
+    _showQueueMessage(
+      'This batch is ready. Transfer will be available in a later version.',
+    );
+  }
+
+  void _showQueueMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   List<String> get _labels => <String>[
@@ -355,13 +463,39 @@ class _CaptureScreenState extends State<CaptureScreen> {
     'Take Photo',
     'Retake',
     'Save',
-    _isBulk ? 'Queue' : 'Send',
+    _batchReady ? 'Send' : (_isBulk ? 'Queue' : 'Send'),
     'Clear',
   ];
 
   bool _buttonEnabled(int index) {
     if (_isBulk) {
-      return index == 0;
+      if (_batchReady) {
+        return false;
+      }
+      if (_queueing) {
+        return false;
+      }
+      switch (index) {
+        case 0:
+          return !_workflow.photoCameraActive && !_workflow.scannerActive;
+        case 1:
+          return _workflow.photoCameraActive;
+        case 2:
+          return !_workflow.photoCameraActive &&
+              !_workflow.scannerActive &&
+              (_workflow.stage == SingleCaptureStage.photoCaptured ||
+                  _workflow.stage == SingleCaptureStage.paired);
+        case 3:
+          return !_workflow.scannerActive &&
+              (_workflow.stage == SingleCaptureStage.isbnScanned ||
+                  _workflow.stage == SingleCaptureStage.photoCaptured);
+        case 4:
+          return false;
+        case 5:
+          return _workflow.hasCaptureData;
+        default:
+          return false;
+      }
     }
 
     switch (index) {
@@ -388,10 +522,6 @@ class _CaptureScreenState extends State<CaptureScreen> {
   }
 
   void _onCaptureButtonPressed(int index) {
-    if (_isBulk) {
-      return;
-    }
-
     switch (index) {
       case 0:
         unawaited(_openScanner());
@@ -401,6 +531,12 @@ class _CaptureScreenState extends State<CaptureScreen> {
         unawaited(_openPhotoCamera());
       case 3:
         _saveCaptureStep();
+      case 4:
+        if (_batchReady) {
+          _showSendUnavailable();
+        } else if (_isBulk) {
+          unawaited(_queueCurrentCapture());
+        }
       case 5:
         unawaited(_clearCapture());
     }
@@ -422,18 +558,20 @@ class _CaptureScreenState extends State<CaptureScreen> {
       case SingleCaptureStage.photoCaptured:
         return 'Photo captured. Save to pair it with this ISBN.';
       case SingleCaptureStage.paired:
-        return 'Capture ready for transfer.';
+        return _isBulk
+            ? 'Capture ready to add to the queue.'
+            : 'Capture ready for transfer.';
     }
   }
 
   Widget _captureCanvas(BuildContext context) {
-    if (!_isBulk && _workflow.scannerActive) {
+    if (_workflow.scannerActive) {
       return IsbnScannerPreview(
         onIsbnCaptured: (isbn) => unawaited(_acceptScannedIsbn(isbn)),
         onCancel: _workflow.cancelIsbnScan,
       );
     }
-    if (!_isBulk && _workflow.photoCameraActive) {
+    if (_workflow.photoCameraActive) {
       return PhotoCameraView(
         captureRequestId: _photoCaptureRequestId,
         onCaptured: _handlePhotoCaptured,
@@ -441,7 +579,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
       );
     }
 
-    final photoPath = _isBulk ? null : _workflow.photoPath;
+    final photoPath = _workflow.photoPath;
     if (photoPath != null) {
       return CapturedPhotoPreview(file: File(photoPath));
     }
@@ -451,7 +589,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
 
   Widget _captureStatus(BuildContext context) {
     final isbn = _workflow.displayedIsbn;
-    if (_isBulk || isbn == null) {
+    if (isbn == null) {
       return const SizedBox.shrink();
     }
 
@@ -517,7 +655,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
           children: [
             if (_isBulk)
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                 child: Row(
                   children: [
                     Text(
@@ -526,16 +664,15 @@ class _CaptureScreenState extends State<CaptureScreen> {
                     ),
                     const Spacer(),
                     Text(
-                      '0 / ${widget.queueTarget ?? 5}',
+                      '${_bulkQueue!.count} / ${_bulkQueue!.capacity}',
                       key: const ValueKey('queue-counter'),
                       style: Theme.of(context).textTheme.titleMedium
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
-              )
-            else
-              _captureStatus(context),
+              ),
+            _captureStatus(context),
             Expanded(
               child: Container(
                 width: double.infinity,
@@ -561,6 +698,21 @@ class _CaptureScreenState extends State<CaptureScreen> {
                   crossAxisSpacing: 10,
                 ),
                 itemBuilder: (context, index) {
+                  if (_isBulk && index == 4) {
+                    return QueueActionButton(
+                      label: _batchReady ? 'Send' : 'Queue',
+                      canTap:
+                          _batchReady ||
+                          (_workflow.stage == SingleCaptureStage.paired &&
+                              !_queueing),
+                      canLongPress: _canFinishBatch,
+                      onTap: _batchReady
+                          ? _showSendUnavailable
+                          : () => unawaited(_queueCurrentCapture()),
+                      onLongPress: _finishBatchEarly,
+                    );
+                  }
+
                   final enabled = _buttonEnabled(index);
                   return ElevatedButton(
                     onPressed: enabled
@@ -580,6 +732,14 @@ class _CaptureScreenState extends State<CaptureScreen> {
                 },
               ),
             ),
+            if (_isBulk && _canFinishBatch)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text(
+                  'Hold Queue to finish batch early.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
             const SizedBox(height: 12),
             const ConnectionStatus(),
           ],

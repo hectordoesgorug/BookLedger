@@ -143,6 +143,22 @@ class SingleEntryWorkflow extends ChangeNotifier {
     return true;
   }
 
+  /// Resets the current capture after another owner accepted its photo path.
+  bool resetAfterSuccessfulQueue() {
+    if (stage != SingleCaptureStage.paired || _photoPath == null) {
+      return false;
+    }
+
+    _scannedIsbn = null;
+    _savedIsbn = null;
+    _photoPath = null;
+    _pairedIsbn = null;
+    _scannerActive = false;
+    _photoCameraActive = false;
+    _notifyListeners();
+    return true;
+  }
+
   Future<void> clear() async {
     final previousPhotoPath = _photoPath;
     _scannedIsbn = null;

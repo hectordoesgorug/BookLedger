@@ -223,6 +223,37 @@ void main() {
       expect(stored.parent.path, directory.path);
     });
 
+    test(
+      'queue handoff resets capture state without deleting its photo',
+      () async {
+        final directory = await _temporaryCaptureDirectory();
+        final photo = await _createPhoto(directory, 'queued');
+        final workflow = await _savedIsbnWorkflow();
+        addTearDown(() async {
+          workflow.dispose();
+          await directory.delete(recursive: true);
+        });
+
+        expect(await workflow.photoCaptured(photo.path), isTrue);
+        expect(workflow.savePhoto(), isTrue);
+        expect(workflow.resetAfterSuccessfulQueue(), isTrue);
+
+        expect(workflow.stage, SingleCaptureStage.empty);
+        expect(workflow.hasCaptureData, isFalse);
+        expect(workflow.displayedIsbn, isNull);
+        expect(workflow.photoPath, isNull);
+        expect(await photo.exists(), isTrue);
+      },
+    );
+
+    test('cannot hand off an unpaired or empty capture', () {
+      final workflow = SingleEntryWorkflow();
+      addTearDown(workflow.dispose);
+
+      expect(workflow.resetAfterSuccessfulQueue(), isFalse);
+      expect(workflow.stage, SingleCaptureStage.empty);
+    });
+
     test('does not pair a photo unless an ISBN was saved first', () async {
       final workflow = SingleEntryWorkflow();
       addTearDown(workflow.dispose);
