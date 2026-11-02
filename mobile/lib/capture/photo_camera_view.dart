@@ -234,22 +234,9 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       fit: StackFit.expand,
       children: [
         if (controller != null && controller.value.isInitialized)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final aspectRatio = controller.value.aspectRatio;
-              return ClipRect(
-                child: SizedBox.expand(
-                  child: FittedBox(
-                    fit: BoxFit.cover,
-                    child: SizedBox(
-                      width: constraints.maxHeight * aspectRatio,
-                      height: constraints.maxHeight,
-                      child: CameraPreview(controller),
-                    ),
-                  ),
-                ),
-              );
-            },
+          ColoredBox(
+            color: Colors.black,
+            child: ClipRect(child: Center(child: CameraPreview(controller))),
           )
         else
           ColoredBox(
