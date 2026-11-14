@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/capture/bulk_capture_queue.dart';
 import 'package:mobile/capture/captured_photo_preview.dart';
@@ -112,6 +113,102 @@ Future<void> _addTestEntries(BulkCaptureQueue queue, int count) async {
 }
 
 void main() {
+  testWidgets('Scan starts the scanner in both capture modes', (
+    WidgetTester tester,
+  ) async {
+    const permissionChannel = MethodChannel(
+      'flutter.baseflow.com/permissions/methods',
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(permissionChannel, (_) async => 1);
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissionChannel, null),
+    );
+
+    for (final mode in CaptureMode.values) {
+      final workflow = SingleEntryWorkflow();
+      final queue = mode == CaptureMode.bulk ? _testQueue(5) : null;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CaptureScreen(
+            mode: mode,
+            queueTarget: mode == CaptureMode.bulk ? 5 : null,
+            bulkQueue: queue,
+            workflow: workflow,
+          ),
+        ),
+      );
+
+      final scanButton = tester.widget<ElevatedButton>(
+        find.widgetWithText(ElevatedButton, 'Scan'),
+      );
+      expect(scanButton.onPressed, isNotNull);
+      expect(find.text('Scan Number'), findsNothing);
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Scan'));
+      await tester.pumpAndSettle();
+      expect(workflow.scannerActive, isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      queue?.dispose();
+      workflow.dispose();
+    }
+  });
+
+  testWidgets('No ISBN choice starts photo capture in both modes', (
+    WidgetTester tester,
+  ) async {
+    for (final mode in CaptureMode.values) {
+      final workflow = SingleEntryWorkflow();
+      final queue = mode == CaptureMode.bulk ? _testQueue(5) : null;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CaptureScreen(
+            mode: mode,
+            queueTarget: mode == CaptureMode.bulk ? 5 : null,
+            bulkQueue: queue,
+            workflow: workflow,
+          ),
+        ),
+      );
+
+      await tester.tap(find.widgetWithText(TextButton, 'No ISBN'));
+      await tester.pump();
+      expect(workflow.captureIsbn, isNull);
+      expect(workflow.isNoIsbn, isTrue);
+      expect(workflow.photoCameraActive, isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      queue?.dispose();
+      workflow.dispose();
+    }
+  });
+
+  testWidgets('manual ISBN keypad Done continues into capture state', (
+    WidgetTester tester,
+  ) async {
+    final workflow = SingleEntryWorkflow();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CaptureScreen(mode: CaptureMode.single, workflow: workflow),
+      ),
+    );
+
+    await tester.tap(find.text('Enter Manually'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '0-306-40615-2');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(workflow.captureIsbn, '0306406152');
+    expect(workflow.displayedIsbn, '0306406152');
+    expect(workflow.photoCameraActive, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    workflow.dispose();
+  });
+
   testWidgets('captured photo preview contains the full camera frame', (
     WidgetTester tester,
   ) async {
@@ -152,10 +249,14 @@ void main() {
     await tester.tap(find.text('Single Entry'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Scan Number'), findsOneWidget);
+    expect(find.text('Scan Number'), findsNothing);
     expect(find.text('Enter Manually'), findsOneWidget);
     expect(find.text('No ISBN'), findsOneWidget);
     expect(find.text('Scan'), findsOneWidget);
+    final scanButton = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Scan'),
+    );
+    expect(scanButton.onPressed, isNotNull);
     expect(find.text('Take Photo'), findsOneWidget);
     expect(find.text('Retake'), findsOneWidget);
     expect(find.text('Save'), findsOneWidget);
@@ -164,14 +265,7 @@ void main() {
     expect(find.text('Not paired'), findsOneWidget);
     expect(find.text('Share Photo'), findsNothing);
 
-    for (final label in [
-      'Scan',
-      'Take Photo',
-      'Retake',
-      'Save',
-      'Send',
-      'Clear',
-    ]) {
+    for (final label in ['Take Photo', 'Retake', 'Save', 'Send', 'Clear']) {
       final button = tester.widget<ElevatedButton>(
         find.widgetWithText(ElevatedButton, label),
       );
@@ -202,7 +296,11 @@ void main() {
     expect(find.text('Share Photo'), findsNothing);
     expect(find.text('Hold Queue to finish batch early.'), findsNothing);
 
-    for (final label in ['Scan', 'Take Photo', 'Retake', 'Save', 'Clear']) {
+    final scanButton = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Scan'),
+    );
+    expect(scanButton.onPressed, isNotNull);
+    for (final label in ['Take Photo', 'Retake', 'Save', 'Clear']) {
       final button = tester.widget<ElevatedButton>(
         find.widgetWithText(ElevatedButton, label),
       );

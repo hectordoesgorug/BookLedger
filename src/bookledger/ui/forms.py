@@ -525,12 +525,24 @@ class BookForm(tk.Toplevel):
             )
 
     def _close(self):
-        if (
-            self.incoming_capture_id
-            and not self._incoming_sequence_finished
-            and self.on_cancel
-        ):
-            self.on_cancel()
+        if self.incoming_capture_id and not self._incoming_sequence_finished:
+            if not messagebox.askyesno(
+                "Cancel Incoming Capture",
+                "Discard this incoming capture and its staged photo? Other captures will be kept.",
+                parent=self,
+            ):
+                return
+            try:
+                if self.on_cancel and self.on_cancel(self.incoming_capture_id) is False:
+                    raise RuntimeError("The incoming capture could not be discarded.")
+                self._incoming_sequence_finished = True
+            except Exception as exc:
+                messagebox.showerror(
+                    "Could Not Cancel Capture",
+                    f"The incoming capture was retained. ({type(exc).__name__})",
+                    parent=self,
+                )
+                return
         self.photo_service.discard_staged(self.photo_path.get())
         self._closing = True
         if self._ui_poll_id:
@@ -895,6 +907,9 @@ class BookForm(tk.Toplevel):
         return any(self._get(key) != defaults.get(key, "") for key in self._widgets) or bool(self.photo_path.get())
 
     def _clear(self):
+        if self.incoming_capture_id:
+            self._discard_incoming()
+            return
         if self._has_input() and not messagebox.askyesno(
             "Clear Book Form?", "Discard the current unsaved entries and reset the form?", parent=self
         ):

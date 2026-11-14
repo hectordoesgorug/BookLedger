@@ -291,6 +291,58 @@ class _EntryCard extends StatelessWidget {
   }
 }
 
+class _ManualIsbnDialog extends StatefulWidget {
+  const _ManualIsbnDialog({required this.initialValue});
+
+  final String initialValue;
+
+  @override
+  State<_ManualIsbnDialog> createState() => _ManualIsbnDialogState();
+}
+
+class _ManualIsbnDialogState extends State<_ManualIsbnDialog> {
+  late final TextEditingController _input;
+
+  @override
+  void initState() {
+    super.initState();
+    _input = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Enter ISBN manually'),
+    content: TextField(
+      controller: _input,
+      autofocus: true,
+      keyboardType: TextInputType.number,
+      textInputAction: TextInputAction.done,
+      onSubmitted: (value) => Navigator.pop(context, value),
+      decoration: const InputDecoration(labelText: 'ISBN-10 or ISBN-13'),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => _input.text = '${_input.text}X',
+        child: const Text('Add X'),
+      ),
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, _input.text),
+        child: const Text('Continue'),
+      ),
+    ],
+  );
+}
+
 enum CaptureMode { single, bulk }
 
 class CaptureScreen extends StatefulWidget {
@@ -395,35 +447,11 @@ class _CaptureScreenState extends State<CaptureScreen>
   }
 
   Future<void> _openManualIsbn() async {
-    final input = TextEditingController(text: _workflow.displayedIsbn ?? '');
     final value = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Enter ISBN manually'),
-        content: TextField(
-          controller: input,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          textInputAction: TextInputAction.done,
-          decoration: const InputDecoration(labelText: 'ISBN-10 or ISBN-13'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => input.text = '${input.text}X',
-            child: const Text('Add X'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, input.text),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
+      builder: (_) =>
+          _ManualIsbnDialog(initialValue: _workflow.displayedIsbn ?? ''),
     );
-    input.dispose();
     if (value == null || !mounted) {
       return;
     }
@@ -656,9 +684,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       }
       switch (index) {
         case 0:
-          return _workflow.isbnChosen &&
-              !_workflow.photoCameraActive &&
-              !_workflow.scannerActive;
+          return !_workflow.photoCameraActive && !_workflow.scannerActive;
         case 1:
           return _workflow.photoCameraActive;
         case 2:
@@ -681,9 +707,7 @@ class _CaptureScreenState extends State<CaptureScreen>
 
     switch (index) {
       case 0:
-        return _workflow.isbnChosen &&
-            !_workflow.photoCameraActive &&
-            !_workflow.scannerActive;
+        return !_workflow.photoCameraActive && !_workflow.scannerActive;
       case 1:
         return _workflow.photoCameraActive;
       case 2:
@@ -766,12 +790,6 @@ class _CaptureScreenState extends State<CaptureScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            FilledButton.icon(
-              onPressed: () => unawaited(_openScanner()),
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('Scan Number'),
-            ),
-            const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () => unawaited(_openManualIsbn()),
               icon: const Icon(Icons.dialpad),

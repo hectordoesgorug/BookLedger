@@ -81,6 +81,77 @@ def test_receive_order_duplicate_isbns_and_isbn_less_capture_are_durable(incomin
     assert store.ready_batches() == [batch_id]
 
 
+def test_manual_isbn10_survives_transfer_metadata_staging(incoming):
+    _db, _data_dir, store = incoming
+    batch_id, capture_id = str(uuid.uuid4()), str(uuid.uuid4())
+    store.begin_batch(batch_id, 1)
+    content_type, body = _multipart(_metadata(1, "0306406152"), _jpeg())
+
+    store.receive_capture(batch_id, capture_id, content_type, body)
+    capture = store.pending_captures(batch_id)[0]
+
+    assert capture["isbn"] == "0306406152"
+    assert capture["photo_path"].name == f"{capture_id}.jpg"
+    assert capture["photo_path"].is_file()
+
+
+def test_discard_last_capture_removes_metadata_and_empty_directories(incoming):
+    db, data_dir, store = incoming
+    batch_id, capture_id = str(uuid.uuid4()), str(uuid.uuid4())
+    store.begin_batch(batch_id, 1)
+    content_type, body = _multipart(_metadata(1, "9780306406157"), _jpeg())
+    store.receive_capture(batch_id, capture_id, content_type, body)
+    staged_photo = data_dir / "incoming" / f"batch-{batch_id}" / f"{capture_id}.jpg"
+
+    assert store.discard_capture(capture_id) is True
+
+    with db.connect() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM mobile_incoming_captures WHERE capture_uuid=?", (capture_id,)
+        ).fetchone() is None
+    assert not staged_photo.exists()
+    assert not staged_photo.parent.exists()
+    assert not (data_dir / "incoming").exists()
+
+
+def test_discard_preserves_other_captures_in_the_same_batch(incoming):
+    _db, data_dir, store = incoming
+    batch_id = str(uuid.uuid4())
+    first_id, second_id = str(uuid.uuid4()), str(uuid.uuid4())
+    store.begin_batch(batch_id, 2)
+    for sequence, capture_id in enumerate((first_id, second_id), start=1):
+        content_type, body = _multipart(_metadata(sequence, None), _jpeg())
+        store.receive_capture(batch_id, capture_id, content_type, body)
+
+    assert store.discard_capture(first_id) is True
+
+    batch_dir = data_dir / "incoming" / f"batch-{batch_id}"
+    assert not (batch_dir / f"{first_id}.jpg").exists()
+    assert (batch_dir / f"{second_id}.jpg").is_file()
+    assert [item["capture_uuid"] for item in store.pending_captures(batch_id)] == [second_id]
+
+    assert store.discard_capture(second_id) is True
+    assert not batch_dir.exists()
+    assert not (data_dir / "incoming").exists()
+
+
+def test_discard_one_batch_preserves_another_batch(incoming):
+    _db, data_dir, store = incoming
+    first_batch, first_capture = str(uuid.uuid4()), str(uuid.uuid4())
+    second_batch, second_capture = str(uuid.uuid4()), str(uuid.uuid4())
+    for batch_id, capture_id in ((first_batch, first_capture), (second_batch, second_capture)):
+        store.begin_batch(batch_id, 1)
+        content_type, body = _multipart(_metadata(1, None), _jpeg())
+        store.receive_capture(batch_id, capture_id, content_type, body)
+
+    assert store.discard_capture(first_capture) is True
+
+    incoming_dir = data_dir / "incoming"
+    assert not (incoming_dir / f"batch-{first_batch}").exists()
+    assert (incoming_dir / f"batch-{second_batch}" / f"{second_capture}.jpg").is_file()
+    assert store.pending_captures(second_batch)[0]["capture_uuid"] == second_capture
+
+
 def test_repeated_capture_request_is_idempotently_acknowledged(incoming):
     _db, _data_dir, store = incoming
     batch_id, capture_id = str(uuid.uuid4()), str(uuid.uuid4())
@@ -169,6 +240,37 @@ def test_catalog_save_is_recognized_after_restart_without_duplicate_copy(incomin
     assert duplicate["duplicate"] is True
     assert duplicate["ready"] is False
     assert not capture["photo_path"].exists()
+
+
+def test_successful_catalog_save_prunes_empty_incoming_directories(incoming):
+    db, data_dir, store = incoming
+    batch_id, capture_id = str(uuid.uuid4()), str(uuid.uuid4())
+    store.begin_batch(batch_id, 1)
+    content_type, body = _multipart(_metadata(1, "0306406152"), _jpeg())
+    store.receive_capture(batch_id, capture_id, content_type, body)
+    capture = store.pending_captures(batch_id)[0]
+    catalog = CatalogService(db, data_dir)
+
+    catalog.create_copy(
+        {
+            "title": "Manual ISBN Book",
+            "author": "Test Author",
+            "isbn": capture["isbn"],
+            "genre": "Science",
+            "format": "Paperback",
+            "condition": "Good",
+            "location": "",
+            "price": "5.00",
+            "photo_path": str(capture["photo_path"]),
+        },
+        copy_uuid=capture_id,
+    )
+
+    assert store.finish_cataloged_capture(capture_id) is True
+    assert not capture["photo_path"].exists()
+    assert not capture["photo_path"].parent.exists()
+    assert not (data_dir / "incoming").exists()
+    assert store.pending_captures(batch_id) == []
 
 
 def test_authenticated_http_transfer_stages_and_completes_batch(incoming):

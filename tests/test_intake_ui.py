@@ -613,6 +613,79 @@ def test_clear_confirms_discard_and_cancel_closes_without_saving(form, monkeypat
     assert not widget.winfo_exists()
 
 
+def test_incoming_form_cancel_discards_its_capture_without_touching_other_data(
+    form, monkeypatch, tmp_path
+):
+    widget, root, photo = form
+    capture_id = "10000000-0000-4000-8000-000000000001"
+    incoming_photo = tmp_path / "data" / "incoming" / "batch-test" / f"{capture_id}.jpg"
+    incoming_photo.parent.mkdir(parents=True)
+    incoming_photo.write_bytes(photo.read_bytes())
+    cancelled = []
+
+    def cancel(identifier):
+        cancelled.append(identifier)
+        incoming_photo.unlink()
+        return True
+
+    incoming = BookForm(
+        root,
+        service=widget.service,
+        photo_service=widget.photo_service,
+        on_saved=lambda: None,
+        initial_isbn="0306406152",
+        initial_photo=incoming_photo,
+        incoming_capture_id=capture_id,
+        on_cancel=cancel,
+    )
+    monkeypatch.setattr(
+        "bookledger.ui.forms.messagebox.askyesno", lambda *_args, **_kwargs: True
+    )
+
+    assert incoming._get("isbn") == "0306406152"
+    incoming._close()
+
+    assert cancelled == [capture_id]
+    assert not incoming_photo.exists()
+    assert photo.is_file()
+
+
+def test_clear_incoming_form_discards_capture_instead_of_detaching_its_metadata(
+    form, monkeypatch, tmp_path
+):
+    widget, root, photo = form
+    capture_id = "10000000-0000-4000-8000-000000000002"
+    incoming_photo = tmp_path / "data" / "incoming" / "batch-test" / f"{capture_id}.jpg"
+    incoming_photo.parent.mkdir(parents=True)
+    incoming_photo.write_bytes(photo.read_bytes())
+    discarded = []
+
+    def discard(identifier):
+        discarded.append(identifier)
+        incoming_photo.unlink()
+        return True
+
+    incoming = BookForm(
+        root,
+        service=widget.service,
+        photo_service=widget.photo_service,
+        on_saved=lambda: None,
+        initial_isbn="0306406152",
+        initial_photo=incoming_photo,
+        incoming_capture_id=capture_id,
+        on_discard_incoming=discard,
+    )
+    monkeypatch.setattr(
+        "bookledger.ui.forms.messagebox.askyesno", lambda *_args, **_kwargs: True
+    )
+
+    incoming._clear()
+
+    assert discarded == [capture_id]
+    assert not incoming_photo.exists()
+    assert not incoming.winfo_exists()
+
+
 def test_lookup_does_not_apply_stale_results_or_overlap_requests(form, monkeypatch):
     widget, root, _photo = form
 

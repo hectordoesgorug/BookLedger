@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/capture/bulk_capture_queue.dart';
+import 'package:mobile/capture/single_entry_workflow.dart';
 import 'package:mobile/connection/desktop_discovery.dart';
 import 'package:mobile/connection/mobile_connection_controller.dart';
 
@@ -50,6 +51,7 @@ class _FakeConnectionTransport implements ConnectionTransport {
   bool captureResult = true;
   bool completeResult = true;
   final sentCaptureIds = <String>[];
+  final sentCaptureIsbns = <String?>[];
   final validationRequests = <List<DesktopEndpoint>>[];
   final validationResults = <DesktopEndpoint?>[];
 
@@ -112,6 +114,7 @@ class _FakeConnectionTransport implements ConnectionTransport {
     CaptureEntry entry,
   ) async {
     sentCaptureIds.add(entry.captureId);
+    sentCaptureIsbns.add(entry.isbn);
     return captureResult;
   }
 
@@ -290,6 +293,87 @@ void main() {
       ]);
     },
   );
+
+  test('scanned and ISBN-less captures transfer after photo capture', () async {
+    final store = _MemoryPairingStore();
+    final transport = _FakeConnectionTransport()..validateResult = _endpoint;
+    final controller = MobileConnectionController(
+      store: store,
+      transport: transport,
+      deviceName: 'Poco X6',
+    );
+    addTearDown(controller.dispose);
+    expect(await controller.pairFromQr(_qrPayload()), isTrue);
+
+    for (final (index, isbn) in [(1, '9780306406157'), (2, null)]) {
+      final workflow = SingleEntryWorkflow();
+      if (isbn == null) {
+        expect(workflow.chooseNoIsbn(), isTrue);
+      } else {
+        expect(workflow.beginIsbnScan(), isTrue);
+        expect(await workflow.scanIsbn(isbn), isTrue);
+        expect(workflow.saveIsbn(), isTrue);
+      }
+      expect(workflow.photoCameraActive, isTrue);
+      expect(await workflow.photoCaptured('capture-$index.jpg'), isTrue);
+      expect(workflow.savePhoto(), isTrue);
+
+      final entry = CaptureEntry(
+        captureId: workflow.captureId,
+        isbn: workflow.captureIsbn,
+        photoPath: 'capture-$index.jpg',
+        sequence: index,
+        capturedAt: DateTime.utc(2026, 11, 15),
+      );
+      expect(
+        await controller.transferCaptures(
+          batchId: '10000000-0000-4000-8000-00000000000$index',
+          entries: [entry],
+          onAcknowledged: (_) {},
+        ),
+        isTrue,
+      );
+      workflow.dispose();
+    }
+
+    expect(transport.sentCaptureIsbns, ['9780306406157', null]);
+  });
+
+  test('manual ISBN-10 is preserved through transfer acknowledgment', () async {
+    final store = _MemoryPairingStore();
+    final transport = _FakeConnectionTransport()..validateResult = _endpoint;
+    final controller = MobileConnectionController(
+      store: store,
+      transport: transport,
+      deviceName: 'Poco X6',
+    );
+    final workflow = SingleEntryWorkflow();
+    addTearDown(controller.dispose);
+    addTearDown(workflow.dispose);
+    expect(await controller.pairFromQr(_qrPayload()), isTrue);
+
+    expect(workflow.chooseManualIsbn('0-306-40615-2'), isTrue);
+    expect(workflow.captureIsbn, '0306406152');
+    expect(await workflow.photoCaptured('manual.jpg'), isTrue);
+    expect(workflow.savePhoto(), isTrue);
+    final entry = CaptureEntry(
+      captureId: workflow.captureId,
+      isbn: workflow.captureIsbn,
+      photoPath: 'manual.jpg',
+      sequence: 1,
+      capturedAt: DateTime.utc(2026, 11, 15),
+    );
+
+    expect(
+      await controller.transferCaptures(
+        batchId: '10000000-0000-4000-8000-000000000002',
+        entries: [entry],
+        onAcknowledged: (_) {},
+      ),
+      isTrue,
+    );
+    expect(transport.sentCaptureIsbns, ['0306406152']);
+  });
 
   test('saved endpoints compare by address and port and deduplicate', () {
     final endpoint = DesktopEndpoint(address: '192.168.1.20', port: 43821);

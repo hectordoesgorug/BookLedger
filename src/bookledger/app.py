@@ -2248,7 +2248,7 @@ class BookLedgerApp(_WindowBase):
             initial_photo=capture["photo_path"],
             incoming_capture_id=capture["capture_uuid"],
             on_discard_incoming=lambda capture_id: self._discard_incoming_capture(batch_id, capture_id),
-            on_cancel=lambda: self._cancel_incoming_sequence(batch_id),
+            on_cancel=lambda capture_id: self._cancel_incoming_sequence(batch_id, capture_id),
         )
 
     def _incoming_capture_saved(self, batch_id, capture_id):
@@ -2268,9 +2268,12 @@ class BookLedgerApp(_WindowBase):
         self.after(50, lambda: self._open_next_incoming_capture(batch_id))
         return True
 
-    def _cancel_incoming_sequence(self, batch_id):
+    def _cancel_incoming_sequence(self, batch_id, capture_id):
+        if not self.mobile_incoming_store.discard_capture(capture_id):
+            return False
         if self._incoming_catalog_batch == batch_id:
             self._incoming_catalog_batch = None
+        return True
 
     def open_add_form(self):
         if self._incoming_reception_active:

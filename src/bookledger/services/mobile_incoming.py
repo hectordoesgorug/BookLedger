@@ -251,6 +251,13 @@ class MobileIncomingStore:
         path.resolve().relative_to(self.root.resolve())
         return path
 
+    def _prune_empty_directories(self, batch_id: str) -> None:
+        batch_dir = self.root / f"batch-{batch_id}"
+        if batch_dir.is_dir() and not any(batch_dir.iterdir()):
+            batch_dir.rmdir()
+        if self.root.is_dir() and not any(self.root.iterdir()):
+            self.root.rmdir()
+
     def complete_batch(self, batch_id: Any) -> dict:
         batch_id = self._uuid(batch_id, "batch_id")
         with self.db.connect() as conn:
@@ -334,6 +341,7 @@ class MobileIncomingStore:
         if not canonical.is_file():
             return False
         self._photo_path(row["batch_uuid"], capture_id).unlink(missing_ok=True)
+        self._prune_empty_directories(row["batch_uuid"])
         return True
 
     def has_unresolved_catalog_save(self, batch_id: str) -> bool:
@@ -391,6 +399,7 @@ class MobileIncomingStore:
                     (batch_id,),
                 )
         self._photo_path(batch_id, capture_id).unlink(missing_ok=True)
+        self._prune_empty_directories(batch_id)
         return True
 
     def recover(self) -> None:
@@ -413,4 +422,10 @@ class MobileIncomingStore:
                 path.unlink(missing_ok=True)
         for capture_id in completed:
             self.finish_cataloged_capture(capture_id)
+        if self.root.is_dir():
+            for batch_dir in self.root.glob("batch-*"):
+                if batch_dir.is_dir() and not any(batch_dir.iterdir()):
+                    batch_dir.rmdir()
+            if not any(self.root.iterdir()):
+                self.root.rmdir()
 
