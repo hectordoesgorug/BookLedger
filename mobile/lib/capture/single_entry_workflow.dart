@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -18,42 +19,57 @@ class SingleEntryWorkflow extends ChangeNotifier {
   String? _scannedIsbn;
   String? _savedIsbn;
   String? _photoPath;
-  String? _pairedIsbn;
+  String _captureId = _newUuid();
+  bool _isbnChosen = false;
+  bool _captureConfirmed = false;
   bool _scannerActive = false;
   bool _photoCameraActive = false;
   bool _disposed = false;
+
+  static String _newUuid() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
 
   SingleCaptureStage get stage {
     if (_photoCameraActive) {
       return SingleCaptureStage.photoCamera;
     }
-    if (_pairedIsbn != null && _pairedIsbn == _savedIsbn) {
-      return SingleCaptureStage.paired;
-    }
     if (_photoPath != null) {
-      return SingleCaptureStage.photoCaptured;
-    }
-    if (_savedIsbn != null) {
-      return SingleCaptureStage.isbnSaved;
+      return _captureConfirmed
+          ? SingleCaptureStage.paired
+          : SingleCaptureStage.photoCaptured;
     }
     if (_scannedIsbn != null) {
       return SingleCaptureStage.isbnScanned;
     }
-    return SingleCaptureStage.empty;
+    return _isbnChosen
+        ? SingleCaptureStage.isbnSaved
+        : SingleCaptureStage.empty;
   }
 
-  String? get displayedIsbn => _savedIsbn ?? _scannedIsbn;
+  String? get displayedIsbn => _scannedIsbn ?? _savedIsbn;
   String? get photoPath => _photoPath;
-  String? get pairedIsbn => _pairedIsbn;
+  String? get pairedIsbn => _captureConfirmed ? captureIsbn : null;
+  String? get captureIsbn => _scannedIsbn ?? _savedIsbn;
+  String get captureId => _captureId;
+  bool get isCaptureReady => _captureConfirmed && _photoPath != null;
+  bool get isbnChosen => _isbnChosen;
+  bool get isNoIsbn => _isbnChosen && captureIsbn == null;
   bool get scannerActive => _scannerActive;
   bool get photoCameraActive => _photoCameraActive;
-  bool get hasCaptureData => stage != SingleCaptureStage.empty;
+  bool get hasCaptureData => _isbnChosen || _photoPath != null;
 
   bool beginIsbnScan() {
     if (_scannerActive || _photoCameraActive) {
       return false;
     }
-
     _scannerActive = true;
     _notifyListeners();
     return true;
@@ -63,7 +79,6 @@ class SingleEntryWorkflow extends ChangeNotifier {
     if (!_scannerActive) {
       return;
     }
-
     _scannerActive = false;
     _notifyListeners();
   }
@@ -73,16 +88,12 @@ class SingleEntryWorkflow extends ChangeNotifier {
     if (isbn == null) {
       return false;
     }
-
-    final previousPhotoPath = _photoPath;
     _scannerActive = false;
     _scannedIsbn = isbn;
     _savedIsbn = null;
-    _photoPath = null;
-    _pairedIsbn = null;
-    _photoCameraActive = false;
+    _isbnChosen = true;
+    _captureConfirmed = false;
     _notifyListeners();
-    await _deletePhoto(previousPhotoPath);
     return true;
   }
 
@@ -90,20 +101,64 @@ class SingleEntryWorkflow extends ChangeNotifier {
     if (stage != SingleCaptureStage.isbnScanned || _scannedIsbn == null) {
       return false;
     }
-
     _savedIsbn = _scannedIsbn;
+    _scannedIsbn = null;
     _photoCameraActive = true;
     _notifyListeners();
     return true;
   }
 
-  bool beginPhotoCapture() {
-    if (_savedIsbn == null || _photoCameraActive) {
+  bool chooseManualIsbn(String rawValue) {
+    final isbn = IsbnValidator.normalizeAndValidate(rawValue);
+    if (isbn == null || _photoCameraActive || _scannerActive) {
       return false;
     }
+    _scannedIsbn = null;
+    _savedIsbn = isbn;
+    _isbnChosen = true;
+    _captureConfirmed = false;
+    if (_photoPath == null) {
+      _photoCameraActive = true;
+    }
+    _notifyListeners();
+    return true;
+  }
 
-    _scannerActive = false;
+  bool chooseNoIsbn() {
+    if (_photoCameraActive || _scannerActive) {
+      return false;
+    }
+    _scannedIsbn = null;
+    _savedIsbn = null;
+    _isbnChosen = true;
+    _captureConfirmed = false;
+    if (_photoPath == null) {
+      _photoCameraActive = true;
+    }
+    _notifyListeners();
+    return true;
+  }
+
+  void returnToIsbnChoice() {
+    if (_photoCameraActive || _scannerActive) {
+      return;
+    }
+    _scannedIsbn = null;
+    _savedIsbn = null;
+    _isbnChosen = false;
+    _captureConfirmed = false;
+    _notifyListeners();
+  }
+
+  bool beginPhotoCapture() {
+    if (!_isbnChosen ||
+        _scannedIsbn != null ||
+        _photoCameraActive ||
+        _scannerActive) {
+      return false;
+    }
     _photoCameraActive = true;
+    _captureConfirmed = false;
     _notifyListeners();
     return true;
   }
@@ -112,47 +167,46 @@ class SingleEntryWorkflow extends ChangeNotifier {
     if (!_photoCameraActive) {
       return;
     }
-
     _photoCameraActive = false;
     _notifyListeners();
   }
 
   Future<bool> photoCaptured(String path) async {
-    if (!_photoCameraActive || _savedIsbn == null) {
+    if (!_photoCameraActive || !_isbnChosen) {
       return false;
     }
-
     final previousPhotoPath = _photoPath;
     _photoPath = path;
-    _pairedIsbn = null;
+    _captureConfirmed = false;
     _photoCameraActive = false;
     _notifyListeners();
-    await _deletePhoto(previousPhotoPath);
+    if (previousPhotoPath != path) {
+      await _deletePhoto(previousPhotoPath);
+    }
     return true;
   }
 
   bool savePhoto() {
-    if (stage != SingleCaptureStage.photoCaptured ||
-        _savedIsbn == null ||
-        _photoPath == null) {
+    if (stage != SingleCaptureStage.photoCaptured || !_isbnChosen) {
       return false;
     }
-
-    _pairedIsbn = _savedIsbn;
+    _captureConfirmed = true;
     _notifyListeners();
     return true;
   }
 
-  /// Resets the current capture after another owner accepted its photo path.
-  bool resetAfterSuccessfulQueue() {
-    if (stage != SingleCaptureStage.paired || _photoPath == null) {
+  bool resetAfterSuccessfulQueue() => resetAfterSuccessfulTransfer();
+
+  bool resetAfterSuccessfulTransfer() {
+    if (!isCaptureReady || _photoPath == null) {
       return false;
     }
-
     _scannedIsbn = null;
     _savedIsbn = null;
     _photoPath = null;
-    _pairedIsbn = null;
+    _captureId = _newUuid();
+    _isbnChosen = false;
+    _captureConfirmed = false;
     _scannerActive = false;
     _photoCameraActive = false;
     _notifyListeners();
@@ -164,7 +218,9 @@ class SingleEntryWorkflow extends ChangeNotifier {
     _scannedIsbn = null;
     _savedIsbn = null;
     _photoPath = null;
-    _pairedIsbn = null;
+    _captureId = _newUuid();
+    _isbnChosen = false;
+    _captureConfirmed = false;
     _scannerActive = false;
     _photoCameraActive = false;
     _notifyListeners();
@@ -181,14 +237,13 @@ class SingleEntryWorkflow extends ChangeNotifier {
     if (path == null) {
       return;
     }
-
     try {
       final photoFile = File(path);
       if (await photoFile.exists()) {
         await photoFile.delete();
       }
     } on FileSystemException {
-      // Temporary cleanup is best-effort; no user library data is affected.
+      // Temporary capture cleanup is best-effort.
     }
   }
 

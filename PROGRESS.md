@@ -69,17 +69,18 @@
 - [x] Backups/restores include poster templates, managed backgrounds, and generated posters; Purge removes poster-owned files while preserving unrelated app assets
 - [ ] Manual Windows visual inspection remains pending; this environment's Tk tests are skipped when Tcl/Tk is incomplete
 
-## Mobile companion connection
-- [x] Local-only desktop pairing/connection API with network-interface discovery, QR/manual credentials, DPAPI-protected device token, one-device pairing, unpairing, and graceful application-shutdown cleanup
-- [x] Android cleartext HTTP for validated private IPv4 endpoints and fixed BookLedger API paths; unencrypted local-network traffic is documented
-- [x] Desktop DNS-SD advertising and Android NSD discovery; reconnect tries last endpoint, discovery, then saved fallback addresses
-- [x] Poco X6 Wi-Fi QR and manual pairing, secure-storage round trip, authenticated reconnect, mobile process restart persistence, desktop restart recovery, and Wi-Fi interruption/recovery
-- [ ] Physical Windows hotspot pairing/discovery and changed-IP DNS-SD recovery remain unverified
-- [ ] Book/photo transfer remains a later milestone
+## Mobile companion and transfer
+- [x] Local-only desktop pairing/connection API, QR/manual pairing, DPAPI-protected desktop token, Android secure storage, DNS-SD/NSD discovery, and reconnection
+- [x] Poco X6 Wi-Fi pairing, authentication, process restart persistence, desktop restart recovery, and Wi-Fi interruption recovery
+- [x] Mobile ISBN choices (scan barcode, manual numeric entry, or no ISBN), UUID capture identity, single and batch transfer with per-capture acknowledgments and retry of unacknowledged captures
+- [x] Desktop validates and atomically stages incoming JPEGs under `data/incoming/`; transfer retries are idempotent by capture UUID
+- [x] Incoming captures remain outside ordinary inventory until cataloged through the existing Add Book form; saved copies retain the incoming UUID to recover safely after restart
+- [x] Sequential cataloging, explicit discard, incomplete-batch recovery, and Add/Edit locking during active reception
+- [ ] Poco X6 end-to-end transfer and cataloging, Windows hotspot/mDNS, actual DHCP-change discovery, and native Tk form interaction remain unverified
 
 ## Next stages
 1. Visually review the Catalog grid, Inventory table, and Add/Edit layouts on a complete native Windows Tk installation.
 2. Add import/export and fuller reports.
 3. Expand migration and interrupted-operation recovery tests.
 4. Package the stable desktop app.
-5. Implement and verify Android-to-desktop book/photo transfer.
+5. Perform physical end-to-end Milestone 5 acceptance testing.

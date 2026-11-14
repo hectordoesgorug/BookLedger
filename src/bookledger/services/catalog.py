@@ -455,7 +455,12 @@ class CatalogService:
             raise ValidationError({"location": "Choose a location from the approved location list."})
         return row[0]
 
-    def create_copy(self, payload: dict, *, isbn_override: bool = False, existing_book_id: int | None = None) -> int:
+    def create_copy(self, payload: dict, *, isbn_override: bool = False, existing_book_id: int | None = None, copy_uuid: str | None = None) -> int:
+        if copy_uuid is not None:
+            try:
+                copy_uuid = str(uuid.UUID(copy_uuid))
+            except (ValueError, AttributeError) as exc:
+                raise ValidationError({"copy_uuid": "The incoming copy identifier is invalid."}) from exc
         errors = self.validate(payload, isbn_override=isbn_override)
         if errors:
             raise ValidationError(errors)
@@ -512,7 +517,7 @@ class CatalogService:
             cur = conn.execute(
                 """INSERT INTO copies(copy_uuid,book_id,copy_number,format,condition,location,photo_path,price_minor,status)
                    VALUES(?,?,?,?,?,?,?,?,?)""",
-                (str(uuid.uuid4()), book_id, next_number, payload["format"].strip(), payload["condition"].strip(), location,
+                (copy_uuid or str(uuid.uuid4()), book_id, next_number, payload["format"].strip(), payload["condition"].strip(), location,
                  "photos/pending.jpg", price_minor, "Available"),
             )
             copy_id = int(cur.lastrowid)

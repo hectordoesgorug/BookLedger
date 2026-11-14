@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import json
+import re
 import secrets
 import threading
 import time
@@ -18,6 +19,7 @@ API_PREFIX = "/api/v1"
 PROTOCOL_ID = "bookledger-mobile"
 DEFAULT_PORT = 43821
 MAX_REQUEST_BYTES = 8 * 1024
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024 + 64 * 1024
 
 
 def encode_pairing_qr(
@@ -67,6 +69,9 @@ class MobileConnectionService:
         token_protector: Callable[[str], str] = protect_secret,
         token_unprotector: Callable[[str], str] = unprotect_secret,
         discovery_advertiser=None,
+        incoming_store=None,
+        on_reception_change: Callable[[bool], None] | None = None,
+        on_batch_ready: Callable[[str], None] | None = None,
     ):
         if not 0 <= port <= 65535:
             raise ValueError("The mobile service port is invalid.")
@@ -80,6 +85,10 @@ class MobileConnectionService:
         self._token_protector = token_protector
         self._token_unprotector = token_unprotector
         self._discovery_advertiser = discovery_advertiser or MdnsServiceAdvertiser()
+        self.incoming_store = incoming_store
+        self.on_reception_change = on_reception_change
+        self.on_batch_ready = on_batch_ready
+        self._active_receivers = 0
         self._discovery_status = "inactive"
         self._lock = threading.RLock()
         self._server: _ReusableThreadingHTTPServer | None = None
@@ -287,21 +296,31 @@ class MobileConnectionService:
                     current = service._token
                     return bool(current) and _constant_time_equal(supplied, current)
 
-            def _json_body(self) -> dict | None:
-                content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-                if content_type != "application/json":
-                    self._write_json(415, {"error": "content_type_required"})
-                    return None
+            def _body_bytes(self, limit: int) -> bytes | None:
                 try:
                     length = int(self.headers.get("Content-Length", ""))
                 except ValueError:
                     self._write_json(400, {"error": "invalid_content_length"})
                     return None
-                if length < 0 or length > MAX_REQUEST_BYTES:
+                if length < 0 or length > limit:
                     self._write_json(413, {"error": "request_too_large"})
                     return None
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    self._write_json(400, {"error": "incomplete_request"})
+                    return None
+                return body
+
+            def _json_body(self) -> dict | None:
+                content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                if content_type != "application/json":
+                    self._write_json(415, {"error": "content_type_required"})
+                    return None
+                raw = self._body_bytes(MAX_REQUEST_BYTES)
+                if raw is None:
+                    return None
                 try:
-                    value = json.loads(self.rfile.read(length))
+                    value = json.loads(raw)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     self._write_json(400, {"error": "invalid_json"})
                     return None
@@ -309,6 +328,16 @@ class MobileConnectionService:
                     self._write_json(400, {"error": "object_required"})
                     return None
                 return value
+
+            def _incoming_error(self, error):
+                self._write_json(error.status, {"error": error.code})
+
+            def _set_receiving(self, active: bool):
+                with service._lock:
+                    service._active_receivers += 1 if active else -1
+                    changed = service._active_receivers == 1 if active else service._active_receivers == 0
+                if changed and service.on_reception_change is not None:
+                    service.on_reception_change(active)
 
             def do_GET(self):
                 if not self._peer_is_local():
@@ -339,24 +368,75 @@ class MobileConnectionService:
                 if not self._peer_is_local():
                     self._write_json(403, {"error": "local_network_only"})
                     return
-                payload = self._json_body()
-                if payload is None:
+                if not self._authorized() and self.path.startswith(f"{API_PREFIX}/batches"):
+                    self._write_json(401, {"error": "unauthorized"})
                     return
-                if self.path != f"{API_PREFIX}/pair":
+                if self.path == f"{API_PREFIX}/pair":
+                    payload = self._json_body()
+                    if payload is None:
+                        return
+                    supplied = payload.get("pairing_credential")
+                    name = payload.get("device_name")
+                    if (
+                        not isinstance(supplied, str)
+                        or not isinstance(name, str)
+                        or not name.strip()
+                        or len(name.strip()) > 80
+                    ):
+                        self._write_json(400, {"error": "invalid_pairing_request"})
+                        return
+                    response, status = service._pair(supplied, name.strip())
+                    self._write_json(status, response)
+                    return
+                store = service.incoming_store
+                if store is None:
                     self._write_json(404, {"error": "not_found"})
                     return
-                supplied = payload.get("pairing_credential")
-                name = payload.get("device_name")
-                if (
-                    not isinstance(supplied, str)
-                    or not isinstance(name, str)
-                    or not name.strip()
-                    or len(name.strip()) > 80
-                ):
-                    self._write_json(400, {"error": "invalid_pairing_request"})
-                    return
-                response, status = service._pair(supplied, name.strip())
-                self._write_json(status, response)
+                try:
+                    if self.path == f"{API_PREFIX}/batches":
+                        payload = self._json_body()
+                        if payload is None:
+                            return
+                        result = store.begin_batch(payload.get("batch_id"), payload.get("expected_count"))
+                        self._write_json(201, result)
+                        return
+                    match = re.fullmatch(
+                        re.escape(f"{API_PREFIX}/batches/") + r"([0-9a-fA-F-]{36})/captures/([0-9a-fA-F-]{36})",
+                        self.path,
+                    )
+                    if match:
+                        self.connection.settimeout(30.0)
+                        self._set_receiving(True)
+                        try:
+                            content_type = self.headers.get("Content-Type", "")
+                            raw = self._body_bytes(MAX_UPLOAD_BYTES)
+                            if raw is None:
+                                return
+                            result = store.receive_capture(match.group(1), match.group(2), content_type, raw)
+                        finally:
+                            self._set_receiving(False)
+                        self._write_json(200, result)
+                        if result.get("ready") and service.on_batch_ready is not None:
+                            service.on_batch_ready(match.group(1))
+                        return
+                    match = re.fullmatch(
+                        re.escape(f"{API_PREFIX}/batches/") + r"([0-9a-fA-F-]{36})/complete",
+                        self.path,
+                    )
+                    if match:
+                        payload = self._json_body()
+                        if payload is None:
+                            return
+                        result = store.complete_batch(match.group(1))
+                        self._write_json(200, result)
+                        return
+                    self._write_json(404, {"error": "not_found"})
+                except Exception as exc:
+                    from bookledger.services.mobile_incoming import IncomingCaptureError
+                    if isinstance(exc, IncomingCaptureError):
+                        self._incoming_error(exc)
+                    else:
+                        self._write_json(500, {"error": "incoming_storage_failed"})
 
             def do_DELETE(self):
                 if not self._peer_is_local():

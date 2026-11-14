@@ -34,6 +34,11 @@ class BookForm(tk.Toplevel):
         existing=None,
         existing_book_id=None,
         metadata_lookup: MetadataLookupService | None = None,
+        initial_isbn=None,
+        initial_photo=None,
+        incoming_capture_id=None,
+        on_discard_incoming=None,
+        on_cancel=None,
     ):
         super().__init__(parent)
         apply_application_icon(self)
@@ -45,6 +50,11 @@ class BookForm(tk.Toplevel):
         self.mousewheel_router = mousewheel_router
         self.existing = existing
         self.existing_book_id = existing_book_id
+        self.incoming_capture_id = incoming_capture_id
+        self.on_discard_incoming = on_discard_incoming
+        self.on_cancel = on_cancel
+        self._incoming_sequence_finished = False
+        self.incoming_copy_uuid = incoming_capture_id
         self.metadata_lookup = metadata_lookup or MetadataLookupService()
         self.photo_path = tk.StringVar(value="")
         self.isbn_override = tk.BooleanVar(value=False)
@@ -84,6 +94,16 @@ class BookForm(tk.Toplevel):
             self._populate(existing)
         else:
             self._set("location", DEFAULT_LOCATION)
+            if initial_isbn:
+                self._set("isbn", initial_isbn)
+            if initial_photo:
+                self.set_photo(initial_photo)
+            if incoming_capture_id:
+                ttk.Button(
+                    self.actions_panel,
+                    text="Discard Incoming Capture",
+                    command=self._discard_incoming,
+                ).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.bind("<Destroy>", self._on_destroy, add="+")
         self._ui_poll_id = self.after(40, self._poll_ui_queue)
@@ -484,7 +504,33 @@ class BookForm(tk.Toplevel):
                     pass
                 self._ui_poll_id = None
 
+    def _discard_incoming(self):
+        if not self.incoming_capture_id or not self.on_discard_incoming:
+            return
+        if not messagebox.askyesno(
+            "Discard Incoming Capture",
+            "Permanently discard this received book and its staged photograph?",
+            parent=self,
+        ):
+            return
+        try:
+            if self.on_discard_incoming(self.incoming_capture_id):
+                self._incoming_sequence_finished = True
+                self._close()
+        except Exception as exc:
+            messagebox.showerror(
+                "Could Not Discard Capture",
+                f"The incoming capture was retained. ({type(exc).__name__})",
+                parent=self,
+            )
+
     def _close(self):
+        if (
+            self.incoming_capture_id
+            and not self._incoming_sequence_finished
+            and self.on_cancel
+        ):
+            self.on_cancel()
         self.photo_service.discard_staged(self.photo_path.get())
         self._closing = True
         if self._ui_poll_id:
@@ -776,6 +822,7 @@ class BookForm(tk.Toplevel):
                 payload,
                 isbn_override=self.isbn_override.get(),
                 existing_book_id=existing_book_id,
+                copy_uuid=self.incoming_copy_uuid,
             )
             if existing_book_id is None:
                 self._new_book_record_created = True
@@ -838,6 +885,7 @@ class BookForm(tk.Toplevel):
                 self.on_activity("physical_copy_added", None)
                 if self._new_book_record_created:
                     self.on_activity("book_added", None)
+        self._incoming_sequence_finished = True
         self.on_saved()
         self.photo_service.discard_staged(self.photo_path.get())
         self._close()

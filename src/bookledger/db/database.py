@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 10
 
 _DATABASE_LOCKS: dict[str, threading.RLock] = {}
 _DATABASE_LOCKS_GUARD = threading.Lock()
@@ -106,7 +106,26 @@ CREATE TABLE IF NOT EXISTS poster_templates (
     elements_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-PRAGMA user_version = 8;
+CREATE TABLE IF NOT EXISTS mobile_incoming_batches (
+    batch_uuid TEXT PRIMARY KEY,
+    expected_count INTEGER NOT NULL CHECK(expected_count BETWEEN 1 AND 20),
+    state TEXT NOT NULL CHECK(state IN ('receiving','ready')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    cataloged_at TEXT
+);
+CREATE TABLE IF NOT EXISTS mobile_incoming_captures (
+    capture_uuid TEXT PRIMARY KEY,
+    batch_uuid TEXT NOT NULL REFERENCES mobile_incoming_batches(batch_uuid) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL CHECK(sequence > 0),
+    isbn TEXT,
+    captured_at TEXT NOT NULL,
+    photo_name TEXT NOT NULL,
+    UNIQUE(batch_uuid, sequence),
+    UNIQUE(batch_uuid, photo_name)
+);
+CREATE INDEX IF NOT EXISTS ix_mobile_incoming_batch_order ON mobile_incoming_captures(batch_uuid,sequence);
+PRAGMA user_version = 10;
 """
 
 
@@ -298,6 +317,43 @@ class Database:
                     conn.execute("PRAGMA user_version = 8")
                     conn.commit()
                     version = 8
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 8:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("""CREATE TABLE mobile_incoming_batches (
+                        batch_uuid TEXT PRIMARY KEY,
+                        expected_count INTEGER NOT NULL CHECK(expected_count BETWEEN 1 AND 20),
+                        state TEXT NOT NULL CHECK(state IN ('receiving','ready')),
+                        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                    )""")
+                    conn.execute("""CREATE TABLE mobile_incoming_captures (
+                        capture_uuid TEXT PRIMARY KEY,
+                        batch_uuid TEXT NOT NULL REFERENCES mobile_incoming_batches(batch_uuid) ON DELETE CASCADE,
+                        sequence INTEGER NOT NULL CHECK(sequence > 0),
+                        isbn TEXT,
+                        captured_at TEXT NOT NULL,
+                        photo_name TEXT NOT NULL,
+                        UNIQUE(batch_uuid, sequence),
+                        UNIQUE(batch_uuid, photo_name)
+                    )""")
+                    conn.execute("CREATE INDEX ix_mobile_incoming_batch_order ON mobile_incoming_captures(batch_uuid,sequence)")
+                    conn.execute("PRAGMA user_version = 9")
+                    conn.commit()
+                    version = 9
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 9:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("ALTER TABLE mobile_incoming_batches ADD COLUMN cataloged_at TEXT")
+                    conn.execute("PRAGMA user_version = 10")
+                    conn.commit()
+                    version = 10
                 except Exception:
                     conn.rollback()
                     raise

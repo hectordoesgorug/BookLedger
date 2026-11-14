@@ -87,3 +87,15 @@ Automated tests cover schema v8 migration, preset persistence and sequencing, sh
 On the Poco X6, the Android secure-storage write/read probe passed. The client initially rejected its own API paths because its allowlist contained escaped prefix text. After that correction, the desktop returned HTTP 400: Dart had sent a chunked JSON body while the Python handler required `Content-Length`. Setting the byte length fixed the request. QR pairing and manual pairing then both completed; the desktop showed the paired device, authenticated reconnect succeeded, the token survived a full app force-stop/relaunch, and connection recovered after desktop restart and Wi-Fi interruption/recovery. Logs report status/phase only and do not include pairing credentials or device tokens.
 
 The desktop DNS-SD service advertised on the tested Wi-Fi network. Changed-IP recovery has automated ordering coverage, but an IP change was not reproduced on the Poco, so Android NSD discovery after an actual DHCP change remains unverified. Windows Mobile Hotspot pairing and multicast discovery were not physically tested. No Windows Firewall rules were modified. The configured shop logo remained visible; the logo file itself was left untouched.
+
+## Milestone 5 mobile transfer and desktop cataloging (2026-11-15)
+
+- Targeted staging/catalog regression run: `.venv\\Scripts\\python.exe -m pytest tests/test_mobile_incoming.py tests/test_catalog.py tests/test_posters.py -q` — **88 passed**.
+- Full Python suite: `.venv\\Scripts\\python.exe -m pytest -q` — **449 passed, 18 skipped**. Skips are Tk/UI tests requiring unavailable Tcl/Tk components.
+- `flutter analyze` — **no issues**.
+- `flutter test` — **59 passed**.
+- `dart format --output=none --set-exit-if-changed lib test` — **24 files checked, 0 changed**.
+- Android debug APK: Flutter's `build apk` wrapper hit the known Kotlin incremental-cache cross-drive issue; direct Android Studio JBR Gradle `assembleDebug` succeeded with Kotlin in-process, incremental compilation disabled, and one worker.
+- `git diff --check` — passed.
+
+Automated tests cover validated and idempotent staging, duplicate/nullable ISBNs, batch ordering and readiness, transfer callbacks, recovery after restart, and preserving the incoming UUID through durable catalog save. Physical Poco X6 end-to-end transfer/cataloging and native Tk UI interaction were not performed in this turn. No transfer retry behavior was tested against a live desktop/device pair.

@@ -48,6 +48,7 @@ from bookledger.ui.poster_designer import PosterDesigner, create_poster_for_copy
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
 from bookledger.ui.mobile_app_setup import MobileAppSetupPanel
 from bookledger.services.mobile_connection import MobileConnectionService
+from bookledger.services.mobile_incoming import MobileIncomingStore
 from bookledger.ui.status_colors import ERROR_COLOR, INVENTORY_STATUS_COLORS, NEUTRAL_COLOR, SUCCESS_COLOR, WARNING_COLOR, status_message_color
 
 CATALOG_CARD_WIDTH = 320
@@ -172,7 +173,18 @@ class BookLedgerApp(_WindowBase):
         self.config_store = AppConfigStore(
             self.paths.provider_config, self.paths.provider_config_fallback()
         )
-        self.mobile_connection_service = MobileConnectionService(self.config_store)
+        self.mobile_incoming_store = MobileIncomingStore(self.db, self.paths.data)
+        self.mobile_incoming_store.recover()
+        self._incoming_catalog_batch = None
+        self._incoming_reception_active = False
+        self._catalog_action_buttons = []
+        self._catalog_action_states = {}
+        self.mobile_connection_service = MobileConnectionService(
+            self.config_store,
+            incoming_store=self.mobile_incoming_store,
+            on_reception_change=self._queue_reception_state,
+            on_batch_ready=self._queue_incoming_batch,
+        )
         self._configuration_warnings = self.config_store.migrate_legacy_settings(
             self.db,
             self.paths.google_books_config,
@@ -244,6 +256,7 @@ class BookLedgerApp(_WindowBase):
         self._configure_style()
         self._build_shell()
         self.show_page("Dashboard")
+        self.after(0, self._resume_mobile_incoming)
         self.protocol("WM_DELETE_WINDOW", self._close_application)
         self.report_callback_exception = self._report_callback_exception
         self.bind_all("<Control-n>", lambda _e: self.open_add_form())
@@ -609,7 +622,7 @@ class BookLedgerApp(_WindowBase):
             cards.grid_columnconfigure(idx % 3, weight=1)
         actions = ttk.LabelFrame(self.workspace, text="Quick actions", padding=16)
         actions.pack(fill="x", pady=(0, 18))
-        ttk.Button(actions, text="＋  Add a book", style="Primary.TButton", command=self.open_add_form).pack(side="left", padx=(0, 8))
+        self._catalog_action_button(actions, text="＋  Add a book", style="Primary.TButton", command=self.open_add_form).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Open catalog", command=lambda: self.show_page("Catalog")).pack(side="left", padx=8)
         ttk.Button(actions, text="Open Poster Folder", command=self._open_poster_folder).pack(side="left", padx=8)
         ttk.Button(actions, text="Back up now", command=self.create_backup).pack(side="left", padx=8)
@@ -626,7 +639,7 @@ class BookLedgerApp(_WindowBase):
         top = ttk.Frame(self.workspace)
         top.pack(fill="x", pady=(0, 12))
         ttk.Label(top, text="Manage physical copies" if inventory else "Browse physical copies", foreground="#64748b").pack(side="left")
-        ttk.Button(top, text="＋ Add Book", style="Primary.TButton", command=self.open_add_form).pack(side="right")
+        self._catalog_action_button(top, text="＋ Add Book", style="Primary.TButton", command=self.open_add_form).pack(side="right")
         filters = ttk.Frame(self.workspace)
         filters.pack(fill="x", pady=(0, 12))
         self.genre_filter = tk.StringVar(value="All")
@@ -649,7 +662,7 @@ class BookLedgerApp(_WindowBase):
         frame = ttk.Frame(self.workspace)
         frame.pack(fill="both", expand=True)
         if inventory:
-            ttk.Button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
+            self._catalog_action_button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
             self._make_tree(frame, columns=("code", "copy_number", "title", "author", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Copy #", "Title", "Author", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
             self._inventory_status_tags = {}
             for status, color in INVENTORY_STATUS_COLORS.items():
@@ -962,7 +975,11 @@ class BookLedgerApp(_WindowBase):
                 state="disabled" if row["status"] == status else "normal",
                 command=lambda target=status, cid=copy_id: self._change_copy_status(cid, target),
             )
-        menu.add_command(label="Edit Book", command=lambda cid=copy_id: self.open_selected_edit(cid))
+        menu.add_command(
+            label="Edit Book",
+            state="disabled" if getattr(self, "_incoming_reception_active", False) else "normal",
+            command=lambda cid=copy_id: self.open_selected_edit(cid),
+        )
         menu.add_command(label="Delete Book", command=lambda cid=copy_id: self._confirm_delete(cid))
         try:
             menu.tk_popup(x_root, y_root)
@@ -1088,7 +1105,7 @@ class BookLedgerApp(_WindowBase):
         panel = ttk.LabelFrame(self.workspace, text="Catalog intake", padding=22)
         panel.pack(fill="x", anchor="n")
         ttk.Label(panel, text="Add one physical copy at a time, with a dedicated photo and its own valuation.", wraplength=700).pack(anchor="w", pady=(0, 14))
-        ttk.Button(panel, text="＋  Add a book", style="Primary.TButton", command=self.open_add_form).pack(anchor="w")
+        self._catalog_action_button(panel, text="＋  Add a book", style="Primary.TButton", command=self.open_add_form).pack(anchor="w")
         ttk.Label(panel, text="Tip: use Ctrl+N from anywhere in BookLedger to start intake.", foreground="#64748b").pack(anchor="w", pady=(14, 0))
         duplicate = ttk.LabelFrame(self.workspace, text="Intake rules", padding=16)
         duplicate.pack(fill="x", pady=18)
@@ -2140,12 +2157,131 @@ class BookLedgerApp(_WindowBase):
             self, google_books_api_key=self._load_google_books_key()
         )
 
+    def _catalog_action_button(self, parent, **kwargs):
+        button = ttk.Button(parent, **kwargs)
+        if self._incoming_reception_active:
+            self._catalog_action_states[button] = kwargs.get("state", "normal")
+            button.configure(state="disabled")
+        self._catalog_action_buttons.append(button)
+        return button
+
+    def _queue_reception_state(self, active):
+        try:
+            self.after(0, lambda: self._set_reception_state(active))
+        except tk.TclError:
+            pass
+
+    def _set_reception_state(self, active):
+        self._incoming_reception_active = bool(active)
+        for button in tuple(self._catalog_action_buttons):
+            try:
+                if button.winfo_exists():
+                    if active:
+                        self._catalog_action_states[button] = button.cget("state")
+                        button.configure(state="disabled")
+                    else:
+                        button.configure(state=self._catalog_action_states.pop(button, "normal"))
+                else:
+                    self._catalog_action_states.pop(button, None)
+            except tk.TclError:
+                self._catalog_action_states.pop(button, None)
+        if active and hasattr(self, "status_var"):
+            self.status_var.set("Receiving books from the mobile companion…")
+
+    def _queue_incoming_batch(self, batch_id):
+        try:
+            self.after(0, lambda: self._start_incoming_cataloging(batch_id))
+        except tk.TclError:
+            pass
+
+    def _resume_mobile_incoming(self):
+        batches = self.mobile_incoming_store.ready_batches()
+        if batches:
+            self._start_incoming_cataloging(batches[0])
+
+    def _start_incoming_cataloging(self, batch_id):
+        if self._incoming_catalog_batch is not None:
+            return
+        self._incoming_catalog_batch = batch_id
+        self._open_next_incoming_capture(batch_id)
+
+    def _open_next_incoming_capture(self, batch_id):
+        pending = self.mobile_incoming_store.pending_captures(batch_id)
+        if not pending:
+            if self.mobile_incoming_store.has_unresolved_catalog_save(batch_id):
+                messagebox.showerror(
+                    "Incoming Photo Recovery Needed",
+                    "A received book was saved, but its desktop photo operation needs recovery. Use Settings → Storage and Backup → Retry Recovery, then restart BookLedger to resume this batch.",
+                    parent=self,
+                )
+                self._incoming_catalog_batch = None
+                return
+            self.mobile_incoming_store.finish_batch_if_empty(batch_id)
+            self._incoming_catalog_batch = None
+            messagebox.showinfo(
+                "Incoming Batch Complete",
+                "All incoming books in this batch have been processed.",
+                parent=self,
+            )
+            remaining = self.mobile_incoming_store.ready_batches()
+            if remaining:
+                self.after(0, lambda: self._start_incoming_cataloging(remaining[0]))
+            return
+        capture = pending[0]
+        if not capture["photo_path"].is_file():
+            messagebox.showerror(
+                "Incoming Capture Needs Recovery",
+                "A staged photograph is missing. The capture was retained; restore the file before continuing.",
+                parent=self,
+            )
+            self._incoming_catalog_batch = None
+            return
+        BookForm(
+            self,
+            service=self.catalog,
+            photo_service=self.photos,
+            metadata_lookup=self.metadata_lookup,
+            mousewheel_router=self._mousewheel_router,
+            on_saved=lambda: self._incoming_capture_saved(batch_id, capture["capture_uuid"]),
+            on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier),
+            initial_isbn=capture["isbn"],
+            initial_photo=capture["photo_path"],
+            incoming_capture_id=capture["capture_uuid"],
+            on_discard_incoming=lambda capture_id: self._discard_incoming_capture(batch_id, capture_id),
+            on_cancel=lambda: self._cancel_incoming_sequence(batch_id),
+        )
+
+    def _incoming_capture_saved(self, batch_id, capture_id):
+        if not self.mobile_incoming_store.finish_cataloged_capture(capture_id):
+            messagebox.showerror(
+                "Incoming Capture Needs Recovery",
+                "The capture was saved, but its staged files could not be finalized. The desktop copy remains saved; retry storage recovery before continuing.",
+                parent=self,
+            )
+            self._incoming_catalog_batch = None
+            return
+        self.after(50, lambda: self._open_next_incoming_capture(batch_id))
+
+    def _discard_incoming_capture(self, batch_id, capture_id):
+        if not self.mobile_incoming_store.discard_capture(capture_id):
+            raise RuntimeError("The incoming capture could not be discarded.")
+        self.after(50, lambda: self._open_next_incoming_capture(batch_id))
+        return True
+
+    def _cancel_incoming_sequence(self, batch_id):
+        if self._incoming_catalog_batch == batch_id:
+            self._incoming_catalog_batch = None
+
     def open_add_form(self):
+        if self._incoming_reception_active:
+            return
         BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup,
                  mousewheel_router=self._mousewheel_router,
                  on_saved=lambda: self._after_save("Book saved."), on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier))
 
     def open_selected_edit(self, copy_id=None):
+        if getattr(self, "_incoming_reception_active", False):
+            return
         if copy_id is None:
             tree = getattr(self, "tree", None)
             try:

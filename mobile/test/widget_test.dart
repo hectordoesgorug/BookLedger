@@ -68,6 +68,29 @@ class _FakeConnectionTransport implements ConnectionTransport {
   ) async => false;
 
   @override
+  Future<bool> beginBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    int expectedCount,
+  ) async => true;
+
+  @override
+  Future<bool> sendCapture(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    CaptureEntry entry,
+  ) async => true;
+
+  @override
+  Future<bool> completeBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+  ) async => true;
+
+  @override
   void close() {}
 }
 
@@ -129,7 +152,9 @@ void main() {
     await tester.tap(find.text('Single Entry'));
     await tester.pumpAndSettle();
 
-    expect(find.bySemanticsLabel('Camera preview area'), findsOneWidget);
+    expect(find.text('Scan Number'), findsOneWidget);
+    expect(find.text('Enter Manually'), findsOneWidget);
+    expect(find.text('No ISBN'), findsOneWidget);
     expect(find.text('Scan'), findsOneWidget);
     expect(find.text('Take Photo'), findsOneWidget);
     expect(find.text('Retake'), findsOneWidget);
@@ -150,7 +175,7 @@ void main() {
       final button = tester.widget<ElevatedButton>(
         find.widgetWithText(ElevatedButton, label),
       );
-      expect(button.onPressed != null, label == 'Scan');
+      expect(button.onPressed, isNull);
     }
   });
 
@@ -181,7 +206,7 @@ void main() {
       final button = tester.widget<ElevatedButton>(
         find.widgetWithText(ElevatedButton, label),
       );
-      expect(button.onPressed != null, label == 'Scan');
+      expect(button.onPressed, isNull);
     }
     final queueButton = tester.widget<QueueActionButton>(
       find.byType(QueueActionButton),
@@ -257,7 +282,7 @@ void main() {
     expect(workflow.photoPath, 'missing-photo.jpg');
     expect(
       find.text(
-        'Could not add this capture. Its ISBN and photo are still available.',
+        'Could not queue this capture. Its ISBN and photo remain available.',
       ),
       findsOneWidget,
     );
@@ -322,18 +347,10 @@ void main() {
     expect(queue.count, 1);
     expect(find.text('1 / 15'), findsOneWidget);
     expect(find.text('Send'), findsOneWidget);
+    expect(find.text('Batch ready to send.'), findsOneWidget);
     expect(
-      find.text('Batch ready. Transfer is not available yet.'),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byKey(const ValueKey('queue-action')));
-    await tester.pumpAndSettle();
-    expect(
-      find.text(
-        'This batch is ready. Transfer will be available in a later version.',
-      ),
-      findsOneWidget,
+      tester.widget<QueueActionButton>(find.byType(QueueActionButton)).canTap,
+      isFalse,
     );
     expect(queue.count, 1);
   });

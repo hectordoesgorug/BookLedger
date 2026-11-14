@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../capture/bulk_capture_queue.dart';
 import 'desktop_discovery.dart';
 
 const mobileProtocolId = 'bookledger-mobile';
@@ -276,6 +278,26 @@ abstract interface class ConnectionTransport {
 
   Future<bool> unpair(List<DesktopEndpoint> endpoints, String deviceToken);
 
+  Future<bool> beginBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    int expectedCount,
+  );
+
+  Future<bool> sendCapture(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    CaptureEntry entry,
+  );
+
+  Future<bool> completeBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+  );
+
   void close();
 }
 
@@ -294,16 +316,25 @@ class HttpConnectionTransport implements ConnectionTransport {
     String path, {
     String? token,
     Map<String, Object?>? body,
+    List<int>? rawBody,
+    String? contentType,
   }) async {
     try {
       DesktopEndpoint.validated(endpoint.address, endpoint.port);
       const allowedRequests = <String, Set<String>>{
         'GET': {'$mobileApiPrefix/health', '$mobileApiPrefix/connection'},
-        'POST': {'$mobileApiPrefix/pair'},
+        'POST': {'$mobileApiPrefix/pair', '$mobileApiPrefix/batches'},
         'DELETE': {'$mobileApiPrefix/pair'},
       };
+      final capturePath = RegExp(
+        r'^/api/v1/batches/[0-9a-fA-F-]{36}/captures/[0-9a-fA-F-]{36}$',
+      ).hasMatch(path);
+      final completePath = RegExp(
+        r'^/api/v1/batches/[0-9a-fA-F-]{36}/complete$',
+      ).hasMatch(path);
       if (!allowedRequests.containsKey(method) ||
-          !allowedRequests[method]!.contains(path)) {
+          (!allowedRequests[method]!.contains(path) &&
+              !(method == 'POST' && (capturePath || completePath)))) {
         throw const FormatException('Unsupported BookLedger API request.');
       }
       final request = await _client
@@ -315,14 +346,20 @@ class HttpConnectionTransport implements ConnectionTransport {
       if (token != null) {
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
       }
-      if (body != null) {
+      if (rawBody != null) {
+        request.headers.contentType = ContentType.parse(contentType!);
+        request.contentLength = rawBody.length;
+        request.add(rawBody);
+      } else if (body != null) {
         final encodedBody = jsonEncode(body);
         request.headers.contentType = ContentType.json;
         request.contentLength = utf8.encode(encodedBody).length;
         request.write(encodedBody);
       }
       final response = await request.close().timeout(
-        const Duration(seconds: 3),
+        rawBody == null
+            ? const Duration(seconds: 3)
+            : const Duration(seconds: 45),
       );
       if (response.contentLength > 8192) {
         unawaited(response.drain<void>());
@@ -477,6 +514,96 @@ class HttpConnectionTransport implements ConnectionTransport {
   }
 
   @override
+  Future<bool> beginBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    int expectedCount,
+  ) async {
+    final (status, body) = await _request(
+      endpoint,
+      'POST',
+      '$mobileApiPrefix/batches',
+      token: token,
+      body: {'batch_id': batchId, 'expected_count': expectedCount},
+    );
+    return (status == 201 || status == 200) && body?['ok'] == true;
+  }
+
+  @override
+  Future<bool> sendCapture(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    CaptureEntry entry,
+  ) async {
+    final photo = File(entry.photoPath);
+    final bytes = await photo.readAsBytes();
+    if (bytes.isEmpty || bytes.length > 25 * 1024 * 1024) {
+      return false;
+    }
+    final boundary = 'BookLedger-${newCaptureUuid()}';
+    final body = BytesBuilder(copy: false)
+      ..add(
+        utf8.encode(
+          '--$boundary\r\nContent-Disposition: form-data; name="metadata"; filename="metadata.json"\r\nContent-Type: application/json\r\n\r\n',
+        ),
+      )
+      ..add(
+        utf8.encode(
+          jsonEncode({
+            'sequence': entry.sequence,
+            'isbn': entry.isbn,
+            'captured_at': entry.capturedAt.toUtc().toIso8601String(),
+          }),
+        ),
+      )
+      ..add(
+        utf8.encode(
+          '\r\n--$boundary\r\nContent-Disposition: form-data; name="photo"; filename="${entry.captureId}.jpg"\r\nContent-Type: image/jpeg\r\n\r\n',
+        ),
+      )
+      ..add(bytes)
+      ..add(utf8.encode('\r\n--$boundary--\r\n'));
+    final path =
+        '$mobileApiPrefix/batches/$batchId/captures/${entry.captureId}';
+    final (status, response) = await _request(
+      endpoint,
+      'POST',
+      path,
+      token: token,
+      rawBody: body.takeBytes(),
+      contentType: 'multipart/form-data; boundary=$boundary',
+    );
+    if ((status == 401 || status == 403) &&
+        response?['error'] == 'unauthorized') {
+      throw const DeviceAuthenticationRejectedException();
+    }
+    return status == 200 &&
+        response?['received'] == true &&
+        response?['capture_id'] == entry.captureId;
+  }
+
+  @override
+  Future<bool> completeBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+  ) async {
+    final (status, body) = await _request(
+      endpoint,
+      'POST',
+      '$mobileApiPrefix/batches/$batchId/complete',
+      token: token,
+      body: const {},
+    );
+    if ((status == 401 || status == 403) && body?['error'] == 'unauthorized') {
+      throw const DeviceAuthenticationRejectedException();
+    }
+    return status == 200 && body?['ready'] == true;
+  }
+
+  @override
   void close() => _client.close(force: true);
 }
 
@@ -511,6 +638,7 @@ class MobileConnectionController extends ChangeNotifier
   Future<void> _storeMutationTail = Future<void>.value();
 
   MobileConnectionStatus get status => _status;
+  bool get isConnected => _status == MobileConnectionStatus.connected;
   String? get message => _message;
   DesktopPairing? get pairing => _pairing;
   bool get isPaired => _pairing != null;
@@ -804,6 +932,85 @@ class MobileConnectionController extends ChangeNotifier
     if (_foreground && _pairing != null && !_disposed) {
       _reconnectTimer = Timer(delay, () => unawaited(reconnect()));
     }
+  }
+
+  Future<bool> transferCaptures({
+    required String batchId,
+    required List<CaptureEntry> entries,
+    required void Function(String captureId) onAcknowledged,
+  }) async {
+    final pairing = _pairing;
+    if (pairing == null ||
+        _status != MobileConnectionStatus.connected ||
+        _busy ||
+        entries.isEmpty) {
+      return false;
+    }
+    _busy = true;
+    _message = 'Sending captures to the desktop…';
+    _notify();
+    try {
+      final endpoint = await _transport.validate(
+        _orderedEndpoints(pairing),
+        pairing.deviceToken,
+      );
+      if (endpoint == null) {
+        _markTransferUnavailable();
+        return false;
+      }
+      if (!await _transport.beginBatch(
+        endpoint,
+        pairing.deviceToken,
+        batchId,
+        entries.length,
+      )) {
+        _markTransferUnavailable();
+        return false;
+      }
+      for (final entry in entries.where((item) => !item.acknowledged)) {
+        if (!await _transport.sendCapture(
+          endpoint,
+          pairing.deviceToken,
+          batchId,
+          entry,
+        )) {
+          _markTransferUnavailable();
+          return false;
+        }
+        onAcknowledged(entry.captureId);
+      }
+      if (!await _transport.completeBatch(
+        endpoint,
+        pairing.deviceToken,
+        batchId,
+      )) {
+        _markTransferUnavailable();
+        return false;
+      }
+      _message =
+          'Desktop received the captures. Cataloging will happen on desktop.';
+      _failureCount = 0;
+      return true;
+    } on DeviceAuthenticationRejectedException {
+      _reconnectTimer?.cancel();
+      _status = MobileConnectionStatus.authenticationRejected;
+      _message = 'This desktop rejected the saved pairing. Forget Pairing, then pair again.';
+      return false;
+    } on Object {
+      _markTransferUnavailable();
+      return false;
+    } finally {
+      _busy = false;
+      _notify();
+    }
+  }
+
+  void _markTransferUnavailable() {
+    _failureCount++;
+    _status = MobileConnectionStatus.disconnected;
+    _message =
+        'Transfer incomplete. Captures remain here; reconnect and retry.';
+    _scheduleReconnect(_retryDelay());
   }
 
   Future<bool> manualReconnect() async {

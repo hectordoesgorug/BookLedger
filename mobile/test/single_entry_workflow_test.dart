@@ -138,30 +138,27 @@ void main() {
       },
     );
 
-    test(
-      'rescanning invalidates the paired photo and removes its file',
-      () async {
-        final directory = await _temporaryCaptureDirectory();
-        final photo = await _createPhoto(directory, 'paired');
-        final workflow = await _savedIsbnWorkflow();
-        addTearDown(() async {
-          await workflow.clear();
-          workflow.dispose();
-          await directory.delete(recursive: true);
-        });
+    test('rescanning preserves the current photograph for review', () async {
+      final directory = await _temporaryCaptureDirectory();
+      final photo = await _createPhoto(directory, 'paired');
+      final workflow = await _savedIsbnWorkflow();
+      addTearDown(() async {
+        await workflow.clear();
+        workflow.dispose();
+        await directory.delete(recursive: true);
+      });
 
-        expect(workflow.photoCameraActive, isTrue);
-        await workflow.photoCaptured(photo.path);
-        workflow.savePhoto();
+      expect(workflow.photoCameraActive, isTrue);
+      await workflow.photoCaptured(photo.path);
+      workflow.savePhoto();
 
-        expect(await workflow.scanIsbn('0306406152'), isTrue);
-        expect(workflow.stage, SingleCaptureStage.isbnScanned);
-        expect(workflow.displayedIsbn, '0306406152');
-        expect(workflow.photoPath, isNull);
-        expect(workflow.pairedIsbn, isNull);
-        expect(await File(photo.path).exists(), isFalse);
-      },
-    );
+      expect(await workflow.scanIsbn('0306406152'), isTrue);
+      expect(workflow.stage, SingleCaptureStage.photoCaptured);
+      expect(workflow.displayedIsbn, '0306406152');
+      expect(workflow.photoPath, photo.path);
+      expect(workflow.pairedIsbn, isNull);
+      expect(await File(photo.path).exists(), isTrue);
+    });
 
     test(
       'clear resets the whole capture and removes the temporary photo',
@@ -272,6 +269,23 @@ void main() {
       expect(workflow.displayedIsbn, '0306406152');
       expect(workflow.stage, SingleCaptureStage.isbnScanned);
       expect(workflow.beginPhotoCapture(), isFalse);
+    });
+
+    test('manual ISBN and no ISBN both lead to photo capture', () async {
+      final manual = SingleEntryWorkflow();
+      final noIsbn = SingleEntryWorkflow();
+      addTearDown(manual.dispose);
+      addTearDown(noIsbn.dispose);
+
+      expect(manual.chooseManualIsbn('0-306-40615-2'), isTrue);
+      expect(manual.displayedIsbn, '0306406152');
+      expect(manual.photoCameraActive, isTrue);
+      expect(manual.captureId, isNot(noIsbn.captureId));
+
+      expect(noIsbn.chooseNoIsbn(), isTrue);
+      expect(noIsbn.isNoIsbn, isTrue);
+      expect(noIsbn.captureIsbn, isNull);
+      expect(noIsbn.photoCameraActive, isTrue);
     });
   });
 }

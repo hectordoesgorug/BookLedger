@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/capture/bulk_capture_queue.dart';
 import 'package:mobile/connection/desktop_discovery.dart';
 import 'package:mobile/connection/mobile_connection_controller.dart';
 
@@ -45,6 +46,10 @@ class _FakeConnectionTransport implements ConnectionTransport {
   int pairCalls = 0;
   int validateCalls = 0;
   int unpairCalls = 0;
+  int? batchExpectedCount;
+  bool captureResult = true;
+  bool completeResult = true;
+  final sentCaptureIds = <String>[];
   final validationRequests = <List<DesktopEndpoint>>[];
   final validationResults = <DesktopEndpoint?>[];
 
@@ -87,6 +92,35 @@ class _FakeConnectionTransport implements ConnectionTransport {
     unpairCalls++;
     return unpairResult;
   }
+
+  @override
+  Future<bool> beginBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    int expectedCount,
+  ) async {
+    batchExpectedCount = expectedCount;
+    return true;
+  }
+
+  @override
+  Future<bool> sendCapture(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+    CaptureEntry entry,
+  ) async {
+    sentCaptureIds.add(entry.captureId);
+    return captureResult;
+  }
+
+  @override
+  Future<bool> completeBatch(
+    DesktopEndpoint endpoint,
+    String token,
+    String batchId,
+  ) async => completeResult;
 
   @override
   void close() {}
@@ -193,6 +227,67 @@ void main() {
       expect(store.pairing!.deviceToken, startsWith('device-token-'));
       expect(store.pairing!.deviceToken, isNot(contains('temporary-')));
       expect(store.pairing!.endpoints, hasLength(2));
+    },
+  );
+
+  test(
+    'transfer acknowledges entries individually and retries only the rest',
+    () async {
+      final store = _MemoryPairingStore();
+      final transport = _FakeConnectionTransport()..validateResult = _endpoint;
+      final controller = MobileConnectionController(
+        store: store,
+        transport: transport,
+        deviceName: 'Poco X6',
+      );
+      addTearDown(controller.dispose);
+      expect(await controller.pairFromQr(_qrPayload()), isTrue);
+
+      final entries = [
+        for (var index = 1; index <= 3; index++)
+          CaptureEntry(
+            captureId: '00000000-0000-4000-8000-00000000000$index',
+            isbn: index == 3 ? null : '9780306406157',
+            photoPath: 'capture-$index.jpg',
+            sequence: index,
+            capturedAt: DateTime.utc(2026, 11, 14),
+          ),
+      ];
+      final acknowledged = <String>[];
+      const batchId = '10000000-0000-4000-8000-000000000001';
+
+      expect(
+        await controller.transferCaptures(
+          batchId: batchId,
+          entries: entries,
+          onAcknowledged: acknowledged.add,
+        ),
+        isTrue,
+      );
+      expect(acknowledged, entries.map((entry) => entry.captureId).toList());
+      expect(transport.batchExpectedCount, 3);
+      expect(
+        transport.sentCaptureIds,
+        entries.map((entry) => entry.captureId).toList(),
+      );
+
+      transport.sentCaptureIds.clear();
+      final retryEntries = [
+        entries.first.copyWith(acknowledged: true),
+        ...entries.skip(1),
+      ];
+      expect(
+        await controller.transferCaptures(
+          batchId: batchId,
+          entries: retryEntries,
+          onAcknowledged: acknowledged.add,
+        ),
+        isTrue,
+      );
+      expect(transport.sentCaptureIds, [
+        entries[1].captureId,
+        entries[2].captureId,
+      ]);
     },
   );
 

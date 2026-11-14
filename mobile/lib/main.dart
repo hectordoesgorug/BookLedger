@@ -114,6 +114,18 @@ class HomeScreen extends StatelessWidget {
     }
   }
 
+  void _openConnection(BuildContext context) {
+    if (connectionController == null) {
+      _openPlaceholder(context, 'Mobile App Setup');
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MobileSetupScreen(controller: connectionController!),
+      ),
+    );
+  }
+
   void _openSingleEntry(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -198,6 +210,15 @@ class HomeScreen extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openConnection(context),
+                        icon: const Icon(Icons.devices),
+                        label: const Text('Pair / Connect'),
+                      ),
                     ),
                     const Spacer(),
                   ],
@@ -300,6 +321,8 @@ class _CaptureScreenState extends State<CaptureScreen>
   late final bool _ownsBulkQueue;
   int _photoCaptureRequestId = 0;
   bool _queueing = false;
+  bool _transferring = false;
+  String _singleBatchId = newCaptureUuid();
 
   bool get _isBulk => widget.mode == CaptureMode.bulk;
   bool get _batchReady => _bulkQueue?.isBatchReady ?? false;
@@ -320,6 +343,7 @@ class _CaptureScreenState extends State<CaptureScreen>
     _workflow = widget.workflow ?? SingleEntryWorkflow();
     _workflow.addListener(_onWorkflowChanged);
     _ownsBulkQueue = widget.bulkQueue == null;
+    widget.connectionController?.addListener(_onWorkflowChanged);
     if (_isBulk) {
       _bulkQueue = widget.bulkQueue;
       _bulkQueue ??= BulkCaptureQueue(
@@ -347,6 +371,7 @@ class _CaptureScreenState extends State<CaptureScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _workflow.removeListener(_onWorkflowChanged);
+    widget.connectionController?.removeListener(_onWorkflowChanged);
     if (_ownsWorkflow) {
       _workflow.dispose();
     }
@@ -366,6 +391,46 @@ class _CaptureScreenState extends State<CaptureScreen>
     }
     if (mounted) {
       _workflow.beginIsbnScan();
+    }
+  }
+
+  Future<void> _openManualIsbn() async {
+    final input = TextEditingController(text: _workflow.displayedIsbn ?? '');
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Enter ISBN manually'),
+        content: TextField(
+          controller: input,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(labelText: 'ISBN-10 or ISBN-13'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => input.text = '${input.text}X',
+            child: const Text('Add X'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, input.text),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    input.dispose();
+    if (value == null || !mounted) {
+      return;
+    }
+    if (!_workflow.chooseManualIsbn(value)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid ISBN-10 or ISBN-13.')),
+      );
     }
   }
 
@@ -447,36 +512,31 @@ class _CaptureScreenState extends State<CaptureScreen>
 
   Future<void> _queueCurrentCapture() async {
     final queue = _bulkQueue;
-    final isbn = _workflow.pairedIsbn;
     final photoPath = _workflow.photoPath;
     if (!_isBulk ||
         queue == null ||
         queue.isBatchReady ||
         _queueing ||
-        isbn == null ||
-        photoPath == null ||
-        _workflow.stage != SingleCaptureStage.paired) {
+        !_workflow.isCaptureReady ||
+        photoPath == null) {
       return;
     }
 
     setState(() => _queueing = true);
     try {
-      await queue.addCapture(isbn: isbn, photoPath: photoPath);
+      await queue.addCapture(
+        isbn: _workflow.captureIsbn,
+        photoPath: photoPath,
+        captureId: _workflow.captureId,
+      );
       if (mounted) {
         _workflow.resetAfterSuccessfulQueue();
       }
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Could not add this capture. Its ISBN and photo are still '
-                'available.',
-              ),
-            ),
-          );
+        _showQueueMessage(
+          'Could not queue this capture. Its ISBN and photo remain available.',
+        );
       }
     } finally {
       if (mounted) {
@@ -485,16 +545,90 @@ class _CaptureScreenState extends State<CaptureScreen>
     }
   }
 
-  void _finishBatchEarly() {
-    if (_bulkQueue?.finishEarly() == true) {
-      _showQueueMessage('Batch ready. Transfer is not available yet.');
+  Future<void> _sendSingleCapture() async {
+    final controller = widget.connectionController;
+    final photoPath = _workflow.photoPath;
+    if (_isBulk ||
+        controller == null ||
+        !controller.isConnected ||
+        !_workflow.isCaptureReady ||
+        photoPath == null ||
+        _transferring) {
+      return;
+    }
+    setState(() => _transferring = true);
+    try {
+      final entry = CaptureEntry(
+        captureId: _workflow.captureId,
+        isbn: _workflow.captureIsbn,
+        photoPath: photoPath,
+        sequence: 1,
+        capturedAt: DateTime.now(),
+      );
+      final sent = await controller.transferCaptures(
+        batchId: _singleBatchId,
+        entries: [entry],
+        onAcknowledged: (_) {},
+      );
+      if (sent && mounted) {
+        await _workflow.clear();
+        _singleBatchId = newCaptureUuid();
+        _showQueueMessage(
+          'Desktop received the capture. Cataloging will follow on desktop.',
+        );
+      } else if (mounted) {
+        _showQueueMessage(
+          controller.message ??
+              'Transfer failed. The capture remains available.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _transferring = false);
+      }
     }
   }
 
-  void _showSendUnavailable() {
-    _showQueueMessage(
-      'This batch is ready. Transfer will be available in a later version.',
-    );
+  Future<void> _sendBulkBatch() async {
+    final controller = widget.connectionController;
+    final queue = _bulkQueue;
+    if (!_isBulk ||
+        controller == null ||
+        queue == null ||
+        !controller.isConnected ||
+        !queue.isBatchReady ||
+        _transferring) {
+      return;
+    }
+    setState(() => _transferring = true);
+    try {
+      final sent = await controller.transferCaptures(
+        batchId: queue.batchId,
+        entries: queue.entries,
+        onAcknowledged: queue.markAcknowledged,
+      );
+      if (sent && mounted) {
+        await queue.clearSession();
+        _showQueueMessage(
+          'Desktop received the batch. Cataloging will follow on desktop.',
+        );
+      } else if (mounted) {
+        _showQueueMessage(
+          controller.message ??
+              'Transfer incomplete. Queued captures are retained.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _transferring = false);
+      }
+    }
+  }
+
+  void _finishBatchEarly() {
+    if (_bulkQueue?.finishEarly() == true) {
+      _showQueueMessage('Batch ready to send.');
+    }
   }
 
   void _showQueueMessage(String message) {
@@ -517,12 +651,14 @@ class _CaptureScreenState extends State<CaptureScreen>
       if (_batchReady) {
         return false;
       }
-      if (_queueing) {
+      if (_queueing || _transferring) {
         return false;
       }
       switch (index) {
         case 0:
-          return !_workflow.photoCameraActive && !_workflow.scannerActive;
+          return _workflow.isbnChosen &&
+              !_workflow.photoCameraActive &&
+              !_workflow.scannerActive;
         case 1:
           return _workflow.photoCameraActive;
         case 2:
@@ -545,7 +681,9 @@ class _CaptureScreenState extends State<CaptureScreen>
 
     switch (index) {
       case 0:
-        return !_workflow.photoCameraActive && !_workflow.scannerActive;
+        return _workflow.isbnChosen &&
+            !_workflow.photoCameraActive &&
+            !_workflow.scannerActive;
       case 1:
         return _workflow.photoCameraActive;
       case 2:
@@ -558,7 +696,9 @@ class _CaptureScreenState extends State<CaptureScreen>
             (_workflow.stage == SingleCaptureStage.isbnScanned ||
                 _workflow.stage == SingleCaptureStage.photoCaptured);
       case 4:
-        return false;
+        return _workflow.isCaptureReady &&
+            widget.connectionController?.isConnected == true &&
+            !_transferring;
       case 5:
         return _workflow.hasCaptureData;
       default:
@@ -578,9 +718,11 @@ class _CaptureScreenState extends State<CaptureScreen>
         _saveCaptureStep();
       case 4:
         if (_batchReady) {
-          _showSendUnavailable();
+          unawaited(_sendBulkBatch());
         } else if (_isBulk) {
           unawaited(_queueCurrentCapture());
+        } else {
+          unawaited(_sendSingleCapture());
         }
       case 5:
         unawaited(_clearCapture());
@@ -593,7 +735,9 @@ class _CaptureScreenState extends State<CaptureScreen>
     }
     switch (_workflow.stage) {
       case SingleCaptureStage.empty:
-        return '';
+        return _workflow.isbnChosen
+            ? 'Ready to photograph the front cover.'
+            : 'Choose how to identify this book.';
       case SingleCaptureStage.isbnScanned:
         return 'ISBN scanned. Save it to continue.';
       case SingleCaptureStage.isbnSaved:
@@ -601,11 +745,11 @@ class _CaptureScreenState extends State<CaptureScreen>
       case SingleCaptureStage.photoCamera:
         return 'Camera active. Frame the front cover and take a photo.';
       case SingleCaptureStage.photoCaptured:
-        return 'Photo captured. Save to pair it with this ISBN.';
+        return 'Photo captured. Save to confirm this capture.';
       case SingleCaptureStage.paired:
         return _isBulk
             ? 'Capture ready to add to the queue.'
-            : 'Capture ready for transfer.';
+            : 'Capture ready to send.';
     }
   }
 
@@ -616,11 +760,69 @@ class _CaptureScreenState extends State<CaptureScreen>
         onCancel: _workflow.cancelIsbnScan,
       );
     }
+    if (!_workflow.isbnChosen && !_workflow.photoCameraActive) {
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            FilledButton.icon(
+              onPressed: () => unawaited(_openScanner()),
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan Number'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => unawaited(_openManualIsbn()),
+              icon: const Icon(Icons.dialpad),
+              label: const Text('Enter Manually'),
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () {
+                _workflow.chooseNoIsbn();
+              },
+              icon: const Icon(Icons.not_interested),
+              label: const Text('No ISBN'),
+            ),
+          ],
+        ),
+      );
+    }
     if (_workflow.photoCameraActive) {
-      return PhotoCameraView(
-        captureRequestId: _photoCaptureRequestId,
-        onCaptured: _handlePhotoCaptured,
-        onCancel: _workflow.cancelPhotoCapture,
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          PhotoCameraView(
+            captureRequestId: _photoCaptureRequestId,
+            onCaptured: _handlePhotoCaptured,
+            onCancel: _workflow.cancelPhotoCapture,
+          ),
+          if (_workflow.captureIsbn != null)
+            Positioned(
+              top: 12,
+              left: 12,
+              right: 12,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(color: Colors.black54),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      _workflow.captureIsbn!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       );
     }
 
@@ -634,10 +836,10 @@ class _CaptureScreenState extends State<CaptureScreen>
 
   Widget _captureStatus(BuildContext context) {
     final isbn = _workflow.displayedIsbn;
-    if (isbn == null) {
+    if (!_workflow.hasCaptureData) {
       return const SizedBox.shrink();
     }
-
+    final title = isbn ?? 'No ISBN';
     final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
@@ -661,7 +863,7 @@ class _CaptureScreenState extends State<CaptureScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isbn,
+                  title,
                   key: const ValueKey('captured-isbn'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
@@ -676,6 +878,13 @@ class _CaptureScreenState extends State<CaptureScreen>
               ],
             ),
           ),
+          if (_workflow.isbnChosen &&
+              !_workflow.photoCameraActive &&
+              !_workflow.scannerActive)
+            TextButton(
+              onPressed: _workflow.returnToIsbnChoice,
+              child: const Text('Change'),
+            ),
         ],
       ),
     );
@@ -746,13 +955,13 @@ class _CaptureScreenState extends State<CaptureScreen>
                   if (_isBulk && index == 4) {
                     return QueueActionButton(
                       label: _batchReady ? 'Send' : 'Queue',
-                      canTap:
-                          _batchReady ||
-                          (_workflow.stage == SingleCaptureStage.paired &&
-                              !_queueing),
+                      canTap: _batchReady
+                          ? widget.connectionController?.isConnected == true &&
+                                !_transferring
+                          : _workflow.isCaptureReady && !_queueing,
                       canLongPress: _canFinishBatch,
                       onTap: _batchReady
-                          ? _showSendUnavailable
+                          ? () => unawaited(_sendBulkBatch())
                           : () => unawaited(_queueCurrentCapture()),
                       onLongPress: _finishBatchEarly,
                     );
