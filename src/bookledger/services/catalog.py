@@ -343,13 +343,16 @@ class CatalogService:
             with self.db.connect() as conn:
                 values = self.config_store.get(("preferences", "locations"), None)
                 if isinstance(values, list) and all(isinstance(value, str) for value in values):
-                    return tuple(values)
-                assigned = conn.execute(
-                    "SELECT DISTINCT trim(location) FROM copies WHERE trim(location)<>'' ORDER BY trim(location) COLLATE NOCASE"
-                ).fetchall()
-                return tuple(self._append_values((), assigned))
-        with self.db.connect() as conn:
-            return tuple(row[0] for row in conn.execute("SELECT name FROM locations ORDER BY name COLLATE NOCASE"))
+                    locations = values
+                else:
+                    assigned = conn.execute(
+                        "SELECT DISTINCT trim(location) FROM copies WHERE trim(location)<>'' ORDER BY trim(location) COLLATE NOCASE"
+                    ).fetchall()
+                    locations = [row[0] for row in assigned]
+        else:
+            with self.db.connect() as conn:
+                locations = [row[0] for row in conn.execute("SELECT name FROM locations ORDER BY name COLLATE NOCASE")]
+        return tuple(self._append_values((DEFAULT_LOCATION,), ((value,) for value in locations)))
 
     @staticmethod
     def _append_values(values, assigned) -> list[str]:
@@ -389,7 +392,7 @@ class CatalogService:
         replacement = (replacement or "").strip()
         if not replacement:
             raise ValidationError({"location": "Location name is required."})
-        if current.casefold() == DEFAULT_LOCATION.casefold() and replacement.casefold() != DEFAULT_LOCATION.casefold():
+        if current.casefold() == DEFAULT_LOCATION.casefold():
             raise ValidationError({"location": "The default location cannot be renamed."})
         if self.config_store is not None:
             old_values = list(self.list_locations())

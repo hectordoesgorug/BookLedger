@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_FORMATS, DEFAULT_LOCATION
+from bookledger.config_store import AppConfigStore
 from bookledger.db.database import Database, SCHEMA
 from bookledger.services.backups import BackupService
 from bookledger.services.catalog import CatalogService, ValidationError
@@ -425,6 +426,30 @@ def test_location_registry_canonicalizes_and_protects_referenced_values(setup):
     service.update_copy(other_copy_id, {**payload, "location": DEFAULT_LOCATION})
     service.delete_location("Front Room")
     assert "Front Room" not in service.list_locations()
+
+
+def test_default_location_is_system_provided_for_empty_and_configured_lists(setup):
+    root, _data, db, _service, payload, _photo = setup
+    store = AppConfigStore(root / "config.json")
+    catalog = CatalogService(db, root / "data", config_store=store)
+
+    store.set(("preferences", "locations"), [])
+    assert catalog.list_locations() == (DEFAULT_LOCATION,)
+    assert catalog.create_copy({**payload, "location": DEFAULT_LOCATION})
+    with pytest.raises(ValidationError) as duplicate:
+        catalog.add_location(DEFAULT_LOCATION)
+    assert "already exists" in duplicate.value.errors["location"]
+    with pytest.raises(ValidationError) as rename:
+        catalog.rename_location(DEFAULT_LOCATION, "not specified")
+    assert "cannot be renamed" in rename.value.errors["location"]
+    with pytest.raises(ValidationError) as delete:
+        catalog.delete_location(DEFAULT_LOCATION)
+    assert "cannot be deleted" in delete.value.errors["location"]
+
+    store.set(("preferences", "locations"), ["not specified", "Shelf", "Not Specified"])
+    assert catalog.list_locations() == (DEFAULT_LOCATION, "Shelf")
+    catalog.add_location("Storage")
+    assert catalog.list_locations() == (DEFAULT_LOCATION, "Shelf", "Storage")
 
 
 def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(setup):

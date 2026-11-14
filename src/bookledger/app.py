@@ -78,34 +78,86 @@ NAV_ICON_FRAME_SIZE = 36
 NAV_ICON_CONTENT_SIZES = (26, 30, 32)
 ABOUT_GUIDE_PAGES = (
     ("Dashboard", "About BookLedger", (
-        "BookLedger keeps bibliographic details for books alongside records for each physical copy. Use it to catalog books, track copy photos, condition, location, price and status, and review sales and reports.",
-        "A bibliographic record describes a title or edition and can be shared by multiple copies. Each physical copy has its own Copy ID, photo, format, condition, location, price and status. BookLedger stores its working library locally, so cataloging and inventory do not require an internet connection. ISBN metadata lookup does use online providers when requested.",
+        ("p", None, "BookLedger is an offline-first desktop library for organizing books and the individual physical copies you own or sell. The desktop library is the authoritative record; the mobile companion sends captures to it."),
+        ("bullet", "Bibliographic record", "describes a title or edition and can be shared by several copies."),
+        ("bullet", "Physical copy", "has its own Copy ID, photograph, format, condition, location, price, and inventory status."),
+        ("note", "Offline use", "Cataloging, inventory, sales, and reports use the local database. ISBN metadata lookup needs an internet connection when you request it."),
     )),
-    ("Acquisitions", "Add books", (
-        "Choose Acquisitions → Add a book, Catalog → Add Book, or Dashboard → Add a book. Enter the book details and the copy's Format, Condition, Location and Price (PHP), choose its photo with Choose Photo, then select Save Book. Title, Author, Genre, Format, Condition, Price and Copy Photo are required. ISBN is optional.",
-        "To look up optional metadata, enter an ISBN and select Look Up ISBN. Retrieved values fill empty fields; existing entries are preserved. Check the results and complete any required fields before saving. You can also enter details manually.",
+    ("Acquisitions", "Adding books", (
+        ("p", None, "You can enter book details yourself or use an ISBN lookup to suggest metadata. Check every suggested value before saving; provider records can be incomplete or describe a different edition."),
+        ("steps", None, (
+            ("Open the form.", "Choose Acquisitions and Add a book, Catalog and Add Book, or Dashboard and Add a book."),
+            ("Enter the book details.", "Title, Author, and Genre are required. ISBN, publisher, year, edition, page count, SRP, and synopsis are optional."),
+            ("Enter copy details.", "Format, Condition, Location, Price in PHP, and a readable Copy Photo are required. Choose Photo to select the image. Location starts at Not Specified."),
+            ("Review and save.", "Correct any red field message, then choose Save Book. Your entered details remain in the form if validation fails."),
+        )),
+        ("bullet", "ISBN lookup", "Enter an ISBN and choose Look Up ISBN. Returned metadata fills empty fields and leaves your existing entries in place. Lookup is optional; manual entry is supported."),
     )),
     ("Catalog", "Catalog and Inventory", (
-        "Open Catalog to browse photo cards or Inventory to see sortable rows. Use the search box and Genre, Condition, Location and Status filters. Double-click a copy or choose Edit Book from its context menu to edit it. Use Choose Photo to replace its photo.",
-        "Use a copy's context menu in Catalog or Inventory to mark it Available, Listed, Not for Sale or Sold. Each copy is managed separately. Marking a copy Sold records a sale; changing a Sold copy to another status asks for a reason and keeps the sale reversal in its history. A Sold copy's Price is locked until its status changes.",
+        ("p", None, "Catalog presents one photo card for each active physical copy. Inventory presents the same copies in a sortable table."),
+        ("bullet", "Find copies", "Use the search box and Genre, Condition, Location, and Status filters. Catalog can sort by title, price, or Copy ID; Inventory sorts by its column headings."),
+        ("bullet", "Edit a copy", "Double-click a row in Inventory, or choose Edit Book from a copy's Catalog context menu. Changes apply to that physical copy."),
+        ("bullet", "Separate copies", "Adding another copy of the same ISBN reuses its bibliographic record after confirmation. A different ISBN remains a separate record, even when title and author match."),
+        ("note", "Copy status", "Available, Listed, Not for Sale, and Sold belong to individual copies. Sold copies remain in inventory and history."),
     )),
-    ("Sale History", "Sales, reports and lists", (
-        "Sale History lists sale records, including reversed sales. Reports summarizes inventory and sales. Dashboard shows copy counts and recently added copies.",
-        "Settings → Preferences contains the Genre, Format and Location lists. Add or rename options there. Delete is disabled while an option is assigned to a copy; rename it to move those assignments to the new name, or update the copies first.",
+    ("Sale History", "Sales and reports", (
+        ("steps", None, (
+            ("Select a copy.", "In Catalog or Inventory, open its context menu."),
+            ("Record a sale.", "Choose Mark as Sold. BookLedger records the current Price and today's local date."),
+            ("Reverse a sale.", "Change a Sold copy to another status and choose a reason. The original sale remains in Sale History as a reversed event."),
+        )),
+        ("bullet", "Sale History", "Lists completed and reversed sale events. Reversed sales remain visible but are excluded from sales revenue."),
+        ("bullet", "Reports", "Inventory Summary counts active copies and titles. Inventory Valuation uses copy prices; Expected Revenue includes Available and Listed copies; Sales Revenue uses completed sale events."),
+        ("bullet", "Dashboard", "Shows copy and title counts by status and recently added copies."),
     )),
-    ("Settings", "Back up and restore", (
-        "Open Settings → Storage and Backup. Select Back Up Now to create a snapshot, or Restore Backup… to select one. Read the confirmation carefully: restoring replaces the active library and does not merge it.",
-        "Restore checks the selected archive before replacement and creates a recovery backup of the current library first. If verification or restoration fails, read the displayed message and keep the backup file; do not assume an unverified snapshot was restored.",
+    ("Settings", "Settings and customization", (
+        ("p", None, "Open Settings and choose Preferences to customize lists and appearance. Changes to a configured value affect the choices available for future edits."),
+        ("bullet", "Genre and Format", "Add or rename values in Preferences. A value assigned to copies cannot be deleted; update those copies or rename the value to move the assignments."),
+        ("bullet", "Location", "Not Specified is a fixed system default and cannot be renamed or removed. Add and rename other locations in Preferences. A location assigned to a copy cannot be deleted."),
+        ("bullet", "Shop logo", "Change Logo selects the configurable shop image, and Add Logo Link sets its click-through address. Clear Logo removes that customization."),
+        ("note", "Application branding", "The BookLedger banner and application identity are part of the app. They are separate from the configurable shop logo."),
+        ("bullet", "Theme", "Choose one of the themes available in the installed Tk runtime, then select Apply."),
+    )),
+    ("Settings", "Metadata and ISBN lookup", (
+        ("p", None, "ISBN lookup queries the enabled providers in the order shown in Settings, Metadata Sources. Later providers can fill supported fields that earlier results left empty. Your manually entered values are preserved."),
+        ("bullet", "Open Library", "Can return title, author, genre, publisher, publication year, edition, and page count."),
+        ("bullet", "Google Books", "Can return title, author, genre, synopsis, publisher, publication year, and page count."),
+        ("bullet", "Archive.org", "Can return title, author, synopsis, publisher, publication year, and edition."),
+        ("bullet", "Booktopia", "Can return title, author, synopsis, publisher, publication year, edition, page count, and format."),
+        ("bullet", "Bigbook", "Can return title, author, verified ISBN, synopsis, publication year, and page count."),
+        ("bullet", "Hardcover", "Can return title, author, verified ISBN, genre, synopsis, publisher, publication year, edition, and page count."),
+        ("note", "Provider order", "The initial registry order is Open Library, Google Books, Archive.org, Booktopia, Bigbook, then Hardcover. Bigbook and Hardcover start disabled; you can enable them and reorder providers in Metadata Sources."),
+        ("bullet", "API Management", "Use Settings, API Management to show or hide, test, save, or remove credentials. Open Library, Archive.org, and Booktopia do not ask for a BookLedger API credential. Google Books accepts an optional key. Bigbook needs an API key; Hardcover needs a personal token. Bigbook and Hardcover are disabled by default."),
+        ("bullet", "Check a provider", "In Settings, use ISBN Lookup Test to select a provider, enter an ISBN, and inspect its result and field statuses. This tests that provider directly; it does not save a book."),
+        ("bullet", "Review results", "Retrieved fields are suggestions. Confirm title, author, edition, and ISBN before saving. Unconfirmed ISBN results are not treated as verified matches."),
+        ("note", "ISBN checks", "BookLedger checks ISBN-10 and ISBN-13 check digits. An invalid ISBN requires an explicit manual-entry override before saving."),
+        ("warning", "Lookup problems", "No matching record or no data means the provider supplied no usable fields. Lookup failed can indicate a network, provider, credential, quota, or rate-limit problem. Check the ISBN and provider settings, try another enabled provider, or enter the details manually."),
+    )),
+    ("Settings", "Backup and restore", (
+        ("p", None, "Backups are portable ZIP snapshots. They contain the database, managed copy and Trash photos, managed assets and posters, and application configuration. Activity logs, caches, and unrelated files are not included."),
+        ("steps", None, (
+            ("Create a backup.", "Open Settings, Storage and Backup, then choose Back Up Now. Keep the resulting ZIP in a safe location."),
+            ("Restore a backup.", "Choose Restore Backup, select the ZIP, review the confirmation, and confirm only if you intend to replace the active library."),
+        )),
+        ("warning", "Restore replaces data", "BookLedger verifies the archive and creates a recovery backup before activation. Restore replaces the active database, photos, assets, and configuration; it does not merge libraries."),
+        ("note", "Backup safety", "Archives are not encrypted and can contain configuration secrets. Protect backup files and keep one until you have confirmed the restored library."),
     )),
     ("About", "Statuses and messages", (
-        "Available means the copy is available in inventory. Listed means it is listed for sale. Not for Sale means it is intentionally withheld from sale. Sold records a sale for that copy. These are inventory states, not connection or lookup results.",
-        "Metadata lookup can report retrieved or partially retrieved details, no matching ISBN record, an unconfirmed ISBN, or metadata unavailable. A provider may time out or have a network or service problem. Review the provider and field statuses; try again later or enter details yourself. Lookup is optional and does not replace information you already entered.",
-        "Validation messages appear beside the fields that need attention. Correct the marked values and select Save Book again. If a photo cannot be read, choose another image with Choose Photo. BookLedger Mobile controls in the book form are simulations; Connection Failed or Scan Failed describes the simulated result.",
+        ("bullet", "Inventory", "Available can be sold; Listed is listed for sale; Not for Sale is withheld from sale; Sold records a sale for that copy."),
+        ("bullet", "Metadata", "The form can show Metadata retrieved, Partially retrieved, No matching ISBN record, Results returned but ISBN could not be confirmed, Record found but no usable supported metadata, or Metadata unavailable. Provider and field details explain which values were found."),
+        ("bullet", "Mobile companion", "Not paired means no device is paired. Paired means a device token is registered; it does not prove that the phone is currently reachable. Receiving appears during a transfer, and Service error means the desktop service reported an error. The connection and scan controls in Add Book are simulations; their results do not report desktop pairing status."),
+        ("bullet", "Validation", "Required book fields are Title, Author, Genre, Format, Condition, Price, and Copy Photo. Red inline messages identify missing details, invalid configured values, or an invalid price. ISBN check-digit warnings can be overridden for manual entry; photo messages ask for a readable image."),
+        ("note", "Colors vary by area", "Inventory uses green for Available, red for Sold, and neutral gray for Listed or Not for Sale. The mobile indicator uses green for Paired, amber for Receiving, red for Service error, and gray for Starting or Not paired. In ISBN Lookup Test, green OK means a field was returned; gray means No Data, N/A, or not checked. Its response time is green at 3 seconds or less and red when slower. Other status messages use green for success and red for errors; amber is used for a warning such as Receiving."),
     )),
-    ("About", "Your data and moving between computers", (
-        "BookLedger keeps its database, copy photos, Trash photos and managed assets in its local data folder. Application preferences are stored in the BookLedger configuration. Backups include a database snapshot, managed photos and assets, and configuration. Backup archives are not encrypted, so store them in a secure place.",
-        "To move work with a USB drive, select Back Up Now on the current computer and copy the BookLedger backup ZIP to the USB drive. On the other computer, open Settings → Storage and Backup, select Restore Backup…, choose that ZIP and confirm. Restart BookLedger after restore so saved settings reload.",
-        "When moving work back, first create a new backup on the computer currently being used, then restore it on the original computer. Restore replaces that computer's active library; it does not combine changes from both computers. Keep backups until you have confirmed the restored library is correct.",
+    ("About", "Data and moving between computers", (
+        ("p", None, "The local SQLite database is the source of truth for bibliographic records, copies, status, and sales. Managed copy photographs, Trash photographs, and assets are stored with BookLedger's local data."),
+        ("bullet", "Configuration", "Application preferences, provider order, and API credentials are stored in the BookLedger configuration. Protect the configuration and backups that contain credentials."),
+        ("steps", None, (
+            ("Back up the current computer.", "Choose Back Up Now and copy the resulting BookLedger ZIP to a USB drive or other portable storage."),
+            ("Restore on the other computer.", "Open Settings, Storage and Backup, select Restore Backup, choose that ZIP, and confirm replacement."),
+            ("Move work back later.", "Create a new backup on the computer currently in use, then restore that newer ZIP on the original computer."),
+        )),
+        ("warning", "No library merge", "Restore replaces the destination computer's active library. It does not combine edits from two computers. Keep the backups until you have checked the restored library."),
     )),
 )
 
@@ -282,8 +334,8 @@ class BookLedgerApp(_WindowBase):
 
         configure("Treeview", rowheight=30, font=("Segoe UI", 10), borderwidth=0)
         configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=8)
-        configure("Sidebar.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10))
-        configure("SidebarActive.TButton", anchor="w", padding=(14, 7), font=("Segoe UI", 10, "bold"))
+        configure("Sidebar.TButton", anchor="w", padding=(14, 4), font=("Segoe UI", 10))
+        configure("SidebarActive.TButton", anchor="w", padding=(14, 4), font=("Segoe UI", 10, "bold"))
         configure("Primary.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"))
         configure("Invalid.TEntry", fieldbackground="#fff0f0")
         configure("Invalid.TCombobox", fieldbackground="#fff0f0")
@@ -317,11 +369,11 @@ class BookLedgerApp(_WindowBase):
     def _build_shell(self):
         shell = ttk.Frame(self)
         shell.pack(fill="both", expand=True)
-        self.sidebar = ttk.Frame(shell, padding=(12, 16), width=210)
+        self.sidebar = ttk.Frame(shell, padding=(12, 10), width=210)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         brand = ttk.Frame(self.sidebar)
-        brand.pack(fill="x", pady=(0, 24))
+        brand.pack(fill="x", pady=(0, 8))
         self._application_banner_image = None
         try:
             with Image.open(resource_path("assets", "banner.png")) as source:
@@ -336,7 +388,7 @@ class BookLedgerApp(_WindowBase):
             text="BookLedger" if self._application_banner_image is None else "",
             font=("Segoe UI", 17, "bold"),
         ).pack(anchor="w")
-        ttk.Separator(self.sidebar).pack(fill="x", pady=(0, 12))
+        ttk.Separator(self.sidebar).pack(fill="x", pady=(0, 6))
         self.nav_buttons = {}
         self._nav_image_sets = {}
         for name, icon_file, fallback in NAVIGATION_ITEMS:
@@ -358,7 +410,7 @@ class BookLedgerApp(_WindowBase):
             )
             if not images:
                 button.configure(text=f"{fallback}   {name}")
-            button.pack(fill="x", pady=2)
+            button.pack(fill="x", pady=1)
             self.nav_buttons[name] = button
             button._nav_frame_images = tuple(images)
             button._nav_frame_index = 0
@@ -372,16 +424,7 @@ class BookLedgerApp(_WindowBase):
         ttk.Frame(self.sidebar).pack(fill="both", expand=True)
         footer = ttk.Frame(self.sidebar)
         footer.pack(fill="x")
-        self.mobile_connection_status_var = tk.StringVar()
-        self.mobile_connection_status_label = ttk.Label(footer, textvariable=self.mobile_connection_status_var, foreground=NEUTRAL_COLOR)
-        self.mobile_connection_status_label.pack(anchor="w", pady=(0, 5))
-        ttk.Label(footer, text=f"Version {__version__}", foreground="#64748b", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 8))
-        self._brand_image = None
-        self.brand_logo_label = ttk.Label(footer, cursor="hand2")
-        self.brand_logo_label.bind("<Button-1>", lambda _event: self._open_shop_link())
-        self.brand_logo_label.pack(anchor="w")
-        self._refresh_brand_logo()
-        self._update_mobile_connection_indicator()
+        self._build_sidebar_footer(footer)
 
         right = ttk.Frame(shell, padding=(22, 18))
         right.pack(side="left", fill="both", expand=True)
@@ -402,6 +445,18 @@ class BookLedgerApp(_WindowBase):
         self.status_label = ttk.Label(right, textvariable=self.status_var, anchor="w")
         self.status_label.pack(fill="x", pady=(12, 0))
         self._bind_status_color(self.status_var, self.status_label)
+
+    def _build_sidebar_footer(self, footer):
+        self._brand_image = None
+        self.brand_logo_label = ttk.Label(footer, cursor="hand2")
+        self.brand_logo_label.bind("<Button-1>", lambda _event: self._open_shop_link())
+        self.brand_logo_label.pack(anchor="w", pady=(0, 8))
+        self._refresh_brand_logo()
+        self.mobile_connection_status_var = tk.StringVar()
+        self.mobile_connection_status_label = ttk.Label(footer, textvariable=self.mobile_connection_status_var, foreground=NEUTRAL_COLOR)
+        self.mobile_connection_status_label.pack(anchor="w", pady=(0, 5))
+        ttk.Label(footer, text=f"Version {__version__}", foreground="#64748b", font=("Segoe UI", 9)).pack(anchor="w")
+        self._update_mobile_connection_indicator()
 
     @staticmethod
     def _bind_status_color(variable, label):
@@ -603,20 +658,29 @@ class BookLedgerApp(_WindowBase):
         self.about_page_count = ttk.Label(heading, foreground="#64748b")
         self.about_page_count.pack(side="right", anchor="center")
         frame = ttk.Frame(self.workspace)
+        actions = ttk.Frame(self.workspace)
+        actions.pack(fill="x", side="bottom", pady=(10, 0))
+        navigation = ttk.Frame(actions)
+        navigation.pack(anchor="center")
+        self.about_back_button = ttk.Button(navigation, text="Back", command=lambda: self._show_about_manual_page(self.about_page_index - 1))
+        self.about_back_button.pack(side="left", padx=(0, 8))
+        self.about_next_button = ttk.Button(navigation, text="Next", command=lambda: self._show_about_manual_page(self.about_page_index + 1))
+        self.about_next_button.pack(side="left", padx=(8, 0))
         frame.pack(fill="both", expand=True)
-        text = tk.Text(frame, wrap="word", height=18, relief="flat", borderwidth=0, padx=12, pady=8, font=("Segoe UI", 11), spacing1=4, spacing3=10)
+        text = tk.Text(frame, wrap="word", height=18, relief="flat", borderwidth=0, padx=18, pady=12, font=("Segoe UI", 11), spacing1=3, spacing3=8)
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
         text.configure(yscrollcommand=scrollbar.set)
         text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        text.tag_configure("body", lmargin1=8, lmargin2=24, spacing3=14)
+        text.tag_configure("body", font=("Segoe UI", 11), foreground="#1f2937", lmargin1=10, lmargin2=28, spacing3=9)
+        text.tag_configure("strong", font=("Segoe UI", 11, "bold"), foreground="#173b63")
+        text.tag_configure("bullet", lmargin1=18, lmargin2=38, spacing3=7)
+        text.tag_configure("steps", lmargin1=22, lmargin2=48, spacing3=7)
+        text.tag_configure("note", foreground="#245b9e", background="#edf5ff", lmargin1=12, lmargin2=30, spacing1=5, spacing3=10)
+        text.tag_configure("warning", foreground=ERROR_COLOR, background="#fff1f0", lmargin1=12, lmargin2=30, spacing1=5, spacing3=10)
+        text.tag_raise("note", "strong")
+        text.tag_raise("warning", "strong")
         self.about_text = text
-        actions = ttk.Frame(self.workspace)
-        actions.pack(fill="x", side="bottom", pady=(10, 0))
-        self.about_back_button = ttk.Button(actions, text="Back", command=lambda: self._show_about_manual_page(self.about_page_index - 1))
-        self.about_back_button.pack(side="left")
-        self.about_next_button = ttk.Button(actions, text="Next", command=lambda: self._show_about_manual_page(self.about_page_index + 1))
-        self.about_next_button.pack(side="right")
         self._show_about_manual_page(self.about_page_index)
         wheel_router = getattr(self, "_mousewheel_router", None)
         if wheel_router is not None:
@@ -631,11 +695,30 @@ class BookLedgerApp(_WindowBase):
         self.about_page_count.configure(text=f"{self.about_page_index + 1} of {len(ABOUT_GUIDE_PAGES)}")
         self.about_text.configure(state="normal")
         self.about_text.delete("1.0", "end")
-        for paragraph in paragraphs:
-            self.about_text.insert("end", f"•  {paragraph}\n\n", "body")
+        for block in paragraphs:
+            BookLedgerApp._insert_about_manual_block(self.about_text, block)
         self.about_text.configure(state="disabled")
         self.about_back_button.configure(state="normal" if self.about_page_index else "disabled")
         self.about_next_button.configure(state="normal" if self.about_page_index < len(ABOUT_GUIDE_PAGES) - 1 else "disabled")
+
+    @staticmethod
+    def _insert_about_manual_block(text, block):
+        kind, heading, content = block
+        if kind in {"steps", "bullets"}:
+            tag = "steps" if kind == "steps" else "bullet"
+            for index, (label, detail) in enumerate(content, start=1):
+                marker = f"{index}.  " if kind == "steps" else "•  "
+                text.insert("end", marker, tag)
+                text.insert("end", f"{label} ", (tag, "strong"))
+                text.insert("end", f"{detail}\n\n", (tag, "body"))
+            return
+        tag = "warning" if kind == "warning" else "note" if kind == "note" else "body"
+        if kind == "bullet":
+            text.insert("end", "•  ", "bullet")
+            tag = "bullet"
+        if heading:
+            text.insert("end", f"{heading} ", (tag, "strong"))
+        text.insert("end", f"{content}\n\n", tag)
 
     def refresh_current(self):
         self.show_page(self.current_page)
@@ -678,10 +761,10 @@ class BookLedgerApp(_WindowBase):
         self.status_filter = tk.StringVar(value="All")
         locations = self.catalog.list_locations()
         filter_specs = (
-            ("Genre", self.genre_filter, ("All",) + self.catalog.list_genres(), 20),
-            ("Condition", self.condition_filter, ("All",) + BOOK_CONDITIONS, 13),
+            ("Genre", self.genre_filter, ("All",) + self.catalog.list_genres(), 18),
+            ("Condition", self.condition_filter, ("All",) + BOOK_CONDITIONS, 12),
             ("Location", self.location_filter, ("All",) + locations, 14),
-            ("Status", self.status_filter, ("All",) + COPY_STATUSES, 13),
+            ("Status", self.status_filter, ("All",) + COPY_STATUSES, 12),
         )
         for label, variable, values, width in filter_specs:
             ttk.Label(filters, text=label).pack(side="left", padx=(0, 5))
@@ -782,23 +865,22 @@ class BookLedgerApp(_WindowBase):
         self._catalog_layout_after_id = None
         self._catalog_pending_layout = None
 
-        def resize_canvas(event):
-            self._queue_catalog_layout(canvas, event.width)
+        def resize_canvas(_event):
+            self._queue_catalog_layout(canvas)
 
         self.catalog_canvas.bind("<Configure>", resize_canvas)
 
-    def _queue_catalog_layout(self, canvas, width):
-        self._catalog_pending_layout = (canvas, width)
+    def _queue_catalog_layout(self, canvas):
+        self._catalog_pending_layout = canvas
         if self._catalog_layout_after_id is None:
             self._catalog_layout_after_id = self.after_idle(self._apply_pending_catalog_layout)
 
     def _apply_pending_catalog_layout(self):
         self._catalog_layout_after_id = None
-        pending = self._catalog_pending_layout
+        canvas = self._catalog_pending_layout
         self._catalog_pending_layout = None
-        if not pending:
+        if canvas is None:
             return
-        canvas, width = pending
         if canvas is not getattr(self, "catalog_canvas", None):
             return
         try:
@@ -806,14 +888,14 @@ class BookLedgerApp(_WindowBase):
                 return
         except tk.TclError:
             return
-        self._layout_catalog_cards(width)
+        self._layout_catalog_cards(canvas.winfo_width())
 
     def _layout_catalog_cards(self, available_width):
         if not self._catalog_card_widgets:
             return
         cell_width = CATALOG_CARD_WIDTH + CATALOG_CARD_GAP
         columns = max(1, int(max(available_width, 1) // cell_width))
-        content_width = min(max(available_width, 1), columns * cell_width)
+        content_width = max(max(available_width, 1), columns * cell_width)
         canvas = getattr(self, "catalog_canvas", None)
         window = getattr(self, "_catalog_window", None)
         if canvas is not None and window is not None:
@@ -870,7 +952,7 @@ class BookLedgerApp(_WindowBase):
             bind_card(card)
         for card in self._catalog_card_widgets:
             self._fix_catalog_card_geometry(card)
-        self._layout_catalog_cards(self.catalog_canvas.winfo_width())
+        self._queue_catalog_layout(self.catalog_canvas)
 
     @staticmethod
     def _fix_catalog_card_geometry(card):
@@ -1535,7 +1617,7 @@ class BookLedgerApp(_WindowBase):
         for provider_id, (name, credential_label, description) in descriptions.items():
             section = ttk.LabelFrame(parent, text=name, padding=12)
             section.pack(fill="x", anchor="n", pady=(0, 10))
-            section.columnconfigure(1, weight=0)
+            section.columnconfigure(0, minsize=140)
             ttk.Label(section, text=description, wraplength=920).grid(row=0, column=0, columnspan=7, sticky="w", pady=(0, 8))
             field_label = ttk.Label(section, text=credential_label)
             field_label.grid(row=1, column=0, sticky="w", padx=(0, 8))
@@ -1556,14 +1638,15 @@ class BookLedgerApp(_WindowBase):
                 button.configure(text="Hide" if visible else "Show")
 
             show_button.configure(command=toggle_visibility)
-            show_button.grid(row=1, column=2, padx=3)
+            show_button.configure(width=8)
+            show_button.grid(row=1, column=2, padx=3, sticky="w")
             save_command = self._save_google_books_key if provider_id == "google_books" else lambda key=provider_id: self._save_provider_credential(key)
             remove_command = self._remove_google_books_key if provider_id == "google_books" else lambda key=provider_id: self._remove_provider_credential(key)
             test_command = self._test_google_books_lookup if provider_id == "google_books" else lambda key=provider_id: self._test_provider_credential(key)
-            ttk.Button(section, text="Test Lookup", command=test_command).grid(row=1, column=3, padx=3)
-            ttk.Button(section, text="Save", command=save_command).grid(row=1, column=4, padx=3)
-            ttk.Button(section, text="Remove", command=remove_command).grid(row=1, column=5, padx=3)
-            ttk.Button(section, text="?", width=3, command=lambda item=name: self._show_api_help(item)).grid(row=1, column=6, padx=(3, 0))
+            ttk.Button(section, text="Test Lookup", width=12, command=test_command).grid(row=1, column=3, padx=3, sticky="w")
+            ttk.Button(section, text="Save", width=8, command=save_command).grid(row=1, column=4, padx=3, sticky="w")
+            ttk.Button(section, text="Remove", width=9, command=remove_command).grid(row=1, column=5, padx=3, sticky="w")
+            ttk.Button(section, text="?", width=3, command=lambda item=name: self._show_api_help(item)).grid(row=1, column=6, padx=(3, 0), sticky="w")
             status = tk.StringVar(value="Saved credentials are masked." if saved_credentials.get(provider_id) else "No saved credential.")
             status_label = ttk.Label(section, textvariable=status, wraplength=920)
             status_label.grid(row=2, column=0, columnspan=7, sticky="w", pady=(8, 0))

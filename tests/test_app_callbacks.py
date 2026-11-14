@@ -70,16 +70,52 @@ def test_about_navigation_opens_the_about_guide():
     assert captured == {"text": "About", "built": True}
 
 
-def test_about_guide_covers_verified_workflows_and_restore_replacement():
-    text = "\n".join(paragraph for _icon, _heading, paragraphs in ABOUT_GUIDE_PAGES for paragraph in paragraphs)
+def _about_guide_text():
+    parts = []
+    for _icon, heading, blocks in ABOUT_GUIDE_PAGES:
+        parts.append(heading)
+        for kind, label, content in blocks:
+            if kind in {"steps", "bullets"}:
+                parts.extend(" ".join(item) for item in content)
+            else:
+                parts.extend((label or "", content))
+    return "\n".join(parts)
 
+
+def test_about_guide_has_nine_practical_pages_and_verified_workflows():
+    text = _about_guide_text()
+    assert [page[1] for page in ABOUT_GUIDE_PAGES] == [
+        "About BookLedger", "Adding books", "Catalog and Inventory", "Sales and reports",
+        "Settings and customization", "Metadata and ISBN lookup", "Backup and restore",
+        "Statuses and messages", "Data and moving between computers",
+    ]
     for phrase in (
-        "physical copy", "Look Up ISBN", "Choose Photo", "Sale History",
-        "Settings → Preferences", "Back Up Now", "Restore Backup…",
-        "does not merge", "USB drive", "computer currently being used",
-        "not encrypted", "simulations",
+        "Bibliographic record", "physical copy", "Look Up ISBN", "Choose Photo",
+        "Sale History", "Not Specified", "shop logo", "Open Library", "Google Books",
+        "Archive.org", "Booktopia", "Bigbook", "Hardcover", "ISBN Lookup Test", "API Management",
+        "Back Up Now", "Restore Backup", "does not merge", "USB drive", "not encrypted",
+        "Not paired", "Paired", "Receiving", "Service error", "colors vary",
+        "Partially retrieved", "No matching ISBN record", "could not be confirmed",
+        "Metadata unavailable", "Provider and field details", "3 seconds or less",
     ):
         assert phrase.casefold() in text.casefold()
+    assert "→" not in text
+
+
+def test_about_manual_renderer_numbers_steps_and_applies_semantic_tags():
+    class Capture:
+        def __init__(self):
+            self.parts = []
+
+        def insert(self, _where, text, tags=()):
+            self.parts.append((text, tags))
+
+    capture = Capture()
+    BookLedgerApp._insert_about_manual_block(capture, ABOUT_GUIDE_PAGES[1][2][1])
+    BookLedgerApp._insert_about_manual_block(capture, ABOUT_GUIDE_PAGES[6][2][2])
+    assert any(text.startswith("1.") for text, _tags in capture.parts)
+    assert any("strong" in tags for _text, tags in capture.parts if isinstance(tags, tuple))
+    assert any("warning" in (tags if isinstance(tags, tuple) else (tags,)) for _text, tags in capture.parts)
 
 
 def test_about_manual_uses_all_navigation_icons_and_clamps_page_navigation():
@@ -111,6 +147,149 @@ def test_about_manual_uses_all_navigation_icons_and_clamps_page_navigation():
     BookLedgerApp._show_about_manual_page(subject, len(ABOUT_GUIDE_PAGES) + 4)
     assert subject.about_page_index == len(ABOUT_GUIDE_PAGES) - 1
     assert subject.about_next_button.options["state"] == "disabled"
+
+
+def test_sidebar_footer_keeps_shop_logo_above_status_and_version():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk widget geometry tests require a display: {exc}")
+    try:
+        footer = ttk.Frame(root)
+        footer.pack()
+        subject = SimpleNamespace(
+            _refresh_brand_logo=lambda: None,
+            _update_mobile_connection_indicator=lambda: None,
+            _open_shop_link=lambda: None,
+        )
+        BookLedgerApp._build_sidebar_footer(subject, footer)
+        root.update()
+        children = footer.winfo_children()
+        assert len(children) == 3
+        assert children[0] is subject.brand_logo_label
+        assert children[1] is subject.mobile_connection_status_label
+        assert children[2].cget("text").startswith("Version ")
+        assert subject.mobile_connection_status_label.winfo_rooty() > subject.brand_logo_label.winfo_rooty()
+        assert children[2].winfo_rooty() > subject.mobile_connection_status_label.winfo_rooty()
+    finally:
+        root.destroy()
+
+
+def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk widget geometry tests require a display: {exc}")
+    try:
+        root.geometry("1000x650+0+0")
+        root.theme_style = ttk.Style(root)
+        root.show_page = lambda *_args: None
+        root._open_shop_link = lambda: None
+        root._animate_navigation_button = lambda *_args: None
+        root._show_hover_tooltip = lambda *_args: None
+        root._hide_hover_tooltip = lambda *_args: None
+        root._bind_status_color = lambda *_args: None
+        root._build_sidebar_footer = lambda footer: BookLedgerApp._build_sidebar_footer(root, footer)
+        root._theme_startup_warning = ""
+
+        def refresh_logo():
+            root._brand_image = tk.PhotoImage(master=root, width=186, height=62)
+            root.brand_logo_label.configure(image=root._brand_image)
+
+        root._refresh_brand_logo = refresh_logo
+        root._update_mobile_connection_indicator = lambda: root.mobile_connection_status_var.set("● Not paired")
+        BookLedgerApp._configure_style(root)
+        BookLedgerApp._build_shell(root)
+        root.update()
+
+        footer = root.brand_logo_label.master
+        sidebar_bottom = root.sidebar.winfo_rooty() + root.sidebar.winfo_height()
+        footer_bottom = footer.winfo_rooty() + footer.winfo_height()
+        assert footer_bottom <= sidebar_bottom
+        assert root.nav_buttons["About"].winfo_rooty() + root.nav_buttons["About"].winfo_height() <= root.brand_logo_label.winfo_rooty()
+        assert root.brand_logo_label.winfo_rooty() < root.mobile_connection_status_label.winfo_rooty()
+        assert root.mobile_connection_status_label.winfo_rooty() < footer.winfo_children()[2].winfo_rooty()
+        assert footer.winfo_children()[2].winfo_rooty() + footer.winfo_children()[2].winfo_height() <= sidebar_bottom
+        assert len(root.nav_buttons) == len(NAVIGATION_ITEMS)
+    finally:
+        root.destroy()
+
+
+def test_about_footer_stays_visible_and_centers_navigation_at_normal_window_size():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk widget geometry tests require a display: {exc}")
+    try:
+        root.geometry("1000x650+0+0")
+        workspace = ttk.Frame(root)
+        workspace.pack(fill="both", expand=True)
+        subject = SimpleNamespace(
+            workspace=workspace,
+            status_var=tk.StringVar(root),
+            about_page_index=0,
+            _nav_image_sets={},
+            _mousewheel_router=None,
+        )
+        subject._show_about_manual_page = lambda index: BookLedgerApp._show_about_manual_page(subject, index)
+        BookLedgerApp._build_about_page(subject)
+        root.update()
+        navigation = subject.about_back_button.master
+        center = navigation.winfo_rootx() + navigation.winfo_width() / 2
+        workspace_center = workspace.winfo_rootx() + workspace.winfo_width() / 2
+        assert abs(center - workspace_center) <= 2
+        bottom = workspace.winfo_rooty() + workspace.winfo_height()
+        assert subject.about_back_button.winfo_rooty() + subject.about_back_button.winfo_height() <= bottom
+        assert subject.about_next_button.winfo_rooty() + subject.about_next_button.winfo_height() <= bottom
+        assert subject.about_page_count.cget("text") == "1 of 9"
+        assert {"strong", "warning", "note"}.issubset(set(subject.about_text.tag_names()))
+        subject._show_about_manual_page(8)
+        assert subject.about_next_button.instate(["disabled"])
+    finally:
+        root.destroy()
+
+
+def test_api_management_fields_and_buttons_share_aligned_columns():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk widget geometry tests require a display: {exc}")
+    try:
+        root.geometry("1000x650+0+0")
+        parent = ttk.Frame(root, padding=8)
+        parent.pack(fill="both", expand=True)
+        subject = SimpleNamespace(
+            _load_api_credentials=lambda: {},
+            _bind_status_color=lambda *_args: None,
+            _configuration_warnings=[],
+            provider_settings_store=SimpleNamespace(warning=None),
+            _show_hover_tooltip=lambda *_args: None,
+            _hide_hover_tooltip=lambda *_args: None,
+            _save_google_books_key=lambda: None,
+            _remove_google_books_key=lambda: None,
+            _test_google_books_lookup=lambda: None,
+            _save_provider_credential=lambda *_args: None,
+            _remove_provider_credential=lambda *_args: None,
+            _test_provider_credential=lambda *_args: None,
+            _show_api_help=lambda *_args: None,
+        )
+        BookLedgerApp._build_api_management(subject, parent)
+        root.update_idletasks()
+        assert len(subject._api_credential_entries) == 3
+        entries = tuple(subject._api_credential_entries.values())
+        assert len({entry.winfo_rootx() for entry in entries}) == 1
+        assert len({entry.winfo_width() for entry in entries}) == 1
+        sections = parent.winfo_children()
+        row_positions = []
+        row_widths = []
+        for section in sections:
+            widgets = {int(widget.grid_info()["column"]): widget for widget in section.grid_slaves(row=1)}
+            row_positions.append(tuple(widgets[column].winfo_rootx() for column in range(2, 7)))
+            row_widths.append(tuple(widgets[column].winfo_width() for column in range(2, 7)))
+        assert len(set(row_positions)) == 1
+        assert len(set(row_widths)) == 1
+    finally:
+        root.destroy()
 
 
 def test_every_navigation_button_has_a_tooltip():
@@ -367,15 +546,20 @@ def test_catalog_grid_renders_fixed_width_cards_left_aligned_at_responsive_sizes
     except tk.TclError as exc:
         pytest.skip(f"Tk widget geometry tests require a display: {exc}")
     try:
-        root.geometry("760x420+0+0")
-        container = ttk.Frame(root)
-        container.pack(fill="both", expand=True)
+        root.geometry("1000x650+0+0")
+        shell = ttk.Frame(root)
+        shell.pack(fill="both", expand=True)
+        sidebar = ttk.Frame(shell, width=210)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        container = ttk.Frame(shell, padding=(22, 18))
+        container.pack(side="left", fill="both", expand=True)
         subject = SimpleNamespace(
             _catalog_card_widgets=[],
             _catalog_grid_columns=0,
             after_idle=root.after_idle,
         )
-        subject._queue_catalog_layout = lambda canvas, width: BookLedgerApp._queue_catalog_layout(subject, canvas, width)
+        subject._queue_catalog_layout = lambda canvas: BookLedgerApp._queue_catalog_layout(subject, canvas)
         subject._apply_pending_catalog_layout = lambda: BookLedgerApp._apply_pending_catalog_layout(subject)
         subject._layout_catalog_cards = lambda width: BookLedgerApp._layout_catalog_cards(subject, width)
         BookLedgerApp._build_catalog_grid(subject, container)
@@ -395,22 +579,22 @@ def test_catalog_grid_renders_fixed_width_cards_left_aligned_at_responsive_sizes
         root.update()
 
         assert subject._catalog_grid_columns == 2
-        assert cards.winfo_width() == min(canvas.winfo_width(), 2 * (CATALOG_CARD_WIDTH + 14))
+        assert cards.winfo_width() == canvas.winfo_width()
         assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
         assert widgets[0].winfo_x() < 20
         assert widgets[1].winfo_x() > widgets[0].winfo_x()
 
-        root.geometry("360x420+0+0")
+        root.geometry("740x520+0+0")
         root.update()
         assert subject._catalog_grid_columns == 1
-        assert cards.winfo_width() == min(canvas.winfo_width(), CATALOG_CARD_WIDTH + 14)
+        assert cards.winfo_width() == canvas.winfo_width()
         assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
         assert widgets[0].winfo_x() < 20
 
-        root.geometry("1000x650+0+0")
+        root.geometry("1280x800+0+0")
         root.update()
         assert subject._catalog_grid_columns == 3
-        assert cards.winfo_width() == min(canvas.winfo_width(), 3 * (CATALOG_CARD_WIDTH + 14))
+        assert cards.winfo_width() == canvas.winfo_width()
         assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
         assert widgets[0].winfo_x() < 20
     finally:
