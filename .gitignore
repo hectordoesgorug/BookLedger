@@ -1,6 +1,8 @@
 # Python
 __pycache__/
 .pytest_cache/
+# Pytest temporary bases created by local test runs
+/.pytest-tmp-*/
 *.py[cod]
 
 # Virtual environments

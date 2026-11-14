@@ -68,7 +68,7 @@ def test_schema_v7_migrates_to_poster_templates_without_touching_copy_records(tm
 
     migrated = Database(paths.database)
     with migrated.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
         assert conn.execute("SELECT title FROM book_records WHERE id=9").fetchone()[0] == "Keep"
         assert conn.execute("SELECT COUNT(*) FROM poster_templates").fetchone()[0] == 0
 

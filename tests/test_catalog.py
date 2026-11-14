@@ -66,6 +66,13 @@ def test_catalog_service_rejects_unapproved_genres(setup):
     assert "genre" in exc.value.errors
 
 
+def test_catalog_service_rejects_conditions_outside_the_shared_list(setup):
+    _, _, _, service, payload, _ = setup
+    with pytest.raises(ValidationError) as exc:
+        service.create_copy({**payload, "condition": "Excellent"})
+    assert exc.value.errors["condition"] == "Choose one of the approved conditions."
+
+
 def test_create_copy_assigns_copy_id_and_default_location(setup):
     _, _, _, service, payload, _ = setup
     copy_id = service.create_copy(payload)
@@ -92,12 +99,12 @@ def test_copy_filters_and_dashboard_counts_use_physical_and_record_levels(setup)
     service.add_location("Shelf B")
     first = service.create_copy({**payload, "location": "Shelf A", "condition": "Good"})
     shared_book = service.duplicate_by_isbn(payload["isbn"])
-    service.create_copy({**payload, "location": "Shelf B", "condition": "Like New"}, existing_book_id=shared_book["id"])
+    service.create_copy({**payload, "location": "Shelf B", "condition": "Good as New"}, existing_book_id=shared_book["id"])
     service.create_copy({**payload, "title": "Second Record", "isbn": "9780140449136", "genre": "History", "location": "Shelf A", "condition": "Good"})
 
     filtered = service.list_copies(genre="Science", condition="Good", location="Shelf A", status="Available")
     assert [row["copy_id"] for row in filtered] == [first]
-    assert service.list_copies(location="Shelf B")[0]["condition"] == "Like New"
+    assert service.list_copies(location="Shelf B")[0]["condition"] == "Good as New"
     service.change_status(first, "Sold")
 
     counts = service.counts()
@@ -126,6 +133,7 @@ def test_exact_isbn_duplicate_requires_reusing_record(setup):
     assert len(service.list_copies()) == 2
     assert len({r["book_id"] for r in service.list_copies()}) == 1
     assert [r["copy_number"] for r in service.list_copies()] == [1, 2]
+    assert service.get_copy(second)["condition"] == "Fair"
 
 
 def test_copy_numbers_start_independently_for_separate_bibliographic_records(setup):
@@ -440,7 +448,7 @@ def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(
     assert CatalogService(db).list_genres() == genres
     assert CatalogService(db).list_formats() == formats
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
 
 
 def test_genre_and_format_rename_migrate_assignments_atomically_and_allow_unassigned_delete(setup):
@@ -516,13 +524,35 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 11
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
         assert migrated.execute("SELECT voided_at FROM sales WHERE id=1").fetchone()[0]
     service.change_status(1, "Sold")
     assert len(service.list_sales()) == 2
     assert service.list_sales()[1]["price_minor"] == 9900
     assert service.list_sales()[1]["voided_at"]
+
+
+def test_v10_migration_normalizes_legacy_conditions_without_changing_copy_ids(tmp_path):
+    path = tmp_path / "v10.sqlite3"
+    db = Database(path)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(1,'One','Author','Science')")
+        conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(2,'Two','Author','Science')")
+        conn.execute("INSERT INTO copies(id,copy_uuid,copy_code,book_id,copy_number,format,condition,photo_path,price_minor) VALUES(1,'legacy-1','BL-000001',1,1,'Paperback','Like New','photos/1.jpg',1000)")
+        conn.execute("INSERT INTO copies(id,copy_uuid,copy_code,book_id,copy_number,format,condition,photo_path,price_minor) VALUES(2,'legacy-2','BL-000002',2,1,'Paperback','Acceptable','photos/2.jpg',1000)")
+        conn.execute("INSERT INTO trash_entries(copy_id,original_status) VALUES(2,'Available')")
+        conn.execute("PRAGMA user_version=10")
+
+    Database(path)
+
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert [tuple(row) for row in conn.execute("SELECT id,condition FROM copies ORDER BY id")] == [
+            (1, "Good as New"), (2, "Fair")
+        ]
+        assert conn.execute("SELECT copy_id FROM trash_entries").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM mobile_activity_events").fetchone()[0] == 0
 
 
 def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_path):
@@ -533,7 +563,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy\n    ON sales(copy_id) WHERE voided_at IS NULL;\n", ""
     ).replace("    copy_uuid TEXT NOT NULL UNIQUE,\n", "").replace(
         "CREATE TRIGGER IF NOT EXISTS copies_copy_uuid_immutable\n    BEFORE UPDATE OF copy_uuid ON copies\n    WHEN OLD.copy_uuid IS NOT NULL AND NEW.copy_uuid IS NOT OLD.copy_uuid\n    BEGIN SELECT RAISE(ABORT, 'copy UUID is immutable'); END;\n", ""
-    ).replace("PRAGMA user_version = 10;", "PRAGMA user_version = 4;")
+    ).replace("PRAGMA user_version = 11;", "PRAGMA user_version = 4;")
     conn = sqlite3.connect(path)
     conn.executescript(legacy_schema)
     conn.execute("DROP TABLE mobile_incoming_captures")
@@ -551,7 +581,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
     db = Database(path)
     with db.connect() as migrated:
         rows = migrated.execute("SELECT id,copy_id,price_minor,sale_date,voided_at FROM sales ORDER BY id").fetchall()
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 11
         assert [(row["id"], row["price_minor"], row["sale_date"]) for row in rows] == [
             (10, 15000, "2026-01-01"), (11, 20000, "2026-02-02"), (12, 25000, "2026-03-03")
         ]

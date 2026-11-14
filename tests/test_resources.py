@@ -22,6 +22,8 @@ from bookledger.resources import (
 def test_bundled_resources_are_relative_to_the_module_not_the_current_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert resource_path("assets", "icon.ico").is_file()
+    with Image.open(resource_path("assets", "banner.png")) as banner:
+        assert banner.size == (2172, 724)
     for filename in (
         "icon-dashboard.svg", "icon-catalog.svg", "icon-inventory.svg", "icon-acquisitions.svg",
         "icon-sale history.svg", "icon-reports.svg", "icon-settings.svg", "icon-help.svg",

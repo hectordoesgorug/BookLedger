@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 import sqlite3
 import uuid
-from bookledger.config import APPROVED_GENRES, COPY_STATUSES, DEFAULT_FORMATS, DEFAULT_LOCATION
+from bookledger.config import APPROVED_GENRES, BOOK_CONDITIONS, COPY_STATUSES, DEFAULT_FORMATS, DEFAULT_LOCATION, normalize_condition
 from bookledger.db.database import Database
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.photos import PhotoService
@@ -291,12 +291,15 @@ class CatalogService:
                 }[field]
         genre = str(payload.get("genre") or "").strip()
         format_name = str(payload.get("format") or "").strip()
+        condition = normalize_condition(str(payload.get("condition") or "").strip())
         genres = self._configurable_values(conn, "genre") if conn is not None else self.list_genres()
         formats = self._configurable_values(conn, "format") if conn is not None else self.list_formats()
         if genre and genre not in genres:
             errors["genre"] = "Choose one of the approved genres."
         if format_name and format_name not in formats:
             errors["format"] = "Choose one of the approved formats."
+        if condition and condition not in BOOK_CONDITIONS:
+            errors["condition"] = "Choose one of the approved conditions."
         try:
             price = float(str(payload.get("price") or "").replace(",", ""))
             scaled_price = price * 100
@@ -517,7 +520,7 @@ class CatalogService:
             cur = conn.execute(
                 """INSERT INTO copies(copy_uuid,book_id,copy_number,format,condition,location,photo_path,price_minor,status)
                    VALUES(?,?,?,?,?,?,?,?,?)""",
-                (copy_uuid or str(uuid.uuid4()), book_id, next_number, payload["format"].strip(), payload["condition"].strip(), location,
+                (copy_uuid or str(uuid.uuid4()), book_id, next_number, payload["format"].strip(), normalize_condition(payload["condition"].strip()), location,
                  "photos/pending.jpg", price_minor, "Available"),
             )
             copy_id = int(cur.lastrowid)
@@ -643,7 +646,7 @@ class CatalogService:
                 raise ValidationError({"isbn": "Another bibliographic record already uses this ISBN."}) from exc
             conn.execute(
                 """UPDATE copies SET format=?,condition=?,location=?,photo_path=?,price_minor=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                (payload["format"].strip(),payload["condition"].strip(),self._canonical_location(conn,payload.get("location")),
+                (payload["format"].strip(),normalize_condition(payload["condition"].strip()),self._canonical_location(conn,payload.get("location")),
                  row["photo_path"],price_minor,copy_id),
             )
             new_photo = self._resolve_photo(payload["photo_path"])

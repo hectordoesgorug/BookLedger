@@ -31,6 +31,20 @@ DEFAULT_FORMATS = (
     "Other",
 )
 
+BOOK_CONDITIONS = (
+    "Brand New",
+    "Good as New",
+    "Very Good",
+    "Good",
+    "Fair",
+    "Poor",
+)
+LEGACY_CONDITIONS = {"Like New": "Good as New", "Acceptable": "Fair"}
+
+
+def normalize_condition(value: str) -> str:
+    return LEGACY_CONDITIONS.get(value, value)
+
 COPY_STATUSES = ("Available", "Not for Sale", "Listed", "Sold")
 DEFAULT_LOCATION = "Not Specified"
 CURRENCY = "PHP"

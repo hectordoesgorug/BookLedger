@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -16,9 +17,10 @@ from bookledger.services.mobile_connection import (
 class MobileAppSetupPanel(ttk.Frame):
     """Settings view for the local Android pairing service."""
 
-    def __init__(self, parent, service: MobileConnectionService):
+    def __init__(self, parent, service: MobileConnectionService, activity_store):
         super().__init__(parent)
         self.service = service
+        self.activity_store = activity_store
         self._qr_image = None
         self._last_qr_payload = None
         self._refresh_after_id = None
@@ -49,6 +51,16 @@ class MobileAppSetupPanel(ttk.Frame):
         ttk.Label(address_frame, textvariable=self.discovery_var).pack(
             anchor="nw", pady=(8, 0)
         )
+        activity = ttk.LabelFrame(address_frame, text="Mobile activity", padding=6)
+        activity.pack(fill="both", expand=True, pady=(10, 0))
+        self.activity_text = tk.Text(activity, height=8, wrap="word", state="disabled", relief="flat", borderwidth=0, font=("Segoe UI", 9))
+        activity_scrollbar = ttk.Scrollbar(activity, orient="vertical", command=self.activity_text.yview)
+        self.activity_text.configure(yscrollcommand=activity_scrollbar.set)
+        self.activity_text.pack(side="left", fill="both", expand=True)
+        activity_scrollbar.pack(side="right", fill="y")
+        self.activity_text.tag_configure("success", foreground="#16803c")
+        self.activity_text.tag_configure("warning", foreground="#a15c00")
+        self.activity_text.tag_configure("error", foreground="#b42318")
 
         pairing_frame = ttk.LabelFrame(self, text="Pair Android companion", padding=10)
         pairing_frame.grid(row=2, column=1, sticky="nsew", padx=(8, 0))
@@ -66,6 +78,8 @@ class MobileAppSetupPanel(ttk.Frame):
 
         actions = ttk.Frame(pairing_frame)
         actions.pack(fill="x")
+        self.download_button = ttk.Button(actions, text="Download App", state="disabled")
+        self.download_button.pack(side="left", padx=(0, 8))
         self.copy_button = ttk.Button(
             actions, text="Copy pairing code", command=self._copy_credential
         )
@@ -100,7 +114,25 @@ class MobileAppSetupPanel(ttk.Frame):
         ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
         self.service.start()
+        self.refresh_activity()
         self._refresh_after_id = self.after(250, self._refresh_view)
+
+    def refresh_activity(self):
+        entries = self.activity_store.latest()
+        self.activity_text.configure(state="normal")
+        self.activity_text.delete("1.0", "end")
+        if not entries:
+            self.activity_text.insert("end", "No mobile activity yet.")
+        for entry in entries:
+            try:
+                timestamp = datetime.fromisoformat(entry["created_at"].replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+            except (ValueError, AttributeError):
+                timestamp = ""
+            start = self.activity_text.index("end-1c")
+            self.activity_text.insert("end", f"{timestamp}  {entry['description']}\n", entry["level"])
+            if entry["level"] == "neutral":
+                self.activity_text.tag_add("neutral", start, "end-1c")
+        self.activity_text.configure(state="disabled")
 
     def _refresh_view(self):
         self._refresh_after_id = None

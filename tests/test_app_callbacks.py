@@ -5,7 +5,7 @@ from PIL import Image
 import pytest
 
 from bookledger import app as app_module
-from bookledger.app import ABOUT_GUIDE_SECTIONS, CATALOG_CARD_WIDTH, BookLedgerApp
+from bookledger.app import ABOUT_GUIDE_PAGES, CATALOG_CARD_WIDTH, NAVIGATION_ITEMS, NAVIGATION_TOOLTIPS, BookLedgerApp
 from bookledger.config_store import AppConfigStore
 
 
@@ -71,7 +71,7 @@ def test_about_navigation_opens_the_about_guide():
 
 
 def test_about_guide_covers_verified_workflows_and_restore_replacement():
-    text = "\n".join(paragraph for _heading, paragraphs in ABOUT_GUIDE_SECTIONS for paragraph in paragraphs)
+    text = "\n".join(paragraph for _icon, _heading, paragraphs in ABOUT_GUIDE_PAGES for paragraph in paragraphs)
 
     for phrase in (
         "physical copy", "Look Up ISBN", "Choose Photo", "Sale History",
@@ -80,6 +80,41 @@ def test_about_guide_covers_verified_workflows_and_restore_replacement():
         "not encrypted", "simulations",
     ):
         assert phrase.casefold() in text.casefold()
+
+
+def test_about_manual_uses_all_navigation_icons_and_clamps_page_navigation():
+    class Widget:
+        def __init__(self):
+            self.options = {}
+
+        def configure(self, **options):
+            self.options.update(options)
+
+    text = Widget()
+    subject = SimpleNamespace(
+        about_page_index=0,
+        about_icon_label=Widget(), about_heading_label=Widget(), about_page_count=Widget(),
+        about_text=SimpleNamespace(
+            configure=lambda **_options: None, delete=lambda *_args: None,
+            insert=lambda *_args: None,
+        ),
+        about_back_button=Widget(), about_next_button=Widget(),
+        _nav_image_sets={"Dashboard": ("dashboard-icon",)},
+    )
+
+    BookLedgerApp._show_about_manual_page(subject, -1)
+    assert subject.about_page_index == 0
+    assert subject.about_back_button.options["state"] == "disabled"
+    assert subject.about_next_button.options["state"] == "normal"
+    assert subject.about_icon_label.options["image"] == "dashboard-icon"
+
+    BookLedgerApp._show_about_manual_page(subject, len(ABOUT_GUIDE_PAGES) + 4)
+    assert subject.about_page_index == len(ABOUT_GUIDE_PAGES) - 1
+    assert subject.about_next_button.options["state"] == "disabled"
+
+
+def test_every_navigation_button_has_a_tooltip():
+    assert {name for name, _icon, _fallback in NAVIGATION_ITEMS} == set(NAVIGATION_TOOLTIPS)
 
 
 def test_double_click_uses_the_matching_active_tree_row():
@@ -129,8 +164,8 @@ def test_inventory_rows_include_physical_copy_number():
             self.rows.append((iid, values, tags))
 
     records = [
-        {"copy_id": 41, "copy_code": "BL-000041", "copy_number": 1, "title": "Shared Title", "author": "Author", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
-        {"copy_id": 42, "copy_code": "BL-000042", "copy_number": 2, "title": "Shared Title", "author": "Author", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
+        {"copy_id": 41, "copy_code": "BL-000041", "copy_number": 1, "title": "Shared Title", "author": "Author", "genre": "Science", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
+        {"copy_id": 42, "copy_code": "BL-000042", "copy_number": 2, "title": "Shared Title", "author": "Author", "genre": "History", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
     ]
     subject = SimpleNamespace(
         catalog=SimpleNamespace(list_copies=lambda *_args: records),
@@ -146,7 +181,40 @@ def test_inventory_rows_include_physical_copy_number():
     BookLedgerApp._populate_catalog(subject)
 
     assert [entry[1][1] for entry in subject.tree.rows] == [1, 2]
+    assert [entry[1][4] for entry in subject.tree.rows] == ["Science", "History"]
     assert all(entry[2] == ("inventory_status_available",) for entry in subject.tree.rows)
+
+
+def test_mobile_indicator_maps_only_supported_service_states():
+    class Label:
+        def configure(self, **options):
+            self.options = options
+
+    class Variable:
+        def set(self, value):
+            self.value = value
+
+    subject = SimpleNamespace(
+        mobile_connection_status_label=Label(), mobile_connection_status_var=Variable(),
+        mobile_connection_service=SimpleNamespace(status="ready", paired=False),
+        _incoming_reception_active=False,
+    )
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.mobile_connection_status_var.value.endswith("Not paired")
+
+    subject.mobile_connection_service.paired = True
+    subject.mobile_connection_service.status = "paired"
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.mobile_connection_status_var.value.endswith("Paired")
+
+    subject._incoming_reception_active = True
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.mobile_connection_status_var.value.endswith("Receiving")
+
+    subject._incoming_reception_active = False
+    subject.mobile_connection_service.status = "error"
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.mobile_connection_status_var.value.endswith("Service error")
 
 
 def test_explicit_copy_id_does_not_read_tree_selection(monkeypatch):
@@ -341,8 +409,8 @@ def test_catalog_grid_renders_fixed_width_cards_left_aligned_at_responsive_sizes
 
         root.geometry("1000x650+0+0")
         root.update()
-        assert subject._catalog_grid_columns == 2
-        assert cards.winfo_width() == min(canvas.winfo_width(), 2 * (CATALOG_CARD_WIDTH + 14))
+        assert subject._catalog_grid_columns == 3
+        assert cards.winfo_width() == min(canvas.winfo_width(), 3 * (CATALOG_CARD_WIDTH + 14))
         assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
         assert widgets[0].winfo_x() < 20
     finally:

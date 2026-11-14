@@ -125,6 +125,33 @@ def test_pairing_qr_contains_every_candidate_and_only_temporary_credential():
     assert "device_token" not in payload
 
 
+def test_service_reports_state_changes_and_only_allowlisted_pairing_events():
+    config = MemoryConfig()
+    activity = []
+    states = []
+    instance = MobileConnectionService(
+        config, port=0, candidate_provider=lambda: [],
+        token_protector=lambda value: "protected:" + value,
+        token_unprotector=lambda value: value.removeprefix("protected:"),
+        on_activity=activity.append,
+        on_state_change=lambda: states.append(True),
+    )
+    instance.start()
+    try:
+        deadline = time.monotonic() + 3
+        while instance.status == "starting" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        credential = instance.pairing_credential
+        token, status = instance._pair(credential, "Private phone name")
+        assert status == 201
+        instance.unpair()
+        assert activity == ["pairing_established", "device_unpaired"]
+        assert len(states) >= 3
+        assert all(secret not in repr(activity) for secret in (credential, token["device_token"], "Private phone name"))
+    finally:
+        instance.stop()
+
+
 def test_service_start_is_idempotent_and_health_endpoint_is_available(service):
     instance, _config = service
     thread = instance._thread

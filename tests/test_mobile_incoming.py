@@ -277,6 +277,7 @@ def test_authenticated_http_transfer_stages_and_completes_batch(incoming):
     _db, _data_dir, store = incoming
     receiver_states = []
     completed_batches = []
+    activity_events = []
     service = MobileConnectionService(
         object(),
         port=0,
@@ -286,6 +287,7 @@ def test_authenticated_http_transfer_stages_and_completes_batch(incoming):
         incoming_store=store,
         on_reception_change=receiver_states.append,
         on_batch_ready=completed_batches.append,
+        on_activity=activity_events.append,
     )
     service._token = "t" * 48
     service.start()
@@ -331,4 +333,5 @@ def test_authenticated_http_transfer_stages_and_completes_batch(incoming):
 
     assert receiver_states == [True, False]
     assert completed_batches == [batch_id]
+    assert activity_events == ["batch_started", "reception_started", "capture_received", "transfer_completed"]
     assert len(store.pending_captures(batch_id)) == 1

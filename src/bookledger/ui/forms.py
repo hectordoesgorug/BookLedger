@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from bookledger.config import APPROVED_GENRES, DEFAULT_FORMATS, DEFAULT_LOCATION
+from bookledger.config import APPROVED_GENRES, BOOK_CONDITIONS, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import isbn_check, normalize_isbn
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
@@ -176,7 +176,7 @@ class BookForm(tk.Toplevel):
         self._field(body, "Format", "format", row, column=0, required=True, values=format_values)
         self._field(body, "Location", "location", row, column=2, values=self.service.list_locations())
         row += 2
-        self._field(body, "Condition", "condition", row, column=0, required=True, values=("Like New", "Very Good", "Good", "Acceptable", "Poor"))
+        self._field(body, "Condition", "condition", row, column=0, required=True, values=BOOK_CONDITIONS)
         self._field(body, "Price (PHP)", "price", row, column=2, required=True)
         row += 2
         row = self._photo_row(body, row)

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _DATABASE_LOCKS: dict[str, threading.RLock] = {}
 _DATABASE_LOCKS_GUARD = threading.Lock()
@@ -114,6 +114,11 @@ CREATE TABLE IF NOT EXISTS mobile_incoming_batches (
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     cataloged_at TEXT
 );
+CREATE TABLE IF NOT EXISTS mobile_activity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 CREATE TABLE IF NOT EXISTS mobile_incoming_captures (
     capture_uuid TEXT PRIMARY KEY,
     batch_uuid TEXT NOT NULL REFERENCES mobile_incoming_batches(batch_uuid) ON DELETE CASCADE,
@@ -125,7 +130,7 @@ CREATE TABLE IF NOT EXISTS mobile_incoming_captures (
     UNIQUE(batch_uuid, photo_name)
 );
 CREATE INDEX IF NOT EXISTS ix_mobile_incoming_batch_order ON mobile_incoming_captures(batch_uuid,sequence);
-PRAGMA user_version = 10;
+PRAGMA user_version = 11;
 """
 
 
@@ -354,6 +359,26 @@ class Database:
                     conn.execute("PRAGMA user_version = 10")
                     conn.commit()
                     version = 10
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 10:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute(
+                        "UPDATE copies SET condition='Good as New' WHERE condition='Like New'"
+                    )
+                    conn.execute(
+                        "UPDATE copies SET condition='Fair' WHERE condition='Acceptable'"
+                    )
+                    conn.execute("""CREATE TABLE IF NOT EXISTS mobile_activity_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event TEXT NOT NULL,
+                        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                    )""")
+                    conn.execute("PRAGMA user_version = 11")
+                    conn.commit()
+                    version = 11
                 except Exception:
                     conn.rollback()
                     raise

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sqlite3
 import threading
 import uuid
@@ -205,3 +206,41 @@ def test_failed_component_activation_rolls_back_library_and_keeps_recovery(setup
     assert {row["title"] for row in rows} == {"Test Book", "Current library"}
     assert catalog.get_copy(first_id)["copy_uuid"] == original_uuid
     assert backups.latest_recovery_point and backups.latest_recovery_point.is_file()
+
+
+def test_restore_migrates_legacy_condition_values_from_an_older_backup(setup):
+    root, data, db, catalog, payload, _photo = setup
+    first = catalog.create_copy({**payload, "condition": "Good as New"})
+    book = catalog.duplicate_by_isbn(payload["isbn"])
+    second = catalog.create_copy({**payload, "condition": "Fair"}, existing_book_id=book["id"])
+    backups = BackupService(db, data, root / "backups")
+    current = backups.create_backup()
+
+    with zipfile.ZipFile(current, "r") as archive:
+        members = {name: archive.read(name) for name in archive.namelist() if name != BackupService.MANIFEST}
+        manifest = json.loads(archive.read(BackupService.MANIFEST))
+    staged_db = root / "legacy.sqlite3"
+    staged_db.write_bytes(members[BackupService.DB_MEMBER])
+    connection = sqlite3.connect(staged_db)
+    connection.execute("UPDATE copies SET condition='Like New' WHERE id=?", (first,))
+    connection.execute("UPDATE copies SET condition='Acceptable' WHERE id=?", (second,))
+    connection.execute("PRAGMA user_version=10")
+    connection.commit()
+    connection.close()
+    members[BackupService.DB_MEMBER] = staged_db.read_bytes()
+    manifest["files"][BackupService.DB_MEMBER] = {
+        "size": len(members[BackupService.DB_MEMBER]),
+        "sha256": hashlib.sha256(members[BackupService.DB_MEMBER]).hexdigest(),
+    }
+    legacy_backup = root / "legacy-conditions.zip"
+    with zipfile.ZipFile(legacy_backup, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+        archive.writestr(BackupService.MANIFEST, json.dumps(manifest).encode("utf-8"))
+
+    valid, message = backups.verify_archive(legacy_backup)
+    assert valid, message
+    backups.restore_backup(legacy_backup)
+
+    restored = {row["copy_id"]: row["condition"] for row in catalog.list_copies()}
+    assert restored == {first: "Good as New", second: "Fair"}
