@@ -17,7 +17,7 @@ from bookledger.services.mobile_connection import (
 class MobileAppSetupPanel(ttk.Frame):
     """Settings view for the local Android pairing service."""
 
-    def __init__(self, parent, service: MobileConnectionService, activity_store):
+    def __init__(self, parent, service: MobileConnectionService, activity_store, *, on_export_apk):
         super().__init__(parent)
         self.service = service
         self.activity_store = activity_store
@@ -78,8 +78,8 @@ class MobileAppSetupPanel(ttk.Frame):
 
         actions = ttk.Frame(pairing_frame)
         actions.pack(fill="x")
-        self.download_button = ttk.Button(actions, text="Download App", state="disabled")
-        self.download_button.pack(side="left", padx=(0, 8))
+        self.export_button = ttk.Button(actions, text="Export APK", command=on_export_apk)
+        self.export_button.pack(side="left", padx=(0, 8))
         self.copy_button = ttk.Button(
             actions, text="Copy pairing code", command=self._copy_credential
         )

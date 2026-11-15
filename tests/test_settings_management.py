@@ -246,6 +246,76 @@ def test_export_inventory_csv_reports_file_errors(tmp_path, monkeypatch):
     assert "blocked" in errors[0][1]
 
 
+def test_export_apk_copies_selected_file_and_preserves_bundled_source(tmp_path, monkeypatch):
+    root = tmp_path / 'portable'
+    source = root / 'mobile' / 'BookLedger-Android.apk'
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'synthetic release apk')
+    original = source.read_bytes()
+    destination = tmp_path / 'exported.apk'
+    destination.write_bytes(b'previous destination')
+    errors = []
+    successes = []
+    subject = SimpleNamespace(
+        paths=SimpleNamespace(root=root),
+        status_var=Value(),
+    )
+
+    def save_dialog(**kwargs):
+        assert kwargs['initialfile'] == source.name
+        assert kwargs['defaultextension'] == '.apk'
+        assert kwargs['confirmoverwrite'] is True
+        return str(destination)
+
+    monkeypatch.setattr(app_module.filedialog, 'asksaveasfilename', save_dialog)
+    monkeypatch.setattr(app_module.messagebox, 'showerror', lambda *args, **_kwargs: errors.append(args))
+    monkeypatch.setattr(app_module.messagebox, 'showinfo', lambda *args, **_kwargs: successes.append(args))
+
+    assert BookLedgerApp.export_apk(subject) is True
+    assert destination.read_bytes() == original
+    assert source.read_bytes() == original
+    assert not errors and successes
+    assert 'exported.apk' in subject.status_var.get()
+
+
+def test_export_apk_cancellation_and_missing_bundle_are_safe(tmp_path, monkeypatch):
+    root = tmp_path / 'portable'
+    source = root / 'mobile' / 'BookLedger-Android.apk'
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'synthetic release apk')
+    errors = []
+    subject = SimpleNamespace(paths=SimpleNamespace(root=root), status_var=Value())
+    monkeypatch.setattr(app_module.filedialog, 'asksaveasfilename', lambda **_kwargs: '')
+    monkeypatch.setattr(app_module.messagebox, 'showerror', lambda *args, **_kwargs: errors.append(args))
+
+    assert BookLedgerApp.export_apk(subject) is False
+    assert source.is_file()
+    assert not errors
+
+    source.unlink()
+    assert BookLedgerApp.export_apk(subject) is False
+    assert errors and errors[-1][0] == 'APK unavailable'
+
+
+def test_export_apk_reports_destination_failure(tmp_path, monkeypatch):
+    root = tmp_path / 'portable'
+    source = root / 'mobile' / 'BookLedger-Android.apk'
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'synthetic release apk')
+    errors = []
+    subject = SimpleNamespace(paths=SimpleNamespace(root=root), status_var=Value())
+    monkeypatch.setattr(
+        app_module.filedialog,
+        'asksaveasfilename',
+        lambda **_kwargs: str(tmp_path / 'missing-parent' / 'export.apk'),
+    )
+    monkeypatch.setattr(app_module.messagebox, 'showerror', lambda *args, **_kwargs: errors.append(args))
+
+    assert BookLedgerApp.export_apk(subject) is False
+    assert errors and errors[0][0] == 'APK export failed'
+    assert source.read_bytes() == b'synthetic release apk'
+
+
 def test_optional_logging_persists_toggle_and_clear_keeps_file(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     config_store = AppConfigStore(config_path)

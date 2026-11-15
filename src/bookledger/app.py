@@ -278,6 +278,12 @@ class BookLedgerApp(_WindowBase):
             else current_theme if current_theme in self._available_theme_names
             else (self._available_theme_names[0] if self._available_theme_names else "")
         )
+        defaults = ProviderSettings.defaults().to_document({
+            "api_keys": {"google_books": ""},
+            "logging": {"enabled": False},
+            "preferences": {"theme": default_theme},
+        })
+        self._configuration_warnings += self.config_store.ensure_defaults(defaults)
         configured_theme = self.config_store.get(("preferences", "theme"), default_theme)
         self._active_theme = resolve_theme_name(
             self._available_theme_names, configured_theme, default_theme
@@ -1561,7 +1567,12 @@ class BookLedgerApp(_WindowBase):
         self._build_preferences(tabs["Preferences"])
 
     def _build_mobile_app_setup(self, parent):
-        panel = MobileAppSetupPanel(parent, self.mobile_connection_service, self.mobile_activity_store)
+        panel = MobileAppSetupPanel(
+            parent,
+            self.mobile_connection_service,
+            self.mobile_activity_store,
+            on_export_apk=self.export_apk,
+        )
         panel.pack(fill="both", expand=True)
         self._mobile_app_setup_panel = panel
         return panel
@@ -2702,6 +2713,43 @@ class BookLedgerApp(_WindowBase):
             f"Exported {len(copies)} physical copies to:\n{destination}",
             parent=self,
         )
+
+    def export_apk(self):
+        source = self.paths.root / "mobile" / "BookLedger-Android.apk"
+        if not source.is_file():
+            messagebox.showerror(
+                "APK unavailable",
+                f"BookLedger-Android.apk was not found in {source.parent}.",
+                parent=self,
+            )
+            return False
+        destination = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export BookLedger Android APK",
+            initialdir=self.paths.root,
+            initialfile=source.name,
+            defaultextension=".apk",
+            filetypes=[("Android package", "*.apk"), ("All files", "*.*")],
+            confirmoverwrite=True,
+        )
+        if not destination:
+            return False
+        try:
+            shutil.copy2(source, destination)
+        except (OSError, shutil.Error) as exc:
+            messagebox.showerror(
+                "APK export failed",
+                f"The Android app could not be exported: {exc}",
+                parent=self,
+            )
+            return False
+        self.status_var.set(f"Exported Android app to {Path(destination).name}.")
+        messagebox.showinfo(
+            "APK export complete",
+            f"Exported {source.name}.",
+            parent=self,
+        )
+        return True
 
     def _read_logging_enabled(self):
         try:

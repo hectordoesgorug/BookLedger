@@ -160,6 +160,21 @@ class AppConfigStore:
             self.active_path = target
             return target
 
+    def ensure_defaults(self, defaults: dict) -> tuple[str, ...]:
+        """Fill missing settings without replacing existing user values."""
+        if not isinstance(defaults, dict):
+            raise TypeError("Configuration defaults must be a JSON object.")
+        with self._lock:
+            current = self.load_document()
+            merged = self._merge_missing(current, defaults)
+            if merged == current:
+                return ()
+            try:
+                self.update_document(lambda latest: self._merge_missing(latest, defaults))
+            except (ConfigurationError, OSError) as exc:
+                return (f"Default configuration could not be initialized safely: {exc}",)
+        return ()
+
     def get(self, path: tuple[str, ...], default=None):
         document = self.load_document()
         value = document

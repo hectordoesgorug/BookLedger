@@ -6,6 +6,7 @@ import pytest
 
 from bookledger.config_store import AppConfigStore
 from bookledger.db.database import Database
+from bookledger.paths import AppPaths
 from bookledger.provider_settings import ProviderSettings, ProviderSettingsStore
 from bookledger.services.catalog import CatalogService, ValidationError
 
@@ -156,6 +157,52 @@ def test_malformed_root_and_fallback_files_are_both_preserved(tmp_path):
 
     assert canonical.read_text(encoding='utf-8') == '{root broken'
     assert fallback.read_text(encoding='utf-8') == '{fallback broken'
+
+
+def test_clean_portable_launch_writes_defaults_and_preserves_them_on_update(tmp_path, monkeypatch):
+    root = tmp_path / 'portable' / 'BookLedger'
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'separate-profile'))
+    paths = AppPaths(root)
+    paths.prepare()
+    db = Database(paths.database)
+    store = AppConfigStore(paths.provider_config, paths.provider_config_fallback())
+    assert not paths.provider_config.exists()
+    warnings = store.migrate_legacy_settings(db, paths.google_books_config)
+    defaults = ProviderSettings.defaults().to_document({
+        'api_keys': {'google_books': ''},
+        'logging': {'enabled': False},
+        'preferences': {'theme': 'flatly'},
+    })
+
+    assert store.ensure_defaults(defaults) == ()
+    assert not warnings
+    assert paths.provider_config == root / 'config.json'
+    assert paths.provider_config.is_file()
+    assert not (tmp_path / 'separate-profile' / 'BookLedger' / 'config.json').exists()
+    document = json.loads(paths.provider_config.read_text(encoding='utf-8'))
+    assert document['metadata_providers'] == ProviderSettings.defaults().to_document()['metadata_providers']
+    assert document['preferences']['theme'] == 'flatly'
+    assert document['preferences']['genres']
+    assert document['preferences']['formats']
+    assert document['logging']['enabled'] is False
+    assert document['api_keys']['google_books'] == ''
+
+    store.set(('preferences', 'theme'), 'bootstrap-dark')
+    saved = paths.provider_config.read_bytes()
+    assert store.ensure_defaults(defaults) == ()
+    assert paths.provider_config.read_bytes() == saved
+    assert store.get(('preferences', 'theme')) == 'bootstrap-dark'
+
+
+def test_ensure_defaults_preserves_unreadable_configuration(tmp_path):
+    canonical = tmp_path / 'config.json'
+    canonical.write_text('{broken', encoding='utf-8')
+    store = AppConfigStore(canonical)
+
+    warnings = store.ensure_defaults({'preferences': {'theme': 'flatly'}})
+
+    assert warnings
+    assert canonical.read_text(encoding='utf-8') == '{broken'
 
 
 def test_canonical_values_win_while_missing_values_can_be_recovered_from_fallback(tmp_path):

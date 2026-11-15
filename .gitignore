@@ -23,6 +23,7 @@ backups/
 # Build output
 build/
 dist/
+/release-input/BookLedger-Android.apk
 
 # Secrets
 .env
