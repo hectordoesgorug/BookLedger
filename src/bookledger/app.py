@@ -362,11 +362,14 @@ class BookLedgerApp(_WindowBase):
             return False
 
         previous = self.theme_style.theme_use()
+        if selected == previous:
+            return True
         try:
             apply_theme_to_style(self.theme_style, selected)
             self._configure_style()
             self.config_store.set(("preferences", "theme"), selected)
         except Exception as exc:
+            self._log_event("theme_change_failed")
             try:
                 apply_theme_to_style(self.theme_style, previous)
                 self._configure_style()
@@ -377,6 +380,7 @@ class BookLedgerApp(_WindowBase):
             return False
 
         self._active_theme = selected
+        self._log_event("theme_changed")
         self.status_var.set(f"Theme '{selected_label}' applied and saved.")
         return True
 
@@ -557,11 +561,15 @@ class BookLedgerApp(_WindowBase):
             self.status_var.set("Enter a valid HTTP or HTTPS shop URL.")
             return False
         try:
+            previous = self.config_store.get(("preferences", "shop_url"), "")
             self.config_store.set(("preferences", "shop_url"), url)
         except (OSError, ValueError, sqlite3.Error) as exc:
+            self._log_event("shop_link_change_failed")
             self.status_var.set(f"Could not save shop link: {exc}")
             return False
         self.shop_url_var.set(url)
+        if previous != url:
+            self._log_event("shop_link_changed")
         self.status_var.set("Shop link saved." if url else "Shop link cleared.")
         return True
 
@@ -581,6 +589,7 @@ class BookLedgerApp(_WindowBase):
             self.config_store.set(("preferences", "shop_logo_path"), reference)
             self._refresh_brand_logo()
         except (OSError, ValueError, sqlite3.Error, Image.DecompressionBombError) as exc:
+            self._log_event("shop_logo_change_failed")
             if stored_path is not None:
                 try:
                     if self.config_store.get(("preferences", "shop_logo_path"), "") != stored_path.relative_to(self.paths.data.resolve()).as_posix():
@@ -590,6 +599,8 @@ class BookLedgerApp(_WindowBase):
             messagebox.showerror("Could not change logo", str(exc), parent=self)
             return False
         self.status_var.set("Shop logo updated.")
+        if old_reference != reference:
+            self._log_event("shop_logo_changed")
         if old_reference and old_reference != reference:
             remove_obsolete_shop_logo(self.paths.data, old_reference)
         return True
@@ -601,20 +612,27 @@ class BookLedgerApp(_WindowBase):
             self.config_store.set(("preferences", "shop_logo_path"), "")
             self._refresh_brand_logo()
         except (OSError, ValueError, sqlite3.Error) as exc:
+            self._log_event("shop_logo_remove_failed")
             self.status_var.set(f"Could not clear shop logo: {exc}")
             return False
         self.status_var.set("Default shop logo restored.")
+        if old_reference:
+            self._log_event("shop_logo_removed")
         remove_obsolete_shop_logo(self.paths.data, old_reference)
         return True
 
     def _clear_shop_url(self):
         """Clear the saved shop link and its visible entry."""
         try:
+            previous = self.config_store.get(("preferences", "shop_url"), "")
             self.config_store.set(("preferences", "shop_url"), "")
         except (OSError, ValueError, sqlite3.Error) as exc:
+            self._log_event("shop_link_change_failed")
             self.status_var.set(f"Could not clear shop link: {exc}")
             return False
         self.shop_url_var.set("")
+        if previous:
+            self._log_event("shop_link_changed")
         self.status_var.set("Shop link cleared.")
         return True
 
@@ -1211,13 +1229,12 @@ class BookLedgerApp(_WindowBase):
         if confirmed:
             try:
                 self.lifecycle.trash_copy(int(copy_id))
-                if hasattr(self, "_log_event"):
-                    self._log_event("physical_copy_deleted", copy_id=int(copy_id))
-                    self._log_event("book_deleted", copy_id=int(copy_id))
-                self._after_save(f"{row['copy_code']} moved to Trash.")
             except Exception as exc:
-                self._log_event("physical_copy_delete_failed", copy_id=int(copy_id))
+                self._log_event("copy_trash_failed", copy_id=int(copy_id))
                 messagebox.showerror("Delete Failed", f"The copy was not safely moved to Trash: {exc}", parent=self)
+                return
+            self._log_event("copy_moved_to_trash", copy_id=int(copy_id))
+            self._after_save(f"{row['copy_code']} moved to Trash.")
 
     def _clear_filters(self):
         self.global_search.set("")
@@ -1919,8 +1936,11 @@ class BookLedgerApp(_WindowBase):
                         try:
                             replacement = rename_value(old_value, edit.get())
                         except (ValueError, OSError, sqlite3.Error) as exc:
+                            self._log_event(f"{kind}_rename_failed")
                             status_var.set(str(exc))
                             return
+                        if replacement != old_value:
+                            self._log_event(f"{kind}_renamed")
                         status_var.set(f"{title} saved.")
                         refresh()
 
@@ -1940,8 +1960,10 @@ class BookLedgerApp(_WindowBase):
             try:
                 value = add_value(add_entry.get())
             except (ValueError, OSError, sqlite3.Error) as exc:
+                self._log_event(f"{kind}_add_failed")
                 status_var.set(str(exc))
                 return
+            self._log_event(f"{kind}_added")
             add_entry.delete(0, "end")
             status_var.set(f"{title} added.")
             refresh()
@@ -1951,9 +1973,11 @@ class BookLedgerApp(_WindowBase):
             try:
                 delete_value(value)
             except (ValueError, OSError, sqlite3.Error) as exc:
+                self._log_event(f"{kind}_delete_failed")
                 status_var.set(str(exc))
                 refresh()
                 return
+            self._log_event(f"{kind}_deleted")
             status_var.set(f"{title} deleted.")
             refresh()
 
@@ -2004,10 +2028,14 @@ class BookLedgerApp(_WindowBase):
         if not editor:
             return
         key = {"genre": "genres", "format": "formats", "location": "locations"}[kind]
+        previous = editor.get("list", lambda: editor["values"])()
         try:
             self.config_store.set(("preferences", key), editor["values"])
+            if previous != editor["values"]:
+                self._log_event(f"{kind}_order_changed")
             editor["status"].set(f"{editor['title']} order saved.")
         except (OSError, ValueError, sqlite3.Error) as exc:
+            self._log_event(f"{kind}_order_change_failed")
             editor["status"].set(f"Could not save {editor['title']} order: {exc}")
             editor["refresh"]()
 
@@ -2098,6 +2126,8 @@ class BookLedgerApp(_WindowBase):
 
     def _save_provider_settings(self):
         order = list(self._provider_order)
+        previous_order = list(self.provider_settings.order)
+        previous_enabled = dict(self.provider_settings.enabled)
         self.provider_settings.order = order
         self.provider_settings.enabled = {
             provider_id: bool(variable.get()) for provider_id, variable in self._provider_variables.items()
@@ -2105,11 +2135,20 @@ class BookLedgerApp(_WindowBase):
         try:
             saved_path = self.provider_settings_store.save(self.provider_settings)
         except OSError as exc:
+            self._log_event("metadata_provider_settings_save_failed")
             self._provider_config_status.set(f"Could not save provider settings: {exc}")
             return
         self.metadata_lookup = MetadataLookupService(
             build_providers(self.provider_settings, credentials=self._load_api_credentials())
         )
+        if previous_order != order:
+            self._log_event("metadata_provider_order_changed")
+        for provider_id, enabled in self.provider_settings.enabled.items():
+            if previous_enabled.get(provider_id) != enabled:
+                self._log_event(
+                    "metadata_provider_enabled" if enabled else "metadata_provider_disabled",
+                    provider_id=provider_id,
+                )
         self._provider_config_status.set(f"Provider settings saved to {saved_path}")
 
     def _restore_provider_defaults(self):
@@ -2148,15 +2187,21 @@ class BookLedgerApp(_WindowBase):
 
     def _save_provider_credential(self, provider_id):
         try:
+            existed = self.config_store.get(("api_keys", provider_id), None) is not None
             credential = self._api_credential_vars[provider_id].get().strip()
             self.config_store.set(("api_keys", provider_id), credential)
             credentials = self._load_api_credentials()
             credentials[provider_id] = credential
             self._apply_api_credentials(credentials)
         except (OSError, ValueError, KeyError) as exc:
+            self._log_event("api_credential_save_failed", provider_id=provider_id)
             self._api_credential_status[provider_id].set(f"Could not save {provider_id} settings: {exc}")
             return False
         self._api_credential_status[provider_id].set("Credential saved locally and masked.")
+        self._log_event(
+            "api_credential_replaced" if existed else "api_credential_saved",
+            provider_id=provider_id,
+        )
         return True
 
     def _remove_provider_credential(self, provider_id):
@@ -2177,11 +2222,14 @@ class BookLedgerApp(_WindowBase):
             credentials[provider_id] = ""
             self._apply_api_credentials(credentials)
         except (OSError, ValueError, KeyError) as exc:
+            self._log_event("api_credential_remove_failed", provider_id=provider_id)
             self._api_credential_status[provider_id].set(f"Could not remove {name} credential: {exc}")
             return False
         self._api_credential_status[provider_id].set(
             f"Saved {name} credential removed." if existed else f"No saved {name} credential was present."
         )
+        if existed:
+            self._log_event("api_credential_removed", provider_id=provider_id)
         return True
 
     def _test_provider_credential(self, provider_id):
@@ -2192,6 +2240,7 @@ class BookLedgerApp(_WindowBase):
         self._api_credential_status[provider_id].set("Testing a sample ISBN metadata lookup…")
 
         def worker():
+            succeeded = False
             try:
                 result = descriptor.factory(credential).lookup("9780306406157")
                 outcomes = {
@@ -2214,6 +2263,7 @@ class BookLedgerApp(_WindowBase):
                     message = "Sample metadata lookup succeeded; some fields may be unavailable."
                 else:
                     message = "A matching record was found, but no supported metadata was available."
+                succeeded = result.status != "Lookup failed"
             except Exception:
                 message = "Sample metadata lookup failed."
 
@@ -2221,6 +2271,12 @@ class BookLedgerApp(_WindowBase):
                 try:
                     if self.winfo_exists():
                         self._api_credential_status[provider_id].set(message)
+                        log_event = getattr(self, "_log_event", None)
+                        if log_event:
+                            log_event(
+                                "api_credential_test_succeeded" if succeeded else "api_credential_test_failed",
+                                provider_id=provider_id,
+                            )
                 except tk.TclError:
                     pass
 
@@ -2232,19 +2288,26 @@ class BookLedgerApp(_WindowBase):
         try:
             threading.Thread(target=worker, name=f"BookLedger{descriptor.name}CredentialTest", daemon=True).start()
         except RuntimeError:
+            self._log_event("api_credential_test_failed", provider_id=provider_id)
             self._api_credential_status[provider_id].set("Could not start the sample metadata lookup.")
             return False
         return True
 
     def _save_google_books_key(self):
         try:
+            existed = self.config_store.get(("api_keys", "google_books"), None) is not None
             api_key = self.google_books_key_var.get().strip()
             self.config_store.set(("api_keys", "google_books"), api_key)
             self._apply_google_books_key(api_key)
         except (OSError, ValueError) as exc:
+            self._log_event("api_credential_save_failed", provider_id="google_books")
             self.google_books_api_status.set(f"Could not save Google Books settings: {exc}")
             return False
         self.google_books_api_status.set("Google Books API settings saved.")
+        self._log_event(
+            "api_credential_replaced" if existed else "api_credential_saved",
+            provider_id="google_books",
+        )
         return True
 
     def _remove_google_books_key(self):
@@ -2261,11 +2324,14 @@ class BookLedgerApp(_WindowBase):
             self.google_books_key_var.set("")
             self._apply_google_books_key("")
         except (OSError, ValueError) as exc:
+            self._log_event("api_credential_remove_failed", provider_id="google_books")
             self.google_books_api_status.set(f"Could not remove Google Books API key: {exc}")
             return
         self.google_books_api_status.set(
             "Saved Google Books API key removed." if existed else "No saved Google Books API key was present."
         )
+        if existed:
+            self._log_event("api_credential_removed", provider_id="google_books")
 
     def _test_google_books_lookup(self):
         api_key = self.google_books_key_var.get().strip()
@@ -2287,6 +2353,10 @@ class BookLedgerApp(_WindowBase):
                             "Sample metadata lookup succeeded." if succeeded
                             else f"Sample metadata lookup failed: {error or 'provider error'}"
                         )
+                        self._log_event(
+                            "api_credential_test_succeeded" if succeeded else "api_credential_test_failed",
+                            provider_id="google_books",
+                        )
                 except tk.TclError:
                     pass
 
@@ -2298,6 +2368,7 @@ class BookLedgerApp(_WindowBase):
         try:
             threading.Thread(target=worker, name="BookLedgerGoogleBooksTest", daemon=True).start()
         except Exception as exc:
+            self._log_event("api_credential_test_failed", provider_id="google_books")
             self.google_books_api_status.set(f"Could not start Google Books lookup: {type(exc).__name__}")
 
     def open_isbn_lookup_test(self):
@@ -2335,12 +2406,19 @@ class BookLedgerApp(_WindowBase):
             text, color = "● Receiving", WARNING_COLOR
         elif service.status == "error":
             text, color = "● Service error", ERROR_COLOR
+            if not getattr(self, "_mobile_service_error_logged", False):
+                log_event = getattr(self, "_log_event", None)
+                if log_event:
+                    log_event("mobile_service_failed")
+                self._mobile_service_error_logged = True
         elif service.paired and service.status in ("ready", "paired"):
             text, color = "● Paired", SUCCESS_COLOR
         elif service.paired and service.status == "starting":
             text, color = "● Starting", NEUTRAL_COLOR
         else:
             text, color = "● Not paired", NEUTRAL_COLOR
+        if service.status != "error":
+            self._mobile_service_error_logged = False
         variable.set(text)
         label.configure(foreground=color)
 
@@ -2348,6 +2426,7 @@ class BookLedgerApp(_WindowBase):
         try:
             self.mobile_activity_store.record(event)
         except (OSError, sqlite3.Error, ValueError):
+            self._log_event("mobile_activity_record_failed")
             return
         try:
             self.after(0, self._refresh_mobile_activity)
@@ -2660,11 +2739,17 @@ class BookLedgerApp(_WindowBase):
     def _log_event(self, event, **details):
         if getattr(self, "_logging_enabled", False):
             level = logging.WARNING if event.endswith("_failed") else logging.INFO
-            log_activity(self._optional_logger, event, level=level, **details)
+            try:
+                log_activity(self._optional_logger, event, level=level, **details)
+            except Exception:
+                pass
 
     def _report_callback_exception(self, exc_type, _exc, _traceback):
         if getattr(self, "_logging_enabled", False):
-            self._optional_logger.error("unexpected_exception type=%s", getattr(exc_type, "__name__", "Exception"))
+            try:
+                self._optional_logger.error("unexpected_exception type=%s", getattr(exc_type, "__name__", "Exception"))
+            except Exception:
+                pass
 
     def _close_application(self):
         try:
@@ -2677,7 +2762,10 @@ class BookLedgerApp(_WindowBase):
         self._log_event("application_closed")
         for handler in tuple(getattr(self, "_optional_logger", logging.getLogger()).handlers):
             self._optional_logger.removeHandler(handler)
-            handler.close()
+            try:
+                handler.close()
+            except Exception:
+                pass
         self.destroy()
 
     def _toggle_logging(self):
@@ -2702,7 +2790,7 @@ class BookLedgerApp(_WindowBase):
         self.clear_log_button.configure(state=state)
         self.logging_status_var.set("Logging is enabled." if requested else "Logging is off.")
         if requested:
-            log_activity(self._optional_logger, "diagnostic_logging_enabled")
+            self._log_event("diagnostic_logging_enabled")
 
     def view_log(self):
         if not self._logging_enabled:
@@ -2766,43 +2854,66 @@ class BookLedgerApp(_WindowBase):
         path = filedialog.askopenfilename(parent=self, title="Choose a BookLedger backup", initialdir=self.paths.backups, filetypes=[("BookLedger backup", "*.zip"), ("All files", "*.*")])
         if not path:
             return
-        ok, message = self.backups.verify_archive(path)
+        try:
+            ok, message = self.backups.verify_archive(path)
+        except Exception:
+            self._log_event("backup_verification_failed")
+            messagebox.showerror("Backup verification failed", "The selected backup could not be verified.", parent=self)
+            return
         if not ok:
+            self._log_event("backup_verification_failed")
             messagebox.showerror("Backup verification failed", message, parent=self)
             return
+        self._log_event("backup_verified")
         if not messagebox.askyesno("Restore backup?", "Restoring replaces the current library, photos, and configuration with the selected snapshot. Changes made after that snapshot will be absent. A recoverable backup of the current library will be saved first. Continue?", parent=self):
             return
         try:
             recovery = self.backups.restore_backup(path)
-            self._log_event("backup_restored")
-            self.status_var.set(f"Restored backup: {Path(path).name}")
-            self.refresh_current()
-            messagebox.showinfo("Restore complete", f"The snapshot was restored and validated. Recovery point: {recovery.name}\n\nRestart BookLedger to apply restored configuration settings.", parent=self)
         except Exception as exc:
             self._log_event("backup_restore_failed")
             messagebox.showerror("Restore failed", f"The backup could not be restored: {exc}", parent=self)
+            return
+        self._log_event("backup_restored")
+        self.status_var.set(f"Restored backup: {Path(path).name}")
+        self.refresh_current()
+        messagebox.showinfo("Restore complete", f"The snapshot was restored and validated. Recovery point: {recovery.name}\n\nRestart BookLedger to apply restored configuration settings.", parent=self)
 
     def verify_database(self):
-        report = self.verifier.verify()
+        try:
+            report = self.verifier.verify()
+        except Exception:
+            self._log_event("database_verification_failed")
+            raise
         if report.ok:
+            self._log_event("database_verified")
             messagebox.showinfo("Database check", report.message, parent=self)
         else:
+            self._log_event("database_verification_failed")
             messagebox.showwarning("Database check", report.message, parent=self)
 
     def restore_latest(self):
         try:
             copy_id = self.lifecycle.restore_latest()
-            if copy_id is not None:
-                self.status_var.set(f"Restored Copy ID {copy_id}.")
-                self.refresh_current()
         except Exception as exc:
+            self._log_event("physical_copy_restore_failed")
             messagebox.showerror("Restore Failed", str(exc), parent=self)
+            return
+        if copy_id is not None:
+            self._log_event("physical_copy_restored", copy_id=int(copy_id))
+            self.status_var.set(f"Restored Copy ID {copy_id}.")
+            self.refresh_current()
 
     def retry_storage_recovery(self):
-        failures = self.lifecycle.retry_pending_operations()
+        try:
+            failures = self.lifecycle.retry_pending_operations()
+        except Exception:
+            self._log_event("storage_recovery_failed")
+            raise
         if failures:
+            self._log_event("storage_recovery_failed", count=len(failures))
             messagebox.showerror("Recovery Needs Attention", "Some storage operations remain unresolved:\n" + "\n".join(failures), parent=self)
         else:
+            self._log_event("storage_recovery_completed")
             messagebox.showinfo("Recovery Complete", "All pending storage operations were completed.", parent=self)
         self.refresh_current()
 
@@ -2811,10 +2922,13 @@ class BookLedgerApp(_WindowBase):
             return
         try:
             count = self.lifecycle.clear_trash()
-            self.status_var.set(f"Permanently removed {count} trashed copy/copies.")
-            self.refresh_current()
         except Exception as exc:
+            self._log_event("trash_clear_failed")
             messagebox.showerror("Clear Trash Incomplete", str(exc), parent=self)
+            return
+        self._log_event("trash_cleared", count=int(count))
+        self.status_var.set(f"Permanently removed {count} trashed copy/copies.")
+        self.refresh_current()
 
     def purge_data(self):
         if not messagebox.askyesno("Reset BookLedger Data?", "This permanently removes the library database, photos, Trash, posters, application settings (including metadata provider settings and API credentials), and the activity log. BookLedger will create a fresh default configuration when the reset completes. Backups in the root backups folder are retained. Create a backup first if you may need this data.", parent=self):

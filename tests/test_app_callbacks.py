@@ -382,6 +382,8 @@ def test_mobile_indicator_maps_only_supported_service_states():
         mobile_connection_status_label=Label(), mobile_connection_status_var=Variable(),
         mobile_connection_service=SimpleNamespace(status="ready", paired=False),
         _incoming_reception_active=False,
+        logged=[],
+        _log_event=lambda event: subject.logged.append(event),
     )
     BookLedgerApp._update_mobile_connection_indicator(subject)
     assert subject.mobile_connection_status_var.value.endswith("Not paired")
@@ -399,6 +401,13 @@ def test_mobile_indicator_maps_only_supported_service_states():
     subject.mobile_connection_service.status = "error"
     BookLedgerApp._update_mobile_connection_indicator(subject)
     assert subject.mobile_connection_status_var.value.endswith("Service error")
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.logged == ["mobile_service_failed"]
+    subject.mobile_connection_service.status = "ready"
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    subject.mobile_connection_service.status = "error"
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.logged == ["mobile_service_failed", "mobile_service_failed"]
 
 
 def test_explicit_copy_id_does_not_read_tree_selection(monkeypatch):
@@ -969,6 +978,7 @@ def test_theme_selection_applies_only_supported_names_and_persists_for_restart(t
         config_store=store,
         status_var=status,
         _configure_style=lambda: None,
+        _log_event=lambda *_args, **_kwargs: None,
     )
 
     assert store.get(("preferences", "shop_url")) == "https://shop.example/books"
@@ -1151,6 +1161,7 @@ def test_shop_url_save_and_logo_click_preserve_config_and_only_open_web_urls(tmp
         config_store=store,
         shop_url_var=Value("shop.example/store"),
         status_var=Value(),
+        _log_event=lambda *_args, **_kwargs: None,
     )
     subject._logo_url = lambda: BookLedgerApp._logo_url(subject)
     assert BookLedgerApp._save_shop_url(subject)
@@ -1187,6 +1198,7 @@ def test_custom_shop_logo_selection_is_saved_as_a_relative_portable_asset(tmp_pa
         config_store=store,
         status_var=Status(),
         _refresh_brand_logo=lambda: None,
+        _log_event=lambda *_args, **_kwargs: None,
     )
 
     assert BookLedgerApp._change_shop_logo(subject)
@@ -1227,6 +1239,7 @@ def test_clear_shop_logo_leaves_reserved_area_blank_and_removes_managed_asset(tm
         paths=SimpleNamespace(data=data),
         status_var=Status(),
         _refresh_brand_logo=lambda: refreshes.append(True),
+        _log_event=lambda *_args, **_kwargs: None,
     )
 
     assert BookLedgerApp._clear_shop_logo(subject)
@@ -1269,7 +1282,7 @@ def test_clear_shop_link_persists_across_restart_and_sidebar_logo_does_not_open_
         def set(self, _value):
             pass
 
-    subject = SimpleNamespace(config_store=store, shop_url_var=Value("https://shop.example/books"), status_var=Status())
+    subject = SimpleNamespace(config_store=store, shop_url_var=Value("https://shop.example/books"), status_var=Status(), _log_event=lambda *_args, **_kwargs: None)
     assert BookLedgerApp._clear_shop_url(subject)
     assert subject.shop_url_var.get() == ""
     restarted = SimpleNamespace(config_store=AppConfigStore(config_path), status_var=Status())
@@ -1314,6 +1327,7 @@ def test_preference_list_drag_order_persists_independently(kind, key):
         _value_drag=(kind, "First"),
         _value_list_editors={kind: {"rows": rows, "values": values.copy(), "status": Status(), "title": kind.title()}},
         config_store=Config(),
+        _log_event=lambda *_args, **_kwargs: None,
     )
     app._reorder_value_rows = lambda selected_kind, ordered: BookLedgerApp._reorder_value_rows(app, selected_kind, ordered)
     BookLedgerApp._value_drag_motion(app, SimpleNamespace(y_root=24))
@@ -1631,8 +1645,43 @@ def test_delete_confirmation_moves_selected_copy_to_trash(monkeypatch):
         lifecycle=SimpleNamespace(trash_copy=lambda copy_id: deleted.append(copy_id)),
         status_var=SimpleNamespace(set=lambda message: refreshed.append(message)),
         _after_save=lambda message: refreshed.append(message),
+        _log_event=lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args, **kwargs: confirmations.append(args) or True)
     BookLedgerApp._confirm_delete(subject, 42)
     assert "BL-000042" in confirmations[0][1]
     assert deleted == [42]
+
+
+def test_backup_restore_logs_verification_restore_and_user_cancel(monkeypatch, tmp_path):
+    events = []
+    refreshed = []
+    subject = SimpleNamespace(
+        paths=SimpleNamespace(backups=tmp_path),
+        backups=SimpleNamespace(
+            verify_archive=lambda _path: (True, "verified"),
+            restore_backup=lambda _path: tmp_path / "recovery.zip",
+        ),
+        status_var=SimpleNamespace(set=lambda value: refreshed.append(value)),
+        refresh_current=lambda: refreshed.append("refreshed"),
+        _log_event=lambda event, **details: events.append((event, details)),
+    )
+    monkeypatch.setattr(app_module.filedialog, "askopenfilename", lambda **_kwargs: str(tmp_path / "private-name.zip"))
+    prompts = iter((True, False))
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: next(prompts))
+    monkeypatch.setattr(app_module.messagebox, "showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(app_module.messagebox, "showerror", lambda *_args, **_kwargs: None)
+
+    BookLedgerApp.restore_backup(subject)
+    assert [event for event, _details in events] == ["backup_verified", "backup_restored"]
+    assert "private-name.zip" not in repr(events)
+    assert refreshed == ["Restored backup: private-name.zip", "refreshed"]
+
+    events.clear()
+    BookLedgerApp.restore_backup(subject)
+    assert [event for event, _details in events] == ["backup_verified"]
+
+    events.clear()
+    subject.backups.verify_archive = lambda _path: (False, "bad archive")
+    BookLedgerApp.restore_backup(subject)
+    assert [event for event, _details in events] == ["backup_verification_failed"]

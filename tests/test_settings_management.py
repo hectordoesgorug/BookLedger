@@ -26,14 +26,17 @@ class Value:
 def test_google_books_key_save_and_remove_preserve_other_configuration(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"version": 1, "metadata_providers": {"enabled": ["open_library"]}, "custom": {"x": 1}}), encoding="utf-8")
+    events = []
     subject = SimpleNamespace(
         config_store=AppConfigStore(config_path),
         google_books_key_var=Value("new-key"),
         google_books_api_status=Value(),
+        _log_event=lambda event, **details: events.append((event, details)),
         _apply_google_books_key=lambda key: setattr(subject, "applied_key", key),
     )
 
     assert BookLedgerApp._save_google_books_key(subject)
+    assert events == [("api_credential_saved", {"provider_id": "google_books"})]
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved == {
         "version": 1,
@@ -45,6 +48,8 @@ def test_google_books_key_save_and_remove_preserve_other_configuration(tmp_path,
 
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
     BookLedgerApp._remove_google_books_key(subject)
+    assert events[-1] == ("api_credential_removed", {"provider_id": "google_books"})
+    assert "new-key" not in repr(events)
     removed = json.loads(config_path.read_text(encoding="utf-8"))
     assert removed["api_keys"] == {}
     assert removed["custom"] == {"x": 1}
@@ -78,30 +83,38 @@ def test_new_api_credentials_load_save_and_remove_independently(tmp_path, monkey
         def set(self, value):
             self.value = value
 
+    events = []
     subject = SimpleNamespace(
         config_store=store,
         _api_credential_vars={"bigbook": Value("new-bigbook-key"), "hardcover": Value("existing-token")},
         _api_credential_status={"bigbook": Value(""), "hardcover": Value("")},
         provider_settings=object(),
+        _log_event=lambda event, **details: events.append((event, details)),
         _load_api_credentials=lambda: BookLedgerApp._load_api_credentials(subject),
         _apply_api_credentials=lambda values: setattr(subject, "applied", values),
     )
 
     assert BookLedgerApp._save_provider_credential(subject, "bigbook")
+    assert events == [("api_credential_saved", {"provider_id": "bigbook"})]
+    subject._api_credential_vars["bigbook"].set("replacement-key")
+    assert BookLedgerApp._save_provider_credential(subject, "bigbook")
+    assert events[-1] == ("api_credential_replaced", {"provider_id": "bigbook"})
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["api_keys"] == {
-        "google_books": "existing-google", "hardcover": "existing-token", "bigbook": "new-bigbook-key",
+        "google_books": "existing-google", "hardcover": "existing-token", "bigbook": "replacement-key",
     }
     restarted = SimpleNamespace(config_store=AppConfigStore(config_path))
     assert BookLedgerApp._load_api_credentials(restarted) == {
-        "google_books": "existing-google", "bigbook": "new-bigbook-key", "hardcover": "existing-token",
+        "google_books": "existing-google", "bigbook": "replacement-key", "hardcover": "existing-token",
     }
     assert subject.applied == {
-        "google_books": "existing-google", "bigbook": "new-bigbook-key", "hardcover": "existing-token",
+        "google_books": "existing-google", "bigbook": "replacement-key", "hardcover": "existing-token",
     }
 
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
     assert BookLedgerApp._remove_provider_credential(subject, "bigbook")
+    assert events[-1] == ("api_credential_removed", {"provider_id": "bigbook"})
+    assert "replacement-key" not in repr(events)
     removed = json.loads(config_path.read_text(encoding="utf-8"))
     assert removed["api_keys"] == {"google_books": "existing-google", "hardcover": "existing-token"}
 
@@ -161,6 +174,7 @@ def test_google_books_remove_cancel_and_invalid_config_leave_file_unchanged(tmp_
         config_store=AppConfigStore(config_path),
         google_books_key_var=Value("keep-me"),
         google_books_api_status=Value(),
+        _log_event=lambda *_args, **_kwargs: None,
         _apply_google_books_key=lambda _key: None,
     )
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: False)
@@ -246,6 +260,7 @@ def test_optional_logging_persists_toggle_and_clear_keeps_file(tmp_path, monkeyp
         logging_status_var=Value(),
         view_log_button=SimpleNamespace(configure=lambda **_kwargs: None),
         clear_log_button=SimpleNamespace(configure=lambda **_kwargs: None),
+        _log_event=lambda *_args, **_kwargs: None,
     )
     subject._configure_optional_logging = lambda enabled: BookLedgerApp._configure_optional_logging(subject, enabled)
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
@@ -296,3 +311,31 @@ def test_activity_logger_keeps_only_safe_numeric_identifiers():
     assert "copy_id=42" in message
     assert "secret-token" not in message
     assert "private title" not in message
+
+
+def test_activity_logger_allows_only_safe_provider_and_operation_labels():
+    import io
+    from bookledger.services.activity_log import log_activity
+
+    logger = logging.Logger("activity-label-test")
+    stream = io.StringIO()
+    logger.addHandler(logging.StreamHandler(stream))
+    log_activity(
+        logger, "api_credential_test_failed", provider_id="google_books", operation="test",
+        path="private/path", operation_detail="secret-token", provider="untrusted",
+    )
+    message = stream.getvalue()
+    assert "provider_id=google_books" in message
+    assert "operation=test" in message
+    assert "private/path" not in message
+    assert "secret-token" not in message
+    assert "untrusted" not in message
+
+
+def test_optional_event_logging_failure_is_nonfatal():
+    class BrokenLogger:
+        def log(self, *_args, **_kwargs):
+            raise OSError("log disk unavailable")
+
+    subject = SimpleNamespace(_logging_enabled=True, _optional_logger=BrokenLogger())
+    BookLedgerApp._log_event(subject, "backup_created")

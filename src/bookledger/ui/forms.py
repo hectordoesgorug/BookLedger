@@ -96,7 +96,7 @@ class BookForm(tk.Toplevel):
                     self.actions_panel,
                     text="Discard Incoming Capture",
                     command=self._discard_incoming,
-                ).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+                ).grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.bind("<Destroy>", self._on_destroy, add="+")
         self._ui_poll_id = self.after(40, self._poll_ui_queue)
@@ -176,6 +176,7 @@ class BookForm(tk.Toplevel):
 
         self.error_summary = ttk.Label(body, text="", foreground="#b42318", wraplength=620)
         self.error_summary.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self._build_actions(body, row + 1)
 
         self.right_panel = ttk.Frame(content)
         self.right_panel.grid(row=0, column=1, sticky="nsew")
@@ -195,7 +196,6 @@ class BookForm(tk.Toplevel):
         )
         self.photo_preview.pack(fill="both", expand=True)
         self._build_metadata_status_panel(self.right_panel)
-        self._build_actions(self.right_panel)
         self._bind_status_color(self.metadata_status, self.metadata_label)
         self._update_control_states()
 
@@ -323,20 +323,18 @@ class BookForm(tk.Toplevel):
             variable.set(status)
             self.provider_status_labels[name].configure(foreground=status_message_color(status))
 
-    def _build_actions(self, parent):
+    def _build_actions(self, parent, row):
         actions = ttk.Frame(parent)
         self.actions_panel = actions
-        actions.grid(row=2, column=0, sticky="ew")
-        actions.columnconfigure(0, weight=1)
-        actions.columnconfigure(1, weight=1)
+        actions.grid(row=row, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        for column in range(4):
+            actions.columnconfigure(column, weight=1, uniform="form-actions")
         self.save_button = ttk.Button(actions, text="Save Book", command=self._save)
         self.refresh_button = ttk.Button(actions, text="Refresh", command=self._refresh)
         self.clear_button = ttk.Button(actions, text="Clear", command=self._clear)
         self.cancel_button = ttk.Button(actions, text="Cancel", command=self._close)
-        self.save_button.grid(row=0, column=0, sticky="ew", padx=(0, 5), pady=(0, 5))
-        self.refresh_button.grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=(0, 5))
-        self.clear_button.grid(row=1, column=0, sticky="ew", padx=(0, 5))
-        self.cancel_button.grid(row=1, column=1, sticky="ew", padx=(5, 0))
+        for column, button in enumerate((self.save_button, self.refresh_button, self.clear_button, self.cancel_button)):
+            button.grid(row=0, column=column, sticky="ew", padx=(0, 8) if column < 3 else 0)
 
     def _set(self, key, value):
         widget = self._widgets.get(key)
@@ -704,20 +702,34 @@ class BookForm(tk.Toplevel):
             return True
         except ValidationError as exc:
             self._populate_validation(exc.errors)
+            if self.on_activity:
+                self.on_activity("book_save_failed", None)
             return False
 
     def _save(self):
+        try:
+            return self._save_book()
+        except Exception:
+            if self.on_activity:
+                self.on_activity("book_save_failed", None)
+            raise
+
+    def _save_book(self):
         self._new_book_record_created = False
         payload = self._payload()
         errors = self.service.validate(payload, isbn_override=self.isbn_override.get())
         if errors:
             self._populate_validation(errors)
+            if self.on_activity:
+                self.on_activity("book_save_failed", None)
             return
         if self.existing:
             try:
                 self.service.update_copy(self.existing["copy_id"], payload, isbn_override=self.isbn_override.get())
             except ValidationError as exc:
                 self._populate_validation(exc.errors)
+                if self.on_activity:
+                    self.on_activity("book_save_failed", None)
                 return
         else:
             isbn = payload.get("isbn")
@@ -754,7 +766,6 @@ class BookForm(tk.Toplevel):
                 return
         if self.on_activity:
             if self.existing:
-                self.on_activity("book_edited", int(self.existing["copy_id"]))
                 self.on_activity("physical_copy_edited", int(self.existing["copy_id"]))
             else:
                 self.on_activity("physical_copy_added", None)

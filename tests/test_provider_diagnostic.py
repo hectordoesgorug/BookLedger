@@ -330,6 +330,7 @@ def test_google_books_test_lookup_does_not_save_the_draft_key(monkeypatch):
         _save_google_books_key=lambda: (_ for _ in ()).throw(AssertionError("test must not save credentials")),
         winfo_exists=lambda: True,
         after=lambda _delay, callback: callback(),
+        _log_event=lambda *_args, **_kwargs: None,
     )
 
     BookLedgerApp._test_google_books_lookup(subject)

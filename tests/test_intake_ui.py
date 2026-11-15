@@ -74,7 +74,11 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert [widget.clear_button.cget("text"), widget.cancel_button.cget("text")] == ["Clear", "Cancel"]
     assert widget.photo_panel.master is widget.right_panel
     assert widget.metadata_status_panel.master is widget.right_panel
-    assert widget.actions_panel.master is widget.right_panel
+    assert widget.actions_panel.master is widget.body
+    assert widget.actions_panel.grid_info()["columnspan"] == 4
+    assert [widget.actions_panel.grid_slaves(row=0, column=column)[0].cget("text") for column in range(4)] == [
+        "Save Book", "Refresh", "Clear", "Cancel",
+    ]
     assert not hasattr(widget, "_simulate_connection")
     assert not hasattr(widget, "_simulate_scan")
     assert not hasattr(widget, "mobile_panel")
