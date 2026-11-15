@@ -117,7 +117,7 @@ class _MobileSetupScreenState extends State<MobileSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mobile App Setup')),
+      appBar: AppBar(title: const Text('Pairing')),
       body: AnimatedBuilder(
         animation: widget.controller,
         builder: (context, _) {
@@ -244,21 +244,30 @@ class _ConnectionStatusCard extends StatelessWidget {
         'Connecting',
         Theme.of(context).colorScheme.primary,
       ),
-      MobileConnectionStatus.connected => ('Connected', Colors.green),
-      MobileConnectionStatus.disconnected => ('Disconnected', Colors.orange),
+      MobileConnectionStatus.connected => (
+        'Connected',
+        Theme.of(context).colorScheme.tertiary,
+      ),
+      MobileConnectionStatus.disconnected => (
+        'Disconnected',
+        Theme.of(context).colorScheme.secondary,
+      ),
       MobileConnectionStatus.desktopUnavailable => (
         'Desktop unavailable',
-        Colors.orange,
+        Theme.of(context).colorScheme.secondary,
       ),
       MobileConnectionStatus.pairingRejected => (
         'Pairing rejected',
-        Colors.red,
+        Theme.of(context).colorScheme.error,
       ),
       MobileConnectionStatus.authenticationRejected => (
         'Pairing no longer valid',
-        Colors.red,
+        Theme.of(context).colorScheme.error,
       ),
-      MobileConnectionStatus.serviceError => ('Connection error', Colors.red),
+      MobileConnectionStatus.serviceError => (
+        'Connection error',
+        Theme.of(context).colorScheme.error,
+      ),
     };
     return Card(
       child: Padding(
@@ -326,6 +335,7 @@ class _QrPairingScreenState extends State<_QrPairingScreen> {
     }
     _handling = true;
     await _scannerController.stop();
+    if (!mounted) return;
     final paired = await widget.controller.pairFromQr(rawValue);
     if (mounted) {
       Navigator.of(context).pop(paired);

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +12,9 @@ import 'package:mobile/connection/desktop_discovery.dart';
 import 'package:mobile/connection/mobile_connection_controller.dart';
 import 'package:mobile/connection/mobile_setup_screen.dart';
 import 'package:mobile/main.dart';
+import 'package:mobile/settings/about_screen.dart';
+import 'package:mobile/settings/mobile_app_settings.dart';
+import 'package:mobile/settings/settings_screen.dart';
 
 Future<SingleEntryWorkflow> _pairedWorkflow(String photoPath) async {
   final workflow = SingleEntryWorkflow();
@@ -26,9 +30,13 @@ BulkCaptureQueue _testQueue(int capacity) =>
 
 class _MemoryPairingStore implements PairingStore {
   DesktopPairing? pairing;
+  bool failClear = false;
 
   @override
-  Future<void> clear() async => pairing = null;
+  Future<void> clear() async {
+    if (failClear) throw const FileSystemException('Pairing clear failed.');
+    pairing = null;
+  }
 
   @override
   Future<DesktopPairing?> read() async => pairing;
@@ -49,6 +57,9 @@ class _NoDesktopDiscovery implements DesktopDiscovery {
 }
 
 class _FakeConnectionTransport implements ConnectionTransport {
+  Completer<DesktopEndpoint?>? validation;
+  int unpairCalls = 0;
+
   @override
   Future<DesktopPairing> pair(
     List<DesktopEndpoint> endpoints,
@@ -60,13 +71,16 @@ class _FakeConnectionTransport implements ConnectionTransport {
   Future<DesktopEndpoint?> validate(
     List<DesktopEndpoint> endpoints,
     String deviceToken,
-  ) async => null;
+  ) => validation?.future ?? Future<DesktopEndpoint?>.value();
 
   @override
   Future<bool> unpair(
     List<DesktopEndpoint> endpoints,
     String deviceToken,
-  ) async => false;
+  ) async {
+    unpairCalls++;
+    return false;
+  }
 
   @override
   Future<bool> beginBatch(
@@ -95,12 +109,20 @@ class _FakeConnectionTransport implements ConnectionTransport {
   void close() {}
 }
 
-MyApp _testApp() => MyApp(
-  connectionController: MobileConnectionController(
-    store: _MemoryPairingStore(),
-    transport: _FakeConnectionTransport(),
-    deviceName: 'Test phone',
-  ),
+MobileConnectionController _testConnectionController() =>
+    MobileConnectionController(
+      store: _MemoryPairingStore(),
+      transport: _FakeConnectionTransport(),
+      deviceName: 'Test phone',
+    );
+
+MyApp _testApp() => MyApp(connectionController: _testConnectionController());
+
+DesktopPairing _savedPairing() => DesktopPairing(
+  endpoints: [DesktopEndpoint(address: '192.168.1.20', port: 43821)],
+  deviceToken: 'device-token-${List.filled(48, 'x').join()}',
+  deviceName: 'Desktop',
+  lastEndpoint: DesktopEndpoint(address: '192.168.1.20', port: 43821),
 );
 
 Future<void> _addTestEntries(BulkCaptureQueue queue, int count) async {
@@ -244,7 +266,22 @@ void main() {
     expect(find.text('Exit'), findsOneWidget);
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('Mobile App Setup'), findsOneWidget);
+    expect(find.text('Pairing'), findsOneWidget);
+    expect(find.text('Clear Data'), findsOneWidget);
+    expect(find.text('Theme'), findsOneWidget);
+    await tester.tap(find.text('Pairing'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pairing with desktop QR code'), findsNothing);
+    expect(find.text('Pair with desktop QR code'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Clear Data'), findsOneWidget);
+    await tester.tap(find.text('Theme'));
+    await tester.pumpAndSettle();
+    expect(find.text('Default'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.pageBack();
     await tester.pumpAndSettle();
 
@@ -380,6 +417,418 @@ void main() {
       expect(find.text('Visit GitHub'), findsOneWidget);
       expect(find.text('Not paired'), findsOneWidget);
     }
+  });
+
+  testWidgets(
+    'About guide includes workflow, version and external project link',
+    (WidgetTester tester) async {
+      const appSettingsChannel = MethodChannel(
+        'com.bookledger.mobile/app_settings',
+      );
+      const externalUrlChannel = MethodChannel(
+        'com.bookledger.mobile/external_url',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        ..setMockMethodCallHandler(appSettingsChannel, (call) async {
+          return {'version': '1.2.3', 'theme': 'default'};
+        })
+        ..setMockMethodCallHandler(externalUrlChannel, (_) async => true);
+      addTearDown(() {
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger
+          ..setMockMethodCallHandler(appSettingsChannel, null)
+          ..setMockMethodCallHandler(externalUrlChannel, null);
+      });
+
+      await tester.pumpWidget(_testApp());
+      await tester.pumpAndSettle();
+      expect(find.text('BookLedger Mobile • v1.2.3'), findsOneWidget);
+      await tester.tap(find.byTooltip('Menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('About'));
+      await tester.pumpAndSettle();
+
+      for (final heading in [
+        'About BookLedger Mobile',
+        'Getting Started',
+        'Single Entry',
+        'Bulk Entry',
+        'Pairing and Connectivity',
+        'Troubleshooting',
+        'Version and Project Information',
+      ]) {
+        for (
+          var scroll = 0;
+          scroll < 10 && find.text(heading).evaluate().isEmpty;
+          scroll++
+        ) {
+          await tester.drag(find.byType(ListView).last, const Offset(0, -400));
+          await tester.pumpAndSettle();
+        }
+        expect(find.text(heading), findsOneWidget);
+      }
+      expect(find.text('BookLedger Mobile • v1.2.3'), findsOneWidget);
+      expect(find.byType(Scrollable), findsWidgets);
+      await tester.ensureVisible(find.text('BookLedger on GitHub'));
+      await tester.tap(find.text('BookLedger on GitHub'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('selected theme updates the whole application immediately', (
+    WidgetTester tester,
+  ) async {
+    const channel = MethodChannel('com.bookledger.mobile/app_settings');
+    var theme = 'default';
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getAppSettings') {
+            return {'version': '1.0.0', 'theme': theme};
+          }
+          if (call.method == 'setTheme') {
+            theme = call.arguments as String;
+            return true;
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    final appSettings = MobileAppSettings();
+    addTearDown(appSettings.dispose);
+
+    await tester.pumpWidget(
+      MyApp(
+        connectionController: _testConnectionController(),
+        appSettings: appSettings,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.light,
+    );
+    await appSettings.setThemeMode(ThemeMode.dark);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.dark,
+    );
+  });
+
+  testWidgets('About guide scrolls with large text on a small viewport', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.8)),
+          child: AboutScreen(settings: settings, onVisitGitHub: () async {}),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ListView), findsOneWidget);
+    expect(find.text('About BookLedger Mobile'), findsOneWidget);
+  });
+
+  testWidgets('Clear Data cancel preserves all data', (
+    WidgetTester tester,
+  ) async {
+    final store = _MemoryPairingStore()..pairing = _savedPairing();
+    final controller = MobileConnectionController(
+      store: store,
+      transport: _FakeConnectionTransport(),
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(controller.dispose);
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+    var clearCalled = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          controller: controller,
+          settings: settings,
+          clearPendingPhotos: () async {
+            clearCalled = true;
+          },
+          onVisitGitHub: () async {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Clear Data'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Clear Mobile Data?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(store.pairing, isNotNull);
+    expect(clearCalled, isFalse);
+  });
+
+  testWidgets('Clear Data deletes only pending photos and forgets locally', (
+    WidgetTester tester,
+  ) async {
+    final store = _MemoryPairingStore()..pairing = _savedPairing();
+    final transport = _FakeConnectionTransport();
+    final controller = MobileConnectionController(
+      store: store,
+      transport: transport,
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pump();
+    await tester.pump();
+    controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+    var photosCleared = false;
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+    const appSettingsChannel = MethodChannel(
+      'com.bookledger.mobile/app_settings',
+    );
+    var savedTheme = 'dark';
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(appSettingsChannel, (call) async {
+          if (call.method == 'getAppSettings') {
+            return {'version': '1.2.3', 'theme': savedTheme};
+          }
+          if (call.method == 'setTheme') {
+            savedTheme = call.arguments as String;
+            return true;
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(appSettingsChannel, null),
+    );
+    await settings.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          controller: controller,
+          settings: settings,
+          clearPendingPhotos: () async {
+            photosCleared = true;
+          },
+          onVisitGitHub: () async {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Clear Data'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('desktop BookLedger library will not be deleted.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.pumpAndSettle();
+
+    expect(photosCleared, isTrue);
+    expect(store.pairing, isNull);
+    expect(controller.isPaired, isFalse);
+    expect(controller.status, MobileConnectionStatus.notPaired);
+    expect(settings.themeMode, ThemeMode.dark);
+    expect(transport.unpairCalls, 0);
+    final restartedController = MobileConnectionController(
+      store: store,
+      transport: _FakeConnectionTransport(),
+      discovery: _NoDesktopDiscovery(),
+    );
+    await restartedController.initialize();
+    expect(restartedController.status, MobileConnectionStatus.notPaired);
+    restartedController.dispose();
+  });
+
+  testWidgets('Clear Data reports photo deletion failure without success', (
+    WidgetTester tester,
+  ) async {
+    final controller = MobileConnectionController(
+      store: _MemoryPairingStore(),
+      transport: _FakeConnectionTransport(),
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(controller.dispose);
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          controller: controller,
+          settings: settings,
+          clearPendingPhotos: () async {
+            throw const FileSystemException('Temporary storage unavailable.');
+          },
+          onVisitGitHub: () async {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Clear Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Pairing was forgotten, but pending photos could not all be deleted. Retry Clear Data.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'Pending captures deleted and pairing forgotten on this phone.',
+      ),
+      findsNothing,
+    );
+    expect(controller.isPaired, isFalse);
+  });
+
+  testWidgets('Clear Data preserves photos when secure pairing clear fails', (
+    WidgetTester tester,
+  ) async {
+    final store = _MemoryPairingStore()
+      ..pairing = _savedPairing()
+      ..failClear = true;
+    final controller = MobileConnectionController(
+      store: store,
+      transport: _FakeConnectionTransport(),
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pump();
+    await tester.pump();
+    controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+    var photosCleared = false;
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          controller: controller,
+          settings: settings,
+          clearPendingPhotos: () async {
+            photosCleared = true;
+          },
+          onVisitGitHub: () async {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Clear Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.pumpAndSettle();
+
+    expect(photosCleared, isFalse);
+    expect(store.pairing, isNotNull);
+    expect(
+      find.text('Saved pairing could not be removed from secure storage.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Clear Data waits while a connection operation is active', (
+    WidgetTester tester,
+  ) async {
+    final store = _MemoryPairingStore()..pairing = _savedPairing();
+    final transport = _FakeConnectionTransport()
+      ..validation = Completer<DesktopEndpoint?>();
+    final controller = MobileConnectionController(
+      store: store,
+      transport: transport,
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(() {
+      if (!transport.validation!.isCompleted) {
+        transport.validation!.complete(null);
+      }
+      controller.dispose();
+    });
+    await controller.initialize();
+    expect(controller.isBusy, isTrue);
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+    var photosCleared = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          controller: controller,
+          settings: settings,
+          clearPendingPhotos: () async {
+            photosCleared = true;
+          },
+          onVisitGitHub: () async {},
+        ),
+      ),
+    );
+    await tester.tap(find.text('Clear Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.pumpAndSettle();
+
+    expect(photosCleared, isFalse);
+    expect(store.pairing, isNotNull);
+    expect(
+      find.text(
+        'Wait for the current connection operation to finish, then retry.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('active camera capture cannot be left before it is settled', (
+    WidgetTester tester,
+  ) async {
+    final workflow = SingleEntryWorkflow()..chooseNoIsbn();
+    addTearDown(workflow.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => CaptureScreen(
+                    mode: CaptureMode.single,
+                    workflow: workflow,
+                  ),
+                ),
+              ),
+              child: const Text('Home'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Home'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Single Entry'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Single Entry'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('bulk entry preserves its 5 to 20 capacity selector', (

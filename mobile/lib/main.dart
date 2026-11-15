@@ -14,15 +14,19 @@ import 'capture/share_photo_button.dart';
 import 'capture/single_entry_workflow.dart';
 import 'connection/mobile_connection_controller.dart';
 import 'connection/mobile_setup_screen.dart';
+import 'settings/about_screen.dart';
+import 'settings/mobile_app_settings.dart';
+import 'settings/settings_screen.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({this.connectionController, super.key});
+  const MyApp({this.connectionController, this.appSettings, super.key});
 
   final MobileConnectionController? connectionController;
+  final MobileAppSettings? appSettings;
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -30,40 +34,63 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late final MobileConnectionController _connectionController;
+  late final MobileAppSettings _appSettings;
+  late final bool _ownsAppSettings;
 
   @override
   void initState() {
     super.initState();
     _connectionController =
         widget.connectionController ?? MobileConnectionController();
+    _ownsAppSettings = widget.appSettings == null;
+    _appSettings = widget.appSettings ?? MobileAppSettings();
     unawaited(_connectionController.initialize());
+    unawaited(_appSettings.initialize());
   }
 
   @override
   void dispose() {
     _connectionController.dispose();
+    if (_ownsAppSettings) _appSettings.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     const seedColor = Color(0xFF346B63);
-    return MaterialApp(
-      title: 'BookLedger Mobile',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: seedColor,
-          surface: const Color(0xFFF7F7F3),
+    return AnimatedBuilder(
+      animation: _appSettings,
+      builder: (context, _) => MaterialApp(
+        title: 'BookLedger Mobile',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: seedColor,
+            surface: const Color(0xFFF7F7F3),
+          ),
+          useMaterial3: true,
+          scaffoldBackgroundColor: const Color(0xFFF7F7F3),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFFF7F7F3),
+            foregroundColor: Color(0xFF202A28),
+            centerTitle: false,
+          ),
         ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF7F7F3),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF7F7F3),
-          foregroundColor: Color(0xFF202A28),
-          centerTitle: false,
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: seedColor,
+            brightness: Brightness.dark,
+            surface: const Color(0xFF171C1B),
+          ),
+          useMaterial3: true,
+          scaffoldBackgroundColor: const Color(0xFF171C1B),
+          appBarTheme: const AppBarTheme(centerTitle: false),
+        ),
+        themeMode: _appSettings.themeMode,
+        home: HomeScreen(
+          connectionController: _connectionController,
+          appSettings: _appSettings,
         ),
       ),
-      home: HomeScreen(connectionController: _connectionController),
     );
   }
 }
@@ -74,9 +101,10 @@ const _externalUrlChannel = MethodChannel('com.bookledger.mobile/external_url');
 const _githubUrl = 'https://github.com/hectordoesgorug/BookLedger';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({this.connectionController, super.key});
+  const HomeScreen({this.connectionController, this.appSettings, super.key});
 
   final MobileConnectionController? connectionController;
+  final MobileAppSettings? appSettings;
 
   void _openPlaceholder(BuildContext context, String title) {
     Navigator.of(context).push(
@@ -87,15 +115,29 @@ class HomeScreen extends StatelessWidget {
   void _handleMenu(BuildContext context, _HomeMenuAction action) {
     switch (action) {
       case _HomeMenuAction.about:
-        _openPlaceholder(context, 'About');
+        if (appSettings == null) {
+          _openPlaceholder(context, 'About');
+        } else {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => AboutScreen(
+                settings: appSettings!,
+                onVisitGitHub: () => _openGithub(context),
+              ),
+            ),
+          );
+        }
       case _HomeMenuAction.settings:
-        if (connectionController == null) {
+        if (connectionController == null || appSettings == null) {
           _openPlaceholder(context, 'Settings');
         } else {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (_) =>
-                  MobileSetupScreen(controller: connectionController!),
+              builder: (_) => SettingsScreen(
+                controller: connectionController!,
+                settings: appSettings!,
+                onVisitGitHub: () => _openGithub(context),
+              ),
             ),
           );
         }
@@ -216,6 +258,22 @@ class HomeScreen extends StatelessWidget {
                       ),
                       label: const Text('Visit GitHub'),
                     ),
+                    if (appSettings != null) ...[
+                      const SizedBox(height: 8),
+                      AnimatedBuilder(
+                        animation: appSettings!,
+                        builder: (context, _) => Text(
+                          mobileVersionLabel(appSettings!.version),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -905,111 +963,119 @@ class _CaptureScreenState extends State<CaptureScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_isBulk ? 'Bulk Entry' : 'Single Entry'),
-        actions: [
-          SharePhotoButton(
-            file: !_isBulk && _workflow.photoPath != null
-                ? File(_workflow.photoPath!)
-                : null,
-          ),
-        ],
-      ),
-      body: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            if (_isBulk)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-                child: Row(
-                  children: [
-                    Text(
-                      'Queue',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${_bulkQueue!.count} / ${_bulkQueue!.capacity}',
-                      key: const ValueKey('queue-counter'),
-                      style: Theme.of(context).textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-              ),
-            _captureStatus(context),
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: _captureCanvas(context),
-              ),
+    return PopScope<void>(
+      canPop:
+          !_workflow.photoCameraActive &&
+          !_workflow.scannerActive &&
+          !_queueing &&
+          !_transferring,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_isBulk ? 'Bulk Entry' : 'Single Entry'),
+          actions: [
+            SharePhotoButton(
+              file: !_isBulk && _workflow.photoPath != null
+                  ? File(_workflow.photoPath!)
+                  : null,
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _labels.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  mainAxisExtent: 56,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                ),
-                itemBuilder: (context, index) {
-                  if (_isBulk && index == 4) {
-                    return QueueActionButton(
-                      label: _batchReady ? 'Send' : 'Queue',
-                      canTap: _batchReady
-                          ? widget.connectionController?.isConnected == true &&
-                                !_transferring
-                          : _workflow.isCaptureReady && !_queueing,
-                      canLongPress: _canFinishBatch,
-                      onTap: _batchReady
-                          ? () => unawaited(_sendBulkBatch())
-                          : () => unawaited(_queueCurrentCapture()),
-                      onLongPress: _finishBatchEarly,
-                    );
-                  }
-
-                  final enabled = _buttonEnabled(index);
-                  return ElevatedButton(
-                    onPressed: enabled
-                        ? () => _onCaptureButtonPressed(index)
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(_labels[index]),
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (_isBulk && _canFinishBatch)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Text(
-                  'Hold Queue to finish batch early.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            const SizedBox(height: 12),
-            ConnectionStatus(controller: widget.connectionController),
           ],
+        ),
+        body: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              if (_isBulk)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Queue',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_bulkQueue!.count} / ${_bulkQueue!.capacity}',
+                        key: const ValueKey('queue-counter'),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              _captureStatus(context),
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: _captureCanvas(context),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _labels.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    mainAxisExtent: 56,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                  ),
+                  itemBuilder: (context, index) {
+                    if (_isBulk && index == 4) {
+                      return QueueActionButton(
+                        label: _batchReady ? 'Send' : 'Queue',
+                        canTap: _batchReady
+                            ? widget.connectionController?.isConnected ==
+                                      true &&
+                                  !_transferring
+                            : _workflow.isCaptureReady && !_queueing,
+                        canLongPress: _canFinishBatch,
+                        onTap: _batchReady
+                            ? () => unawaited(_sendBulkBatch())
+                            : () => unawaited(_queueCurrentCapture()),
+                        onLongPress: _finishBatchEarly,
+                      );
+                    }
+
+                    final enabled = _buttonEnabled(index);
+                    return ElevatedButton(
+                      onPressed: enabled
+                          ? () => _onCaptureButtonPressed(index)
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(_labels[index]),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (_isBulk && _canFinishBatch)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Hold Queue to finish batch early.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              const SizedBox(height: 12),
+              ConnectionStatus(controller: widget.connectionController),
+            ],
+          ),
         ),
       ),
     );
@@ -1114,20 +1180,22 @@ class ConnectionStatus extends StatelessWidget {
     MobileConnectionStatus.serviceError => 'Connection error',
   };
 
-  Color _color(BuildContext context, MobileConnectionStatus status) =>
-      switch (status) {
-        MobileConnectionStatus.connected => Colors.green,
-        MobileConnectionStatus.pairing || MobileConnectionStatus.connecting =>
-          Theme.of(context).colorScheme.primary,
-        MobileConnectionStatus.disconnected ||
-        MobileConnectionStatus.desktopUnavailable => Colors.orange,
-        MobileConnectionStatus.pairingRejected ||
-        MobileConnectionStatus.authenticationRejected ||
-        MobileConnectionStatus.serviceError => Colors.red,
-        MobileConnectionStatus.notPaired => Theme.of(
-          context,
-        ).colorScheme.outline,
-      };
+  Color _color(
+    BuildContext context,
+    MobileConnectionStatus status,
+  ) => switch (status) {
+    MobileConnectionStatus.connected => Theme.of(context).colorScheme.tertiary,
+    MobileConnectionStatus.pairing ||
+    MobileConnectionStatus.connecting => Theme.of(context).colorScheme.primary,
+    MobileConnectionStatus.disconnected ||
+    MobileConnectionStatus.desktopUnavailable => Theme.of(
+      context,
+    ).colorScheme.secondary,
+    MobileConnectionStatus.pairingRejected ||
+    MobileConnectionStatus.authenticationRejected ||
+    MobileConnectionStatus.serviceError => Theme.of(context).colorScheme.error,
+    MobileConnectionStatus.notPaired => Theme.of(context).colorScheme.outline,
+  };
 
   IconData _icon(MobileConnectionStatus status) => switch (status) {
     MobileConnectionStatus.notPaired => Icons.link_off,

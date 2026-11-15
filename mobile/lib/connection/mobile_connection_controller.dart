@@ -636,6 +636,7 @@ class MobileConnectionController extends ChangeNotifier
   int _failureCount = 0;
   int _operationGeneration = 0;
   Future<void> _storeMutationTail = Future<void>.value();
+  Future<void>? _initialization;
 
   MobileConnectionStatus get status => _status;
   bool get isConnected => _status == MobileConnectionStatus.connected;
@@ -675,7 +676,9 @@ class MobileConnectionController extends ChangeNotifier
     return error.runtimeType.toString();
   }
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<void> _initialize() async {
     if (_initialized) {
       return;
     }
@@ -1029,9 +1032,15 @@ class MobileConnectionController extends ChangeNotifier
     return _status == MobileConnectionStatus.connected;
   }
 
-  Future<bool> forgetPairing() async {
+  Future<bool> forgetPairing() => _removeLocalPairing(allowMissing: false);
+
+  Future<bool> clearLocalPairing() => _removeLocalPairing(allowMissing: true);
+
+  Future<bool> _removeLocalPairing({required bool allowMissing}) async {
     final pairing = _pairing;
-    if (pairing == null || (_busy && !_reconnecting) || _forgetting) {
+    if ((!allowMissing && pairing == null) ||
+        (_busy && !_reconnecting) ||
+        _forgetting) {
       return false;
     }
     _forgetting = true;

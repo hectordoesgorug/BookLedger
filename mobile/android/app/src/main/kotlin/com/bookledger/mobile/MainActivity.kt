@@ -62,6 +62,28 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_SETTINGS_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                val preferences = getSharedPreferences(APP_SETTINGS_PREFERENCES, MODE_PRIVATE)
+                when (call.method) {
+                    "getAppSettings" -> result.success(
+                        mapOf(
+                            "version" to BuildConfig.VERSION_NAME,
+                            "theme" to preferences.getString(THEME_KEY, "default"),
+                        ),
+                    )
+                    "setTheme" -> {
+                        val theme = call.arguments as? String
+                        if (theme != "default" && theme != "dark") {
+                            result.success(false)
+                        } else {
+                            result.success(preferences.edit().putString(THEME_KEY, theme).commit())
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         nsdManager = getSystemService(NSD_SERVICE) as? NsdManager
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DISCOVERY_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -159,6 +181,9 @@ class MainActivity : FlutterActivity() {
         const val CHANNEL_NAME = "com.bookledger.mobile/scan_feedback"
         const val EXTERNAL_URL_CHANNEL = "com.bookledger.mobile/external_url"
         const val GITHUB_URL = "https://github.com/hectordoesgorug/BookLedger"
+        const val APP_SETTINGS_CHANNEL = "com.bookledger.mobile/app_settings"
+        const val APP_SETTINGS_PREFERENCES = "bookledger_mobile_preferences"
+        const val THEME_KEY = "theme"
         const val DISCOVERY_CHANNEL = "com.bookledger.mobile/desktop_discovery"
         const val SERVICE_TYPE = "_bookledger._tcp."
         const val DISCOVERY_TIMEOUT_MS = 8_000L
