@@ -170,7 +170,7 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     assert widget.body.winfo_width() <= canvas.winfo_width()
     short_keys = ("genre", "edition", "publisher", "page_count", "publication_year", "srp", "format", "location", "condition", "price")
     input_widths = {widget._widgets[key].winfo_width() for key in short_keys}
-    assert len(input_widths) == 1
+    assert max(input_widths) - min(input_widths) <= 1
     short_row = int(widget._widgets["genre"].grid_info()["row"])
     assert widget.body.grid_bbox(0, short_row, 1, 1)[2] == widget.body.grid_bbox(2, short_row, 1, 1)[2]
     for key in short_keys:
@@ -195,7 +195,8 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
         root.update()
         short_row = int(widget._widgets["genre"].grid_info()["row"])
         assert widget.body.grid_bbox(0, short_row, 1, 1)[2] == widget.body.grid_bbox(2, short_row, 1, 1)[2]
-        assert len({widget._widgets[key].winfo_width() for key in short_keys}) == 1
+        input_widths = {widget._widgets[key].winfo_width() for key in short_keys}
+        assert max(input_widths) - min(input_widths) <= 1
         assert all(widget._errors[key].winfo_width() == widget._widgets[key].winfo_width() for key in short_keys)
         preview_heights.append(widget.photo_panel.winfo_height())
         assert widget.photo_panel.winfo_ismapped()

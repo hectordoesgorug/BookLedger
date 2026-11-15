@@ -183,6 +183,17 @@ THEME_OPTIONS = (
 )
 
 
+def default_theme_name(available, current=""):
+    """Prefer Clam for new defaults while retaining safe runtime fallbacks."""
+    available = tuple(available)
+    for name in ("clam", "flatly"):
+        if name in available:
+            return name
+    if current in available:
+        return current
+    return available[0] if available else ""
+
+
 def resolve_theme_name(available, configured, default):
     """Return a configured theme only when the active Tk runtime provides it."""
     available = tuple(available)
@@ -273,11 +284,7 @@ class BookLedgerApp(_WindowBase):
         self._theme_name_by_label = {label: name for label, name in self._theme_options}
         self._theme_label_by_name = {name: label for label, name in self._theme_options}
         current_theme = self.theme_style.theme_use() or ""
-        default_theme = (
-            "flatly" if "flatly" in self._available_theme_names
-            else current_theme if current_theme in self._available_theme_names
-            else (self._available_theme_names[0] if self._available_theme_names else "")
-        )
+        default_theme = default_theme_name(self._available_theme_names, current_theme)
         defaults = ProviderSettings.defaults().to_document({
             "api_keys": {"google_books": ""},
             "logging": {"enabled": False},
@@ -3021,7 +3028,7 @@ class BookLedgerApp(_WindowBase):
             )
             available_themes = getattr(self, "_available_theme_names", ())
             if available_themes:
-                default_theme = "flatly" if "flatly" in available_themes else available_themes[0]
+                default_theme = default_theme_name(available_themes)
                 try:
                     apply_theme_to_style(self.theme_style, default_theme)
                     self._active_theme = default_theme

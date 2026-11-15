@@ -1032,6 +1032,13 @@ def test_theme_selection_applies_only_supported_names_and_persists_for_restart(t
     assert AppConfigStore(config_path).get(("preferences", "theme")) == "missing-theme"
 
 
+def test_default_theme_prefers_clam_and_falls_back_to_available_theme():
+    assert app_module.default_theme_name(("flatly", "clam"), "flatly") == "clam"
+    assert app_module.default_theme_name(("flatly", "bootstrap-dark"), "bootstrap-dark") == "flatly"
+    assert app_module.default_theme_name(("bootstrap-dark",), "bootstrap-dark") == "bootstrap-dark"
+    assert app_module.default_theme_name((), "") == ""
+
+
 @pytest.mark.parametrize("active_theme, native_theme", [("clam", True), ("flatly", False)])
 def test_configure_style_uses_the_matching_ttk_configure_call(
     active_theme, native_theme, monkeypatch

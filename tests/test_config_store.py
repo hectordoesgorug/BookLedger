@@ -171,7 +171,7 @@ def test_clean_portable_launch_writes_defaults_and_preserves_them_on_update(tmp_
     defaults = ProviderSettings.defaults().to_document({
         'api_keys': {'google_books': ''},
         'logging': {'enabled': False},
-        'preferences': {'theme': 'flatly'},
+        'preferences': {'theme': 'clam'},
     })
 
     assert store.ensure_defaults(defaults) == ()
@@ -181,7 +181,7 @@ def test_clean_portable_launch_writes_defaults_and_preserves_them_on_update(tmp_
     assert not (tmp_path / 'separate-profile' / 'BookLedger' / 'config.json').exists()
     document = json.loads(paths.provider_config.read_text(encoding='utf-8'))
     assert document['metadata_providers'] == ProviderSettings.defaults().to_document()['metadata_providers']
-    assert document['preferences']['theme'] == 'flatly'
+    assert document['preferences']['theme'] == 'clam'
     assert document['preferences']['genres']
     assert document['preferences']['formats']
     assert document['logging']['enabled'] is False

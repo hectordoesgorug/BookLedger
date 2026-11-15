@@ -25,6 +25,9 @@ build/
 dist/
 /release-input/BookLedger-Android.apk
 
+# Machine-generated local Gradle daemon JVM selection
+/mobile/android/gradle/gradle-daemon-jvm.properties
+
 # Secrets
 .env
 .env.*
