@@ -227,6 +227,7 @@ void main() {
       expect(transport.pairCalls, 1);
       expect(store.writes, 1);
       expect(controller.status, MobileConnectionStatus.connected);
+      expect(controller.message, 'Connected to BookLedger Desktop.');
       expect(store.pairing!.deviceToken, startsWith('device-token-'));
       expect(store.pairing!.deviceToken, isNot(contains('temporary-')));
       expect(store.pairing!.endpoints, hasLength(2));
@@ -476,6 +477,7 @@ void main() {
 
       expect(transport.validateCalls, 1);
       expect(controller.status, MobileConnectionStatus.connected);
+      expect(controller.message, 'Connected to BookLedger Desktop.');
       expect(store.writes, 1);
 
       controller.didChangeAppLifecycleState(AppLifecycleState.paused);
@@ -549,6 +551,7 @@ void main() {
       expect(transport.validationRequests[1], [discoveredEndpoint]);
       expect(discovery.discoverCalls, 1);
       expect(controller.status, MobileConnectionStatus.connected);
+      expect(controller.message, 'Connected to BookLedger Desktop.');
       expect(controller.pairing!.lastEndpoint, discoveredEndpoint);
       expect(controller.pairing!.endpoints, [
         fallbackEndpoint,

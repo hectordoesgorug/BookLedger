@@ -760,7 +760,7 @@ class MobileConnectionController extends ChangeNotifier
       await _mutateStore(() => _store.write(pairing));
       _pairing = pairing;
       _status = MobileConnectionStatus.connected;
-      _message = 'Paired and connected to ${pairing.deviceName}.';
+      _message = 'Connected to BookLedger Desktop.';
       _failureCount = 0;
       _scheduleReconnect(const Duration(seconds: 20));
       return true;
@@ -887,7 +887,7 @@ class MobileConnectionController extends ChangeNotifier
           return;
         }
         _status = MobileConnectionStatus.connected;
-        _message = 'Connected to ${_pairing!.deviceName}.';
+        _message = 'Connected to BookLedger Desktop.';
         _failureCount = 0;
         _scheduleReconnect(const Duration(seconds: 20));
       } else {

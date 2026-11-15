@@ -17,6 +17,7 @@ import 'connection/mobile_setup_screen.dart';
 import 'settings/about_screen.dart';
 import 'settings/mobile_app_settings.dart';
 import 'settings/settings_screen.dart';
+import 'success_notification.dart';
 
 void main() {
   runApp(const MyApp());
@@ -654,7 +655,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       if (sent && mounted) {
         await _workflow.clear();
         _singleBatchId = newCaptureUuid();
-        _showQueueMessage(
+        _showSuccessMessage(
           'Desktop received the capture. Cataloging will follow on desktop.',
         );
       } else if (mounted) {
@@ -690,7 +691,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
       if (sent && mounted) {
         await queue.clearSession();
-        _showQueueMessage(
+        _showSuccessMessage(
           'Desktop received the batch. Cataloging will follow on desktop.',
         );
       } else if (mounted) {
@@ -716,6 +717,12 @@ class _CaptureScreenState extends State<CaptureScreen>
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showSuccessMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(successNotification(context, message));
   }
 
   List<String> get _labels => <String>[

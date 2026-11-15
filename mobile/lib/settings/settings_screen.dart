@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../connection/mobile_connection_controller.dart';
 import '../connection/mobile_setup_screen.dart';
+import '../success_notification.dart';
 import 'clear_mobile_data.dart';
 import 'mobile_app_settings.dart';
 
@@ -106,10 +107,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Pending captures deleted and pairing forgotten on this phone.',
-          ),
+        successNotification(
+          context,
+          'Pending captures deleted and pairing forgotten on this phone.',
         ),
       );
       Navigator.of(context).popUntil((route) => route.isFirst);

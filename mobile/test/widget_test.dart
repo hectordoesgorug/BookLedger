@@ -56,8 +56,16 @@ class _NoDesktopDiscovery implements DesktopDiscovery {
   Future<void> stop() async {}
 }
 
+class _NoFileCleanupWorkflow extends SingleEntryWorkflow {
+  @override
+  Future<void> clear() async {
+    resetAfterSuccessfulTransfer();
+  }
+}
+
 class _FakeConnectionTransport implements ConnectionTransport {
   Completer<DesktopEndpoint?>? validation;
+  DesktopEndpoint? validationResult;
   int unpairCalls = 0;
 
   @override
@@ -71,7 +79,7 @@ class _FakeConnectionTransport implements ConnectionTransport {
   Future<DesktopEndpoint?> validate(
     List<DesktopEndpoint> endpoints,
     String deviceToken,
-  ) => validation?.future ?? Future<DesktopEndpoint?>.value();
+  ) => validation?.future ?? Future<DesktopEndpoint?>.value(validationResult);
 
   @override
   Future<bool> unpair(
@@ -328,6 +336,107 @@ void main() {
     final size = tester.getSize(find.byKey(const ValueKey('home-banner')));
     expect(banner.fit, BoxFit.contain);
     expect(size.width / size.height, closeTo(sourceRatio, 0.01));
+  });
+
+  testWidgets('connected footer names BookLedger Desktop', (
+    WidgetTester tester,
+  ) async {
+    final store = _MemoryPairingStore()..pairing = _savedPairing();
+    final controller = MobileConnectionController(
+      store: store,
+      transport: _FakeConnectionTransport()
+        ..validationResult = _savedPairing().endpoints.first,
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(() {
+      controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+      controller.dispose();
+    });
+    await controller.initialize();
+    await tester.pump();
+    await tester.pump();
+    expect(controller.status, MobileConnectionStatus.connected);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ConnectionStatus(controller: controller)),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text('Connected · Connected to BookLedger Desktop.'),
+      findsOneWidget,
+    );
+    final icon = tester.widget<Icon>(find.byIcon(Icons.check_circle));
+    expect(
+      icon.color,
+      Theme.of(tester.element(find.byType(ConnectionStatus)))
+          .colorScheme
+          .tertiary,
+    );
+    await controller.clearLocalPairing();
+  });
+
+  testWidgets('successful single transfer shows the success notice', (
+    WidgetTester tester,
+  ) async {
+    final controller = MobileConnectionController(
+      store: _MemoryPairingStore()..pairing = _savedPairing(),
+      transport: _FakeConnectionTransport()
+        ..validationResult = _savedPairing().endpoints.first,
+      discovery: _NoDesktopDiscovery(),
+    );
+    addTearDown(() {
+      controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+      controller.dispose();
+    });
+    await controller.initialize();
+    await tester.pump();
+    await tester.pump();
+    expect(controller.isConnected, isTrue);
+    final workflow = _NoFileCleanupWorkflow();
+    expect(await workflow.scanIsbn('9780306406157'), isTrue);
+    expect(workflow.saveIsbn(), isTrue);
+    expect(
+      await workflow.photoCaptured('successful-transfer-photo.jpg'),
+      isTrue,
+    );
+    expect(workflow.savePhoto(), isTrue);
+    addTearDown(workflow.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CaptureScreen(
+          mode: CaptureMode.single,
+          workflow: workflow,
+          connectionController: controller,
+        ),
+      ),
+    );
+    final sendButton = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Send'),
+    );
+    expect(sendButton.onPressed, isNotNull);
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Send'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.text(
+        'Desktop received the capture. Cataloging will follow on desktop.',
+      ),
+      findsOneWidget,
+    );
+    final theme = Theme.of(tester.element(find.byType(SnackBar)));
+    expect(
+      tester.widget<SnackBar>(find.byType(SnackBar)).backgroundColor,
+      theme.colorScheme.tertiaryContainer,
+    );
+    await controller.clearLocalPairing();
+    ScaffoldMessenger.of(tester.element(find.byType(SnackBar)))
+        .hideCurrentSnackBar();
+    await tester.pump(const Duration(milliseconds: 300));
   });
 
   testWidgets(
@@ -647,6 +756,13 @@ void main() {
     expect(controller.status, MobileConnectionStatus.notPaired);
     expect(settings.themeMode, ThemeMode.dark);
     expect(transport.unpairCalls, 0);
+    expect(
+      find.text(
+        'Pending captures deleted and pairing forgotten on this phone.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(SnackBar), findsOneWidget);
     final restartedController = MobileConnectionController(
       store: store,
       transport: _FakeConnectionTransport(),
