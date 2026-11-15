@@ -31,6 +31,10 @@ def test_copy_licenses_includes_ttkbootstrap_icon_font_license(tmp_path):
     license_text = (tmp_path / "licenses" / "Bootstrap-Icons" / "LICENSE").read_text()
     assert license_text.startswith("The MIT License (MIT)")
     assert (tmp_path / "licenses" / "Pillow-Dependencies" / "LIBAVIF.txt").is_file()
+    assert (tmp_path / "licenses" / "Pillow-Dependencies" / "AOM-Patent-License-1.0.html").is_file()
+    assert (tmp_path / "licenses" / "Pillow-Dependencies" / "AOM-Patent-License-Statement.pdf").is_file()
+    assert (tmp_path / "licenses" / "Android" / "Apache-2.0.txt").is_file()
+    assert (tmp_path / "licenses" / "Android" / "Flutter-engine-LICENSE.txt").is_file()
     assert (tmp_path / "licenses" / "Python" / "Python-THIRD-PARTY-LICENSES.rst").is_file()
 
 

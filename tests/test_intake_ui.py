@@ -4,6 +4,7 @@ from tkinter import ttk
 
 import pytest
 from PIL import Image
+from ttkbootstrap import Style
 
 from bookledger.config import APPROVED_GENRES, DEFAULT_LOCATION
 from bookledger.db.database import Database
@@ -18,6 +19,7 @@ from bookledger.ui.forms import BookForm
 def tk_root():
     try:
         root = tk.Tk()
+        Style(theme="clam")
         root.withdraw()
     except tk.TclError as exc:
         pytest.skip(f"Tk UI tests require a display: {exc}")

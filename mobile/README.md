@@ -18,7 +18,7 @@ Pairing and transfers use unencrypted HTTP over the local network, so pair only 
 
 Barcode image input and results are processed on-device and are not sent to Google by BookLedger. The bundled ML Kit SDK may contact Google for model updates, fixes, and hardware compatibility information, and sends usage/performance metrics. See [ML Kit Terms and Privacy](https://developers.google.com/ml-kit/terms); make this possible SDK traffic visible to users as applicable. The app does not implement its own analytics or telemetry; this source review does not independently observe network traffic.
 
-The APK includes Flutter's generated package notices at `assets/flutter_assets/NOTICES.Z`. Include the repository's `LICENSE` and `THIRD_PARTY_NOTICES.md` with direct APK distribution; the latter records Android SDK and ML Kit terms and the release review status.
+The APK includes Flutter's generated package notices at `assets/flutter_assets/NOTICES.Z`. Include the repository's `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `licenses/Android/` with direct APK distribution. That folder supplies the Apache 2.0 text and Flutter engine license bundle for this APK's engine revision.
 
 ## Android release signing
 
@@ -28,7 +28,7 @@ Release builds require an external signing properties file. Store it and the rel
 
 From this directory, run `flutter build apk --release`. Flutter writes the APK to `build/app/outputs/flutter-apk/app-release.apk`. Verify it with Android SDK `apksigner` and inspect the application ID, version, permissions, and bundled notices before distribution. For the Windows portable ZIP, stage the verified APK at `release-input/BookLedger-Android.apk` in the repository root, then run `scripts/build_windows_portable.ps1`; the script checks its signature and bundles it at `mobile/BookLedger-Android.apk` without re-signing it.
 
-In BookLedger Desktop, choose **Settings → Mobile App Setup → Export APK**, then save the copy and transfer it to the Android device. Export uses the APK beside `BookLedger.exe` and does not modify the bundled file. For a standalone direct APK release, provide this README, the repository `LICENSE`, and `THIRD_PARTY_NOTICES.md` with the APK.
+In BookLedger Desktop, choose **Settings → Mobile App Setup → Export APK**, then save the copy and transfer it to the Android device. Export uses the APK beside `BookLedger.exe` and does not modify the bundled file. For a standalone direct APK release, provide this README, the repository `LICENSE` and `THIRD_PARTY_NOTICES.md`, and the `licenses/Android/` directory with the APK.
 
 The production-signed `1.0.0+1` APK uses the existing `bookledger-release` certificate. Android requires future upgrades to use the same signing identity and a greater version code. A previous physical-device test of this APK with a packaged Windows executable was reported by the project owner; that prior test does not verify this newly assembled combined ZIP. Do not uninstall an existing installation for upgrade testing unless its app data has first been safely preserved.
 

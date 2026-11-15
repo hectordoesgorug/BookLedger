@@ -83,6 +83,8 @@ def _copy_licenses(bundle: Path) -> None:
 
     pillow_licenses = ROOT / "licenses" / "Pillow-Dependencies"
     shutil.copytree(pillow_licenses, license_root / "Pillow-Dependencies", dirs_exist_ok=True)
+    android_licenses = ROOT / "licenses" / "Android"
+    shutil.copytree(android_licenses, license_root / "Android", dirs_exist_ok=True)
     python_licenses = ROOT / "licenses" / "Python-THIRD-PARTY-LICENSES.rst"
     shutil.copy2(python_licenses, license_root / "Python" / python_licenses.name)
 
