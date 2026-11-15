@@ -29,6 +29,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
+    icon=str(ROOT / "assets" / "icon.ico"),
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
