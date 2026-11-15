@@ -143,9 +143,21 @@ def test_short_fields_use_the_approved_two_column_form_layout(form):
 def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     widget, root, _photo = form
     root.deiconify()
+    widget.deiconify()
+    root.update()
+    default_size = (widget.winfo_width(), widget.winfo_height())
+    expected_height = max(700, max(widget.body.winfo_reqheight(), widget.right_panel.winfo_reqheight()) + 28)
+    assert default_size == (1120, expected_height)
+    assert default_size[1] < 850
+    assert widget.right_panel.grid_rowconfigure(0)["weight"] == 1
+    assert widget.photo_preview.cget("text") == "No Photo Selected"
+    assert widget.photo_preview.cget("anchor") == "center"
+    default_preview_height = widget.photo_panel.winfo_height()
+    assert widget.metadata_status_panel.winfo_y() + widget.metadata_status_panel.winfo_height() <= widget.right_panel.winfo_height()
+
     root.geometry("400x300+0+0")
     widget.geometry("960x700")
-    widget.update()
+    root.update()
     canvas = widget.body.master
     canvas.update_idletasks()
     body_height = widget.body.winfo_reqheight()
@@ -166,14 +178,34 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
         assert int(error.cget("wraplength")) == error.winfo_width()
     # Scrolling remains available at the minimum supported window size.
     assert int(widget.minsize()[1]) == 700
+    minimum_preview_height = widget.photo_panel.winfo_height()
+    assert minimum_preview_height < default_preview_height
+    assert widget.photo_panel.winfo_ismapped()
+    assert widget.metadata_status_panel.winfo_ismapped()
+    assert widget.metadata_status_panel.winfo_y() + widget.metadata_status_panel.winfo_height() <= widget.right_panel.winfo_height()
+    assert all(button.winfo_ismapped() for button in (widget.save_button, widget.refresh_button, widget.clear_button, widget.cancel_button))
+    canvas.yview_moveto(1.0)
+    root.update()
+    assert canvas.canvasy(0) > 0
+    assert widget.actions_panel.winfo_rooty() + widget.actions_panel.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
 
+    preview_heights = [minimum_preview_height]
     for geometry in ("1120x850", "1400x900"):
         widget.geometry(geometry)
-        widget.update()
+        root.update()
         short_row = int(widget._widgets["genre"].grid_info()["row"])
         assert widget.body.grid_bbox(0, short_row, 1, 1)[2] == widget.body.grid_bbox(2, short_row, 1, 1)[2]
         assert len({widget._widgets[key].winfo_width() for key in short_keys}) == 1
         assert all(widget._errors[key].winfo_width() == widget._widgets[key].winfo_width() for key in short_keys)
+        preview_heights.append(widget.photo_panel.winfo_height())
+        assert widget.photo_panel.winfo_ismapped()
+        assert widget.photo_preview.winfo_ismapped()
+        assert widget.metadata_status_panel.winfo_ismapped()
+        assert widget.metadata_status_panel.winfo_y() >= widget.photo_panel.winfo_y() + widget.photo_panel.winfo_height()
+        assert widget.metadata_status_panel.winfo_y() + widget.metadata_status_panel.winfo_height() <= widget.right_panel.winfo_height()
+        assert all(button.winfo_ismapped() for button in (widget.save_button, widget.refresh_button, widget.clear_button, widget.cancel_button))
+
+    assert preview_heights[0] < default_preview_height < preview_heights[1] < preview_heights[2]
 
 
 def test_edit_form_uses_the_same_two_column_layout(form):
@@ -187,14 +219,23 @@ def test_edit_form_uses_the_same_two_column_layout(form):
             "title": "An Existing Book", "author": "Test Author", "genre": "Science",
             "format": "Paperback", "condition": "Good", "location": "Shelf",
             "price_minor": 50000, "status": "Available", "srp_minor": None,
+            "photo_path": str(photo),
         },
     )
-    edit.update_idletasks()
+    root.deiconify()
+    edit.deiconify()
+    root.update()
     assert int(edit._field_labels["genre"].grid_info()["row"]) == int(edit._widgets["genre"].grid_info()["row"])
     assert int(edit._widgets["genre"].grid_info()["column"]) == 1
     assert int(edit._widgets["edition"].grid_info()["column"]) == 3
     assert int(edit._errors["genre"].grid_info()["row"]) == int(edit._widgets["genre"].grid_info()["row"]) + 1
     assert int(edit.photo_path_label.master.grid_info()["columnspan"]) == 3
+    assert edit.actions_panel.master is edit.body
+    assert edit.photo_panel.master is edit.right_panel
+    assert edit.metadata_status_panel.master is edit.right_panel
+    assert edit.right_panel.grid_rowconfigure(0)["weight"] == 1
+    assert edit.photo_preview.cget("image")
+    assert edit.metadata_status_panel.winfo_y() >= edit.photo_panel.winfo_y() + edit.photo_panel.winfo_height()
     assert edit._field_labels["srp"].cget("text") == "SRP"
     edit.destroy()
 
@@ -352,8 +393,8 @@ def test_optional_metadata_placeholder_can_be_replaced_with_manual_value(form):
     assert widget._payload()["publisher"] == "Manual Press"
 
 
-def test_photo_preview_and_manual_metadata_values_are_preserved(form):
-    widget, _root, photo = form
+def test_photo_preview_and_manual_metadata_values_are_preserved(form, tmp_path):
+    widget, root, photo = form
     widget._set("title", "Manually Entered Title")
     widget._set("author", "Manually Entered Author")
     widget._set("format", "Hardcover")
@@ -372,6 +413,38 @@ def test_photo_preview_and_manual_metadata_values_are_preserved(form):
     widget._set("format", "")
     widget._apply_metadata(MetadataResult("Retrieved", {"format": "Paperback"}, "Booktopia"))
     assert widget._get("format") == "Paperback"
+
+    root.deiconify()
+    widget.deiconify()
+    root.update()
+    portrait = tmp_path / "portrait.png"
+    Image.new("RGB", (1200, 1800), "blue").save(portrait)
+    widget.set_photo(portrait)
+    widget.update()
+    portrait_size = (widget._photo_image.width(), widget._photo_image.height())
+    preview_size = (widget.photo_preview.winfo_width() - 4, widget.photo_preview.winfo_height() - 4)
+    assert portrait_size[0] <= preview_size[0] and portrait_size[1] <= preview_size[1]
+    assert portrait_size[0] / portrait_size[1] == pytest.approx(2 / 3, abs=0.01)
+    assert portrait_size[1] == preview_size[1]
+
+    widget.geometry("1120x850")
+    widget.update()
+    resized_portrait_height = widget._photo_image.height()
+    assert resized_portrait_height > portrait_size[1]
+
+    landscape = tmp_path / "landscape.png"
+    Image.new("RGB", (1800, 1200), "orange").save(landscape)
+    widget.set_photo(landscape)
+    widget.update()
+    landscape_size = (widget._photo_image.width(), widget._photo_image.height())
+    preview_size = (widget.photo_preview.winfo_width() - 4, widget.photo_preview.winfo_height() - 4)
+    assert landscape_size[0] <= preview_size[0] and landscape_size[1] <= preview_size[1]
+    assert landscape_size[0] / landscape_size[1] == pytest.approx(3 / 2, abs=0.01)
+    assert landscape_size[0] == preview_size[0]
+
+    widget.geometry("1400x900")
+    widget.update()
+    assert widget._photo_image.width() > landscape_size[0]
 
 
 def test_booktopia_title_and_author_populate_empty_add_form_fields(form):

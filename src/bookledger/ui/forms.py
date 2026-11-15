@@ -71,12 +71,14 @@ class BookForm(tk.Toplevel):
         self._active_operation = None
         self._operation_serial = 0
         self._photo_image = None
+        self._photo_source = None
+        self._photo_fit_bounds = None
         self._ui_queue = SimpleQueue()
         self._ui_poll_id = None
         self._closing = False
 
         self.title("Edit Book" if existing else "Add Book")
-        self.geometry("1120x850")
+        self.geometry("1120x700")
         self.minsize(960, 700)
         self.transient(parent)
         self.grab_set()
@@ -97,6 +99,10 @@ class BookForm(tk.Toplevel):
                     text="Discard Incoming Capture",
                     command=self._discard_incoming,
                 ).grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.update_idletasks()
+        # The canvas does not propagate the scrollable body's requested height.
+        content_height = max(self.body.winfo_reqheight(), self.right_panel.winfo_reqheight())
+        self.geometry(f"1120x{max(700, content_height + 28)}")
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.bind("<Destroy>", self._on_destroy, add="+")
         self._ui_poll_id = self.after(40, self._poll_ui_queue)
@@ -195,6 +201,7 @@ class BookForm(tk.Toplevel):
             wraplength=200,
         )
         self.photo_preview.pack(fill="both", expand=True)
+        self.photo_preview.bind("<Configure>", self._fit_photo_preview)
         self._build_metadata_status_panel(self.right_panel)
         self._bind_status_color(self.metadata_status, self.metadata_label)
         self._update_control_states()
@@ -398,14 +405,30 @@ class BookForm(tk.Toplevel):
         self.photo_path_label.configure(text=Path(value).name or str(value))
         try:
             with Image.open(self._resolve_photo(value)) as source:
-                image = source.convert("RGB")
-                image.thumbnail((240, 320), Image.Resampling.LANCZOS)
-                self._photo_image = ImageTk.PhotoImage(image)
-            self.photo_preview.configure(image=self._photo_image, text="")
+                self._photo_source = source.convert("RGB")
+            self._photo_fit_bounds = None
+            self._fit_photo_preview()
         except (OSError, tk.TclError):
+            self._photo_source = None
             self._photo_image = None
+            self._photo_fit_bounds = None
             self.photo_preview.configure(image="", text="Photo Preview Unavailable")
         self._clear_valid_error("photo_path")
+
+    def _fit_photo_preview(self, _event=None):
+        if self._photo_source is None:
+            return
+        width, height = self.photo_preview.winfo_width() - 4, self.photo_preview.winfo_height() - 4
+        if width < 2 or height < 2:
+            width, height = 240, 320
+        bounds = (width, height)
+        if bounds == self._photo_fit_bounds:
+            return
+        image = self._photo_source.copy()
+        image.thumbnail(bounds, Image.Resampling.LANCZOS)
+        self._photo_fit_bounds = bounds
+        self._photo_image = ImageTk.PhotoImage(image)
+        self.photo_preview.configure(image=self._photo_image, text="")
 
     def _replace_staged_photo(self, new_path):
         previous = self.photo_path.get()
