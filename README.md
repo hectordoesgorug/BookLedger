@@ -13,3 +13,7 @@ Install Python 3.10 or newer with Tk support, then run [`run_bookledger.bat`](ru
 ## Built with
 
 Python, Tkinter, and SQLite.
+
+## Licensing
+
+Original BookLedger desktop and mobile source code is licensed under the [MIT License](LICENSE). Third-party dependencies and assets retain their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
