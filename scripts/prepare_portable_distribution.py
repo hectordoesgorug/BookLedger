@@ -96,6 +96,10 @@ def prepare(bundle: Path, android_apk: Path | None = None) -> None:
     for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"):
         shutil.copy2(ROOT / name, bundle / name)
 
+    docs = bundle / "docs"
+    docs.mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "docs" / "PRIVACY_NOTICE.md", docs / "PRIVACY_NOTICE.md")
+
     mobile = bundle / "mobile"
     mobile.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "mobile" / "README.md", mobile / "README.md")

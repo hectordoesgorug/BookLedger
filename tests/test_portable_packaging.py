@@ -22,6 +22,7 @@ def test_prepare_stages_onefile_executable_without_changing_it(tmp_path, monkeyp
     assert (bundle / "backups").is_dir()
     assert (bundle / "mobile" / "BookLedger-Android.apk").read_bytes() == b"signed apk"
     assert (bundle / "README.md").is_file()
+    assert (bundle / "docs" / "PRIVACY_NOTICE.md").is_file()
     assert not (bundle / "_internal").exists()
 
 

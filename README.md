@@ -20,6 +20,8 @@ To install the companion app, copy `BookLedger/mobile/BookLedger-Android.apk` to
 
 In BookLedger Desktop, open **Settings → Mobile App Setup → Export APK**, choose a save location, and transfer the exported APK to the device. Canceling the save dialog exports nothing. Export copies the bundled file without changing or re-signing it. This option is available only in a package that contains `mobile/BookLedger-Android.apk`.
 
+See the [BookLedger Privacy Notice](docs/PRIVACY_NOTICE.md) for local storage, network communications, backups, and contact information.
+
 The companion app asks for Camera access when scanning ISBNs or taking cover photos. It also declares Internet and network-state access for local desktop pairing. It does not request microphone or broad shared-storage permissions. Pairing uses unencrypted HTTP on the local network; use a trusted network. Barcode input and results are processed on-device by the bundled ML Kit model, while the SDK may contact Google for model/fix/hardware compatibility updates and usage/performance metrics. See [mobile/README.md](mobile/README.md) and the accompanying third-party notices for details. When you run an online metadata lookup, BookLedger sends the ISBN and any provider credentials needed for that request to the selected provider over HTTPS.
 
 ## Run and move BookLedger
