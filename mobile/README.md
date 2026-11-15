@@ -8,7 +8,7 @@ Mobile App Setup pairs to the desktop over the local network using QR or manual 
 
 ## Install the APK
 
-The combined Windows portable ZIP includes the production-signed app at `mobile/BookLedger-Android.apk`. Copy it to an Android device and open it from Files or another package installer. Android may ask you to allow installs from that source; follow its prompt. On Android 8.0 and later, this permission is controlled per source. See [Android's sideloading guidance](https://developer.android.com/distribute/marketing-tools/alternative-distribution). The app ID is `com.bookledger.mobile`; the current version is `1.0.0` (version code `1`). It is a direct APK distribution and is not available through Google Play.
+The combined Windows portable ZIP includes the production-signed app at `mobile/BookLedger-Android.apk`. The separately published v1.0.0 APK is named `BookLedger-v1.0.0-Android.apk`. Copy either APK to an Android device and open it from Files or another package installer. Android may ask you to allow installs from that source; follow its prompt. On Android 8.0 and later, this permission is controlled per source. See [Android's sideloading guidance](https://developer.android.com/distribute/marketing-tools/alternative-distribution). The app ID is `com.bookledger.mobile`; the current version is `1.0.0` (version code `1`). This is a companion app that uses BookLedger Desktop to manage the transferred inventory, not a standalone inventory manager. It is distributed by sideloading and is not available through Google Play.
 
 ## Permissions and privacy
 

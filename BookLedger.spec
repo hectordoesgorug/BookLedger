@@ -1,8 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import sys
 
 ROOT = Path(SPECPATH).resolve()
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
+from bookledger import __version__
+from scripts.windows_version_info import build_version_info
+
+version_info = build_version_info(__version__)
 
 a = Analysis(
     [str(ROOT / "src" / "bookledger" / "app.py")],
@@ -30,6 +37,7 @@ exe = EXE(
     strip=False,
     upx=False,
     icon=str(ROOT / "assets" / "icon.ico"),
+    version=version_info,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,

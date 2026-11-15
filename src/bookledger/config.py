@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from bookledger import __version__ as APP_VERSION
+
 APP_NAME = "BookLedger"
-APP_VERSION = "0.1.0"
 
 # The approved v1 genre vocabulary. Metadata providers may return other labels,
 # but those labels must be explicitly recategorized before a copy can be saved.
