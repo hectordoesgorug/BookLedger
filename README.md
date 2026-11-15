@@ -1,6 +1,6 @@
 # BookLedger
 
-BookLedger is an offline-first Windows desktop app for managing a personal or small-scale book inventory. Catalog books and individual physical copies, add photos and bibliographic details, and organize copies by condition, location, status, and price. ISBN-based metadata lookup is available when online.
+BookLedger is an offline-first Windows desktop app for managing a personal or small-scale book inventory. Catalog books and individual physical copies, add photos and bibliographic details, and organize copies by condition, location, status, and price. ISBN-based metadata lookup is available when online. The portable Windows release targets Windows 11 x64.
 
 ## Build the portable Windows app
 
@@ -20,7 +20,7 @@ To install the companion app, copy `BookLedger/mobile/BookLedger-Android.apk` to
 
 In BookLedger Desktop, open **Settings → Mobile App Setup → Export APK**, choose a save location, and transfer the exported APK to the device. Canceling the save dialog exports nothing. Export copies the bundled file without changing or re-signing it. This option is available only in a package that contains `mobile/BookLedger-Android.apk`.
 
-The companion app asks for Camera access when scanning ISBNs or taking cover photos. It also declares Internet and network-state access for local desktop pairing. It does not request microphone or broad shared-storage permissions. Pairing uses unencrypted HTTP on the local network; use a trusted network. Barcode input and results are processed on-device by the bundled ML Kit model, while the SDK may contact Google for model/fix/hardware compatibility updates and usage/performance metrics. See [mobile/README.md](mobile/README.md) and the accompanying third-party notices for details.
+The companion app asks for Camera access when scanning ISBNs or taking cover photos. It also declares Internet and network-state access for local desktop pairing. It does not request microphone or broad shared-storage permissions. Pairing uses unencrypted HTTP on the local network; use a trusted network. Barcode input and results are processed on-device by the bundled ML Kit model, while the SDK may contact Google for model/fix/hardware compatibility updates and usage/performance metrics. See [mobile/README.md](mobile/README.md) and the accompanying third-party notices for details. When you run an online metadata lookup, BookLedger sends the ISBN and any provider credentials needed for that request to the selected provider over HTTPS.
 
 ## Run and move BookLedger
 

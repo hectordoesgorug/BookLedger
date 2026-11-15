@@ -74,6 +74,18 @@ def _copy_licenses(bundle: Path) -> None:
             shutil.copy2(source, target)
             break
 
+    icon_license = Path(distribution("ttkbootstrap").locate_file("ttkbootstrap/assets/icons/LICENSE"))
+    if not icon_license.is_file():
+        raise RuntimeError("The ttkbootstrap icon asset license was not found.")
+    target = license_root / "Bootstrap-Icons" / "LICENSE"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(icon_license, target)
+
+    pillow_licenses = ROOT / "licenses" / "Pillow-Dependencies"
+    shutil.copytree(pillow_licenses, license_root / "Pillow-Dependencies", dirs_exist_ok=True)
+    python_licenses = ROOT / "licenses" / "Python-THIRD-PARTY-LICENSES.rst"
+    shutil.copy2(python_licenses, license_root / "Python" / python_licenses.name)
+
 
 def prepare(bundle: Path, android_apk: Path | None = None) -> None:
     bundle = bundle.resolve()

@@ -25,6 +25,15 @@ def test_prepare_stages_onefile_executable_without_changing_it(tmp_path, monkeyp
     assert not (bundle / "_internal").exists()
 
 
+def test_copy_licenses_includes_ttkbootstrap_icon_font_license(tmp_path):
+    prepare_portable_distribution._copy_licenses(tmp_path)
+
+    license_text = (tmp_path / "licenses" / "Bootstrap-Icons" / "LICENSE").read_text()
+    assert license_text.startswith("The MIT License (MIT)")
+    assert (tmp_path / "licenses" / "Pillow-Dependencies" / "LIBAVIF.txt").is_file()
+    assert (tmp_path / "licenses" / "Python" / "Python-THIRD-PARTY-LICENSES.rst").is_file()
+
+
 def test_prepare_rejects_bundle_without_bookledger_executable(tmp_path):
     with pytest.raises(RuntimeError, match="Expected a completed package"):
         prepare_portable_distribution.prepare(tmp_path / "empty")
