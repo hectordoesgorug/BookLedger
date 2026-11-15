@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'capture/bulk_capture_queue.dart';
 import 'capture/camera_permission.dart';
@@ -69,6 +70,9 @@ class _MyAppState extends State<MyApp> {
 
 enum _HomeMenuAction { about, settings, exit }
 
+const _externalUrlChannel = MethodChannel('com.bookledger.mobile/external_url');
+const _githubUrl = 'https://github.com/hectordoesgorug/BookLedger';
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({this.connectionController, super.key});
 
@@ -96,21 +100,7 @@ class HomeScreen extends StatelessWidget {
           );
         }
       case _HomeMenuAction.exit:
-        showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Exit'),
-            content: const Text(
-              'Exit controls will be available in a later version.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
+        unawaited(SystemNavigator.pop());
     }
   }
 
@@ -146,6 +136,21 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _openGithub(BuildContext context) async {
+    try {
+      final opened = await _externalUrlChannel.invokeMethod<bool>(
+        'openGithub',
+        _githubUrl,
+      );
+      if (opened == true || !context.mounted) return;
+    } on Object {
+      if (!context.mounted) return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open GitHub. Please try again.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -169,58 +174,48 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           children: [
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      'BookLedger',
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.5,
-                          ),
+                    Image.asset(
+                      'assets/banner.png',
+                      key: const ValueKey('home-banner'),
+                      width: double.infinity,
+                      fit: BoxFit.contain,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Capture books and send them to your desktop library.',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const Spacer(),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _EntryCard(
-                            label: 'Single Entry',
-                            description: 'Capture one book',
-                            icon: Icons.book_outlined,
-                            onTap: () => _openSingleEntry(context),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: _EntryCard(
-                            label: 'Bulk Entry',
-                            description: 'Capture a queue',
-                            icon: Icons.library_books_outlined,
-                            onTap: () => _openBulkEntry(context),
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 24),
+                    _EntryCard(
+                      label: 'Single Entry',
+                      description: 'Scan and capture one book.',
+                      icon: Icons.book_outlined,
+                      onTap: () => _openSingleEntry(context),
                     ),
                     const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _openConnection(context),
-                        icon: const Icon(Icons.devices),
-                        label: const Text('Pair / Connect'),
-                      ),
+                    _EntryCard(
+                      label: 'Bulk Entry',
+                      description: 'Capture multiple books in a queue.',
+                      icon: Icons.library_books_outlined,
+                      onTap: () => _openBulkEntry(context),
                     ),
-                    const Spacer(),
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: () => _openConnection(context),
+                      icon: const Icon(Icons.devices),
+                      label: const Text('Pair / Connect'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () => unawaited(_openGithub(context)),
+                      icon: Image.asset(
+                        'assets/github-mark.png',
+                        width: 22,
+                        height: 22,
+                        semanticLabel: 'GitHub logo',
+                      ),
+                      label: const Text('Visit GitHub'),
+                    ),
                   ],
                 ),
               ),
@@ -255,17 +250,16 @@ class _EntryCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: SizedBox(
-          height: 168,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Icon(icon, size: 30, color: colors.onPrimaryContainer),
-                Column(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(icon, size: 32, color: colors.onPrimaryContainer),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       label,
@@ -277,13 +271,14 @@ class _EntryCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       description,
-                      style: Theme.of(context).textTheme.bodySmall
+                      style: Theme.of(context).textTheme.bodyMedium
                           ?.copyWith(color: colors.onPrimaryContainer),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              Icon(Icons.chevron_right, color: colors.onPrimaryContainer),
+            ],
           ),
         ),
       ),
@@ -1134,15 +1129,23 @@ class ConnectionStatus extends StatelessWidget {
         ).colorScheme.outline,
       };
 
+  IconData _icon(MobileConnectionStatus status) => switch (status) {
+    MobileConnectionStatus.notPaired => Icons.link_off,
+    MobileConnectionStatus.pairing ||
+    MobileConnectionStatus.connecting => Icons.sync,
+    MobileConnectionStatus.connected => Icons.check_circle,
+    MobileConnectionStatus.disconnected ||
+    MobileConnectionStatus.desktopUnavailable => Icons.cloud_off,
+    MobileConnectionStatus.pairingRejected ||
+    MobileConnectionStatus.authenticationRejected ||
+    MobileConnectionStatus.serviceError => Icons.error_outline,
+  };
+
   @override
   Widget build(BuildContext context) {
     final connectionController = controller;
     if (connectionController == null) {
-      return _buildStatus(
-        context,
-        MobileConnectionStatus.notPaired,
-        'Not paired',
-      );
+      return _buildStatus(context, MobileConnectionStatus.notPaired, null);
     }
     return AnimatedBuilder(
       animation: connectionController,
@@ -1171,7 +1174,7 @@ class ConnectionStatus extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.circle, size: 10, color: _color(context, status)),
+          Icon(_icon(status), size: 18, color: _color(context, status)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(

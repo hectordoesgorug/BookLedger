@@ -1,9 +1,12 @@
 package com.bookledger.mobile
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import java.net.Inet4Address
@@ -40,6 +43,22 @@ class MainActivity : FlutterActivity() {
                     }
                 } catch (error: RuntimeException) {
                     result.error("BEEP_UNAVAILABLE", error.message, null)
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, EXTERNAL_URL_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "openGithub" || call.arguments != GITHUB_URL) {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL)))
+                    result.success(true)
+                } catch (_: ActivityNotFoundException) {
+                    result.success(false)
+                } catch (_: SecurityException) {
+                    result.success(false)
                 }
             }
 
@@ -138,6 +157,8 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val CHANNEL_NAME = "com.bookledger.mobile/scan_feedback"
+        const val EXTERNAL_URL_CHANNEL = "com.bookledger.mobile/external_url"
+        const val GITHUB_URL = "https://github.com/hectordoesgorug/BookLedger"
         const val DISCOVERY_CHANNEL = "com.bookledger.mobile/desktop_discovery"
         const val SERVICE_TYPE = "_bookledger._tcp."
         const val DISCOVERY_TIMEOUT_MS = 8_000L

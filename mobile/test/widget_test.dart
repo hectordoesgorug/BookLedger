@@ -230,9 +230,11 @@ void main() {
   ) async {
     await tester.pumpWidget(_testApp());
 
-    expect(find.text('BookLedger'), findsWidgets);
+    expect(find.byKey(const ValueKey('home-banner')), findsOneWidget);
     expect(find.text('Single Entry'), findsOneWidget);
+    expect(find.text('Scan and capture one book.'), findsOneWidget);
     expect(find.text('Bulk Entry'), findsOneWidget);
+    expect(find.text('Capture multiple books in a queue.'), findsOneWidget);
     expect(find.text('Not paired'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Menu'));
@@ -270,6 +272,113 @@ void main() {
         find.widgetWithText(ElevatedButton, label),
       );
       expect(button.onPressed, isNull);
+    }
+  });
+
+  testWidgets('home banner asset loads and keeps its source aspect ratio', (
+    WidgetTester tester,
+  ) async {
+    final bytes = await rootBundle.load('assets/banner.png');
+    final dimensions = ByteData.sublistView(bytes, 16, 24);
+    final sourceRatio = dimensions.getUint32(0) / dimensions.getUint32(4);
+
+    await tester.pumpWidget(_testApp());
+    await tester.pumpAndSettle();
+
+    final banner = tester.widget<Image>(
+      find.byKey(const ValueKey('home-banner')),
+    );
+    final size = tester.getSize(find.byKey(const ValueKey('home-banner')));
+    expect(banner.fit, BoxFit.contain);
+    expect(size.width / size.height, closeTo(sourceRatio, 0.01));
+  });
+
+  testWidgets(
+    'Visit GitHub opens the repository externally and handles failure',
+    (WidgetTester tester) async {
+      const channel = MethodChannel('com.bookledger.mobile/external_url');
+      MethodCall? receivedCall;
+      var shouldOpen = true;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            receivedCall = call;
+            return shouldOpen;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      await tester.pumpWidget(_testApp());
+      await tester.ensureVisible(find.text('Visit GitHub'));
+      await tester.tap(find.text('Visit GitHub'));
+      await tester.pumpAndSettle();
+      expect(receivedCall?.method, 'openGithub');
+      expect(
+        receivedCall?.arguments,
+        'https://github.com/hectordoesgorug/BookLedger',
+      );
+      expect(
+        find.text('Could not open GitHub. Please try again.'),
+        findsNothing,
+      );
+
+      shouldOpen = false;
+      await tester.ensureVisible(find.text('Visit GitHub'));
+      await tester.tap(find.text('Visit GitHub'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Could not open GitHub. Please try again.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('Exit requests normal Flutter activity shutdown', (
+    WidgetTester tester,
+  ) async {
+    MethodCall? receivedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          receivedCall = call;
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    await tester.pumpWidget(_testApp());
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Exit'));
+    await tester.pump();
+
+    expect(receivedCall?.method, 'SystemNavigator.pop');
+  });
+
+  testWidgets('home scrolls on small screens with larger text', (
+    WidgetTester tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    for (final size in [const Size(320, 480), const Size(412, 915)]) {
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+            child: const HomeScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Single Entry'), findsOneWidget);
+      expect(find.text('Visit GitHub'), findsOneWidget);
+      expect(find.text('Not paired'), findsOneWidget);
     }
   });
 
