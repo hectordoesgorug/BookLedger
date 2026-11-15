@@ -10,7 +10,8 @@ from PIL import Image, ImageTk
 
 from bookledger.config import APPROVED_GENRES, BOOK_CONDITIONS, DEFAULT_FORMATS, DEFAULT_LOCATION
 from bookledger.services.catalog import CatalogService, ValidationError
-from bookledger.services.isbn import isbn_check, normalize_isbn
+from bookledger.services.isbn import normalize_isbn
+from bookledger.provider_registry import PROVIDERS_BY_NAME
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
 from bookledger.resources import apply_application_icon
 from bookledger.ui.status_colors import status_message_color
@@ -20,7 +21,7 @@ OPTIONAL_METADATA_FIELDS = frozenset({"publisher", "publication_year", "edition"
 
 
 class BookForm(tk.Toplevel):
-    """Add/edit form with a testable BookLedger Mobile intake simulation."""
+    """Add/edit form for catalog records and individual physical copies."""
 
     def __init__(
         self,
@@ -59,25 +60,17 @@ class BookForm(tk.Toplevel):
         self.photo_path = tk.StringVar(value="")
         self.isbn_override = tk.BooleanVar(value=False)
         self.metadata_status = tk.StringVar(value="Manual entry")
-        self.open_library_status = tk.StringVar(value="Not attempted")
-        self.google_books_status = tk.StringVar(value="Not attempted")
-        self.archive_org_status = tk.StringVar(value="Not attempted")
-        self.booktopia_status = tk.StringVar(value="Not attempted")
-        self.bigbook_status = tk.StringVar(value="Not attempted")
-        self.hardcover_status = tk.StringVar(value="Not attempted")
-        self.mobile_status = tk.StringVar(value="Idle — Ready")
-        self.connection_outcome = tk.StringVar(value="Connected — Ready")
-        self.mock_scan_isbn = tk.StringVar()
         self.metadata_source = (existing or {}).get("metadata_source")
+        self.provider_status_vars = {}
+        self.provider_status_labels = {}
+        self._provider_status_widgets = []
+        self._provider_names = []
         self._widgets = {}
         self._errors = {}
         self._field_labels = {}
         self._active_operation = None
         self._operation_serial = 0
-        self._invalidated_operations = set()  # Used by simulated connection/scan callbacks.
         self._photo_image = None
-        self._scan_timeout_id = None
-        self._connection_ready = False
         self._ui_queue = SimpleQueue()
         self._ui_poll_id = None
         self._closing = False
@@ -181,29 +174,6 @@ class BookForm(tk.Toplevel):
         row += 2
         row = self._photo_row(body, row)
 
-        self.metadata_status_panel = ttk.Frame(body)
-        self.metadata_status_panel.grid(row=row, column=0, columnspan=4, sticky="w", pady=(12, 2))
-        self.metadata_label = ttk.Label(self.metadata_status_panel, textvariable=self.metadata_status, foreground="#334155")
-        self.metadata_label.grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Open Library:", foreground="#596579").grid(row=1, column=0, sticky="w", padx=(0, 4))
-        self.open_library_label = ttk.Label(self.metadata_status_panel, textvariable=self.open_library_status, foreground="#596579")
-        self.open_library_label.grid(row=1, column=1, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Google Books:", foreground="#596579").grid(row=2, column=0, sticky="w", padx=(0, 4))
-        self.google_books_label = ttk.Label(self.metadata_status_panel, textvariable=self.google_books_status, foreground="#596579")
-        self.google_books_label.grid(row=2, column=1, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Archive.org:", foreground="#596579").grid(row=3, column=0, sticky="w", padx=(0, 4))
-        self.archive_org_label = ttk.Label(self.metadata_status_panel, textvariable=self.archive_org_status, foreground="#596579")
-        self.archive_org_label.grid(row=3, column=1, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Booktopia:", foreground="#596579").grid(row=4, column=0, sticky="w", padx=(0, 4))
-        self.booktopia_label = ttk.Label(self.metadata_status_panel, textvariable=self.booktopia_status, foreground="#596579")
-        self.booktopia_label.grid(row=4, column=1, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Bigbook:", foreground="#596579").grid(row=5, column=0, sticky="w", padx=(0, 4))
-        self.bigbook_label = ttk.Label(self.metadata_status_panel, textvariable=self.bigbook_status, foreground="#596579")
-        self.bigbook_label.grid(row=5, column=1, sticky="w")
-        ttk.Label(self.metadata_status_panel, text="Hardcover:", foreground="#596579").grid(row=6, column=0, sticky="w", padx=(0, 4))
-        self.hardcover_label = ttk.Label(self.metadata_status_panel, textvariable=self.hardcover_status, foreground="#596579")
-        self.hardcover_label.grid(row=6, column=1, sticky="w")
-        row += 1
         self.error_summary = ttk.Label(body, text="", foreground="#b42318", wraplength=620)
         self.error_summary.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
@@ -224,20 +194,9 @@ class BookForm(tk.Toplevel):
             wraplength=200,
         )
         self.photo_preview.pack(fill="both", expand=True)
-        ttk.Label(
-            self.photo_panel,
-            text="Reserved for a future BookLedger Mobile photo.",
-            wraplength=220,
-            foreground="#596579",
-        ).pack(anchor="w", pady=(10, 0))
-
-        self._build_mobile_status(self.right_panel)
+        self._build_metadata_status_panel(self.right_panel)
         self._build_actions(self.right_panel)
         self._bind_status_color(self.metadata_status, self.metadata_label)
-        self._bind_status_color(self.open_library_status, self.open_library_label)
-        self._bind_status_color(self.google_books_status, self.google_books_label)
-        self._bind_status_color(self.booktopia_status, self.booktopia_label)
-        self._bind_status_color(self.mobile_status, self.mobile_status_label)
         self._update_control_states()
 
     @staticmethod
@@ -325,32 +284,44 @@ class BookForm(tk.Toplevel):
         self._errors["photo_path"].grid(row=row + 1, column=1, columnspan=3, sticky="w", pady=(0, 3))
         return row + 2
 
-    def _build_mobile_status(self, parent):
-        panel = ttk.LabelFrame(parent, text="BookLedger Mobile (Simulation)", padding=(10, 8))
-        self.mobile_panel = panel
+    def _build_metadata_status_panel(self, parent):
+        panel = ttk.LabelFrame(parent, text="Metadata Status", padding=(10, 8))
+        self.metadata_status_panel = panel
         panel.grid(row=1, column=0, sticky="ew", pady=(10, 8))
         panel.columnconfigure(1, weight=1)
-        ttk.Label(panel, text="Status:").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.mobile_status_label = ttk.Label(panel, textvariable=self.mobile_status)
-        self.mobile_status_label.grid(row=0, column=1, sticky="w")
+        self.metadata_label = ttk.Label(panel, textvariable=self.metadata_status, foreground="#334155", wraplength=360)
+        self.metadata_label.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        self._sync_provider_statuses()
 
-        ttk.Label(panel, text="Connection Outcome").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        self.connection_outcome_box = ttk.Combobox(
-            panel,
-            textvariable=self.connection_outcome,
-            values=("Connected — Ready", "Connection Failed"),
-            state="readonly",
-            width=18,
-        )
-        self.connection_outcome_box.grid(row=1, column=1, sticky="ew", pady=(8, 0))
-        self.connect_button = ttk.Button(panel, text="Simulate Connection", command=self._simulate_connection)
-        self.connect_button.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+    def _sync_provider_statuses(self):
+        names = []
+        for provider in getattr(self.metadata_lookup, "providers", ()):
+            if provider.name in PROVIDERS_BY_NAME and provider.name not in names:
+                names.append(provider.name)
+        if names == self._provider_names:
+            return
+        old_vars = self.provider_status_vars
+        for widget in self._provider_status_widgets:
+            widget.destroy()
+        self._provider_status_widgets = []
+        self.provider_status_labels = {}
+        self.provider_status_vars = {}
+        self._provider_names = names
+        for row, name in enumerate(names, start=1):
+            variable = old_vars.get(name, tk.StringVar(value="Not attempted"))
+            self.provider_status_vars[name] = variable
+            name_label = ttk.Label(self.metadata_status_panel, text=f"{name}:", foreground="#596579")
+            status_label = ttk.Label(self.metadata_status_panel, textvariable=variable, foreground="#596579", wraplength=360)
+            name_label.grid(row=row, column=0, sticky="nw", padx=(0, 6))
+            status_label.grid(row=row, column=1, sticky="nw")
+            self._provider_status_widgets.extend((name_label, status_label))
+            self.provider_status_labels[name] = status_label
 
-        ttk.Label(panel, text="Mock Scan ISBN").grid(row=3, column=0, sticky="w", pady=(8, 0))
-        self.mock_scan_entry = ttk.Entry(panel, textvariable=self.mock_scan_isbn, width=18)
-        self.mock_scan_entry.grid(row=3, column=1, sticky="ew", pady=(8, 0))
-        self.scan_button = ttk.Button(panel, text="Simulate Scan", command=self._simulate_scan)
-        self.scan_button.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+    def _set_provider_status(self, name, status):
+        variable = self.provider_status_vars.get(name)
+        if variable is not None:
+            variable.set(status)
+            self.provider_status_labels[name].configure(foreground=status_message_color(status))
 
     def _build_actions(self, parent):
         actions = ttk.Frame(parent)
@@ -424,7 +395,7 @@ class BookForm(tk.Toplevel):
         return path if path.is_absolute() else self.service.data_dir / path
 
     def set_photo(self, value: str | Path):
-        """Set an already stored photo; this is the handoff point for future mobile capture."""
+        """Display a selected or staged photo in the form."""
         self.photo_path.set(str(value))
         self.photo_path_label.configure(text=Path(value).name or str(value))
         try:
@@ -438,26 +409,10 @@ class BookForm(tk.Toplevel):
             self.photo_preview.configure(image="", text="Photo Preview Unavailable")
         self._clear_valid_error("photo_path")
 
-    def receive_photo(self, value: str | Path):
-        """Accept a photo path from a future companion event without networking here."""
-        try:
-            staged = self.photo_service.import_and_compress(value)
-            self._replace_staged_photo(staged)
-            self.set_photo(staged)
-            self.mobile_status.set("Photo Received")
-            self._update_control_states()
-        except ValueError as exc:
-            self._populate_validation({"photo_path": str(exc)})
-
     def _replace_staged_photo(self, new_path):
         previous = self.photo_path.get()
         if previous and Path(previous) != Path(new_path):
             self.photo_service.discard_staged(previous)
-
-    def phone_photo_capture_started(self):
-        """Status hook for a future mobile capture event; no phone capture is performed here."""
-        self.mobile_status.set("Taking Photo…")
-        self._update_control_states()
 
     def _choose_photo(self):
         path = filedialog.askopenfilename(
@@ -556,11 +511,11 @@ class BookForm(tk.Toplevel):
     def _lookup_metadata(self):
         if self._active_operation is not None:
             return
+        self._sync_provider_statuses()
         isbn = normalize_isbn(self._get("isbn"))
         if not isbn:
             self.metadata_status.set("Manual entry")
             self._reset_provider_statuses()
-            self.mobile_status.set("Idle — Ready")
             self._update_control_states()
             return
         self._operation_serial += 1
@@ -579,9 +534,12 @@ class BookForm(tk.Toplevel):
             try:
                 result = self.metadata_lookup.lookup(isbn, on_provider_status=report_provider)
             except Exception as exc:
+                provider_statuses = {name: "Not attempted" for name in self._provider_names}
+                if self._provider_names:
+                    provider_statuses[self._provider_names[0]] = "Unexpected response error"
                 result = MetadataResult(
                     "Lookup failed", {}, "Metadata providers", str(exc), "unexpected",
-                    provider_statuses={"Open Library": "Unexpected response error", "Google Books": "Not attempted", "Archive.org": "Not attempted", "Booktopia": "Not attempted", "Bigbook": "Not attempted", "Hardcover": "Not attempted"},
+                    provider_statuses=provider_statuses,
                 )
             self._schedule_ui(lambda: self._finish_lookup(operation_id, isbn, result))
 
@@ -596,7 +554,6 @@ class BookForm(tk.Toplevel):
         self._active_operation = None
         self._reset_provider_statuses()
         self.metadata_status.set("Manual entry")
-        self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
         self._update_control_states()
 
     def _set_lookup_provider_status(self, operation_id, requested_isbn, provider_name, status):
@@ -604,24 +561,11 @@ class BookForm(tk.Toplevel):
             return
         if normalize_isbn(self._get("isbn")) != requested_isbn:
             return
-        target = {
-            "Open Library": self.open_library_status,
-            "Google Books": self.google_books_status,
-            "Archive.org": self.archive_org_status,
-            "Booktopia": self.booktopia_status,
-            "Bigbook": self.bigbook_status,
-            "Hardcover": self.hardcover_status,
-        }.get(provider_name)
-        if target is not None:
-            target.set(status)
+        self._set_provider_status(provider_name, status)
 
     def _reset_provider_statuses(self):
-        self.open_library_status.set("Not attempted")
-        self.google_books_status.set("Not attempted")
-        self.archive_org_status.set("Not attempted")
-        self.booktopia_status.set("Not attempted")
-        self.bigbook_status.set("Not attempted")
-        self.hardcover_status.set("Not attempted")
+        for name in self._provider_names:
+            self._set_provider_status(name, "Not attempted")
 
     def _finish_lookup(self, operation_id, requested_isbn, result):
         if not self._active_operation or self._active_operation[1] != operation_id:
@@ -632,21 +576,11 @@ class BookForm(tk.Toplevel):
             self._reset_provider_statuses()
             self.metadata_status.set("Manual entry")
             self._update_control_states()
-            self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
             return
 
         self._reset_provider_statuses()
         for provider_name, status in result.provider_statuses.items():
-            target = {
-                "Open Library": self.open_library_status,
-                "Google Books": self.google_books_status,
-                "Archive.org": self.archive_org_status,
-                "Booktopia": self.booktopia_status,
-                "Bigbook": self.bigbook_status,
-                "Hardcover": self.hardcover_status,
-            }.get(provider_name)
-            if target is not None:
-                target.set(status)
+            self._set_provider_status(provider_name, status)
 
         if result.values:
             self._apply_metadata(result)
@@ -669,7 +603,6 @@ class BookForm(tk.Toplevel):
             self.metadata_source = result.source
         if self.on_activity and (result.failure_kind or result.status in {"Lookup failed", "No data"}):
             self.on_activity("provider_lookup_failed", None)
-        self.mobile_status.set("Connected — Ready" if self._connection_ready else "Idle — Ready")
         self._active_operation = None
         self._update_control_states()
 
@@ -684,87 +617,17 @@ class BookForm(tk.Toplevel):
             if value not in (None, "") and key in self._widgets and not self._get(key):
                 self._set(key, value)
 
-    def _simulate_connection(self):
-        if self._active_operation is not None:
-            return
-        self._operation_serial += 1
-        operation_id = self._operation_serial
-        self._active_operation = ("connection", operation_id, None)
-        self.mobile_status.set("Connecting to App…")
-        self._update_control_states()
-        self.after(200, lambda: self._finish_connection(operation_id))
-
-    def _finish_connection(self, operation_id):
-        if not self._active_operation or self._active_operation[1] != operation_id:
-            return
-        self._active_operation = None
-        if operation_id in self._invalidated_operations:
-            self._invalidated_operations.discard(operation_id)
-            self._update_control_states()
-            return
-        self._connection_ready = self.connection_outcome.get() == "Connected — Ready"
-        self.mobile_status.set("Connected — Ready" if self._connection_ready else "Connection Failed")
-        self._update_control_states()
-
-    def _simulate_scan(self):
-        if self._active_operation is not None or not self._connection_ready:
-            return
-        self._operation_serial += 1
-        operation_id = self._operation_serial
-        self._active_operation = ("scan", operation_id, None)
-        self.mobile_status.set("Scanning ISBN…")
-        self._update_control_states()
-        self._scan_timeout_id = self.after(10_000, lambda: self._finish_scan(operation_id, None))
-        mock_isbn = self.mock_scan_isbn.get().strip()
-        if mock_isbn:
-            self.after(200, lambda: self._finish_scan(operation_id, mock_isbn))
-
-    def _finish_scan(self, operation_id, value):
-        if not self._active_operation or self._active_operation[1] != operation_id:
-            return
-        if self._scan_timeout_id:
-            try:
-                self.after_cancel(self._scan_timeout_id)
-            except tk.TclError:
-                pass
-            self._scan_timeout_id = None
-        self._active_operation = None
-        if operation_id in self._invalidated_operations:
-            self._invalidated_operations.discard(operation_id)
-            self._update_control_states()
-            return
-        if value:
-            valid, _message = isbn_check(value)
-            if valid and normalize_isbn(value):
-                self._set("isbn", normalize_isbn(value))
-                self.mobile_status.set("Connected — Ready")
-            else:
-                self.mobile_status.set("Scan Failed")
-        else:
-            self.mobile_status.set("Scan Failed")
-        self._update_control_states()
-
     def _refresh(self):
-        if self._active_operation is not None:
-            return
-        status = self.mobile_status.get()
-        if status == "Connection Failed":
-            self._simulate_connection()
-        elif status == "Scan Failed":
-            self._simulate_scan()
-        elif self.metadata_status.get().startswith("Metadata unavailable"):
+        if self._active_operation is None and self.metadata_status.get().startswith("Metadata unavailable"):
             self._lookup_metadata()
 
     def _update_control_states(self):
         busy = self._active_operation is not None
         self.refresh_button.configure(state="disabled" if busy or not self._refreshable() else "normal")
         self.lookup_button.configure(state="disabled" if busy else "normal")
-        self.connect_button.configure(state="disabled" if busy else "normal")
-        self.scan_button.configure(state="normal" if self._connection_ready and not busy else "disabled")
 
     def _refreshable(self):
-        status = self.mobile_status.get()
-        return status in {"Connection Failed", "Scan Failed"} or self.metadata_status.get().startswith("Metadata unavailable")
+        return self.metadata_status.get().startswith("Metadata unavailable")
 
     def _populate_validation(self, errors):
         for key, label in self._errors.items():
@@ -915,19 +778,8 @@ class BookForm(tk.Toplevel):
         ):
             return
         if self._active_operation is not None:
-            kind, operation_id, _requested_isbn = self._active_operation
-            if kind == "lookup":
-                # Detach now so Clear can start a fresh lookup immediately.
-                # Any queued callbacks from this operation will fail the ID check.
-                self._active_operation = None
-            else:
-                if self._scan_timeout_id:
-                    try:
-                        self.after_cancel(self._scan_timeout_id)
-                    except tk.TclError:
-                        pass
-                    self._scan_timeout_id = None
-                self._active_operation = None
+            # Detach the lookup so queued progress and results are ignored.
+            self._active_operation = None
         for key in self._widgets:
             self._set(key, "")
         self.photo_service.discard_staged(self.photo_path.get())
@@ -936,12 +788,9 @@ class BookForm(tk.Toplevel):
         self._photo_image = None
         self.photo_preview.configure(image="", text="No Photo Selected")
         self.isbn_override.set(False)
-        self.mock_scan_isbn.set("")
         self.metadata_source = None
         self.metadata_status.set("Manual entry")
         self._reset_provider_statuses()
-        self._connection_ready = False
-        self.mobile_status.set("Idle — Ready")
         self._set("location", DEFAULT_LOCATION)
         self._populate_validation({})
         self._update_control_states()

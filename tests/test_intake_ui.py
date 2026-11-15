@@ -7,8 +7,9 @@ from PIL import Image
 
 from bookledger.config import APPROVED_GENRES, DEFAULT_LOCATION
 from bookledger.db.database import Database
+from bookledger.provider_registry import PROVIDERS_BY_NAME
 from bookledger.services.catalog import CatalogService
-from bookledger.services.metadata import MetadataResult
+from bookledger.services.metadata import MetadataLookupService, MetadataResult
 from bookledger.services.photos import PhotoService
 from bookledger.ui.forms import BookForm
 
@@ -54,32 +55,29 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert "sale_date" not in widget._widgets
     assert "status" not in widget._widgets
     assert widget._get("location") == DEFAULT_LOCATION
-    assert widget.open_library_status.get() == "Not attempted"
-    assert widget.google_books_status.get() == "Not attempted"
-    assert widget.archive_org_status.get() == "Not attempted"
-    assert widget.bigbook_status.get() == "Not attempted"
-    assert widget.hardcover_status.get() == "Not attempted"
-    assert widget.booktopia_status.get() == "Not attempted"
+    assert list(widget.provider_status_vars) == ["Open Library", "Google Books", "Archive.org", "Booktopia"]
+    assert all(status.get() == "Not attempted" for status in widget.provider_status_vars.values())
     provider_labels = [
         child.cget("text") for child in widget.metadata_status_panel.winfo_children()
-        if isinstance(child, ttk.Label) and child.cget("text") in {
-            "Open Library:", "Google Books:", "Archive.org:", "Booktopia:", "Bigbook:", "Hardcover:",
-        }
+        if isinstance(child, ttk.Label) and child.cget("text").endswith(":")
     ]
-    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Booktopia:", "Bigbook:", "Hardcover:"]
+    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Booktopia:"]
     assert not any(
         child.cget("text") == "Fields marked * are required. Metadata lookup is optional."
         for child in widget.body.winfo_children()
         if isinstance(child, ttk.Label)
     )
-    assert int(widget.error_summary.grid_info()["row"]) == int(widget.metadata_status_panel.grid_info()["row"]) + 1
+    assert widget.error_summary.master is widget.body
     assert tuple(widget._widgets["genre"]["values"]) == APPROVED_GENRES
     assert str(widget.refresh_button.cget("state")) == "disabled"
     assert [widget.save_button.cget("text"), widget.refresh_button.cget("text")] == ["Save Book", "Refresh"]
     assert [widget.clear_button.cget("text"), widget.cancel_button.cget("text")] == ["Clear", "Cancel"]
     assert widget.photo_panel.master is widget.right_panel
-    assert widget.mobile_panel.master is widget.right_panel
+    assert widget.metadata_status_panel.master is widget.right_panel
     assert widget.actions_panel.master is widget.right_panel
+    assert not hasattr(widget, "_simulate_connection")
+    assert not hasattr(widget, "_simulate_scan")
+    assert not hasattr(widget, "mobile_panel")
     title_row = int(widget._widgets["title"].grid_info()["row"])
     assert int(widget._field_labels["title"].grid_info()["row"]) == title_row
     title_error = widget._errors["title"].grid_info()
@@ -212,10 +210,7 @@ def test_lookup_keeps_all_provider_statuses_not_attempted_until_service_reports_
 
     widget._lookup_metadata()
 
-    assert widget.open_library_status.get() == "Not attempted"
-    assert widget.google_books_status.get() == "Not attempted"
-    assert widget.archive_org_status.get() == "Not attempted"
-    assert widget.booktopia_status.get() == "Not attempted"
+    assert all(status.get() == "Not attempted" for status in widget.provider_status_vars.values())
 
 
 def test_archive_org_provider_status_updates_during_and_after_intake_lookup(form, monkeypatch):
@@ -235,24 +230,53 @@ def test_archive_org_provider_status_updates_during_and_after_intake_lookup(form
     operation_id = widget._active_operation[1]
 
     widget._set_lookup_provider_status(operation_id, isbn, "Archive.org", "Retrieving from Archive.org…")
-    assert widget.archive_org_status.get() == "Retrieving from Archive.org…"
+    assert widget.provider_status_vars["Archive.org"].get() == "Retrieving from Archive.org…"
     widget._set_lookup_provider_status(operation_id, isbn, "Archive.org", "Metadata retrieved · some fields missing")
-    assert widget.archive_org_status.get() == "Metadata retrieved · some fields missing"
+    assert widget.provider_status_vars["Archive.org"].get() == "Metadata retrieved · some fields missing"
     widget._finish_lookup(operation_id, isbn, MetadataResult(
         "Retrieved", {"title": "Nightfall", "book_details": "A test synopsis."}, "Archive.org",
         provider_statuses={"Archive.org": "Metadata retrieved · some fields missing"},
     ))
-    assert widget.archive_org_status.get() == "Metadata retrieved · some fields missing"
+    assert widget.provider_status_vars["Archive.org"].get() == "Metadata retrieved · some fields missing"
 
 
 def test_bigbook_and_hardcover_provider_status_updates_through_intake(form):
     widget, _root, _photo = form
+    widget.metadata_lookup = MetadataLookupService([
+        PROVIDERS_BY_NAME["Hardcover"].factory(""),
+        PROVIDERS_BY_NAME["Bigbook"].factory(""),
+    ])
+    widget._sync_provider_statuses()
     widget._set("isbn", "9780306406157")
     widget._active_operation = ("lookup", 13, "9780306406157")
     widget._set_lookup_provider_status(13, "9780306406157", "Bigbook", "Metadata retrieved")
     widget._set_lookup_provider_status(13, "9780306406157", "Hardcover", "Authentication required or failed")
-    assert widget.bigbook_status.get() == "Metadata retrieved"
-    assert widget.hardcover_status.get() == "Authentication required or failed"
+    assert list(widget.provider_status_vars) == ["Hardcover", "Bigbook"]
+    assert widget.provider_status_vars["Bigbook"].get() == "Metadata retrieved"
+    assert widget.provider_status_vars["Hardcover"].get() == "Authentication required or failed"
+
+
+def test_provider_status_rows_follow_updated_enabled_provider_order(form, monkeypatch):
+    widget, _root, _photo = form
+    providers = {provider.name: provider for provider in widget.metadata_lookup.providers}
+    widget.metadata_lookup = MetadataLookupService([providers["Booktopia"], providers["Open Library"]])
+
+    class DeferredThread:
+        def __init__(self, *, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr("bookledger.ui.forms.threading.Thread", DeferredThread)
+    widget._set("isbn", "9780306406157")
+    widget._lookup_metadata()
+
+    assert list(widget.provider_status_vars) == ["Booktopia", "Open Library"]
+    assert [widget.metadata_status_panel.grid_slaves(row=row, column=0)[0].cget("text") for row in (1, 2)] == [
+        "Booktopia:", "Open Library:",
+    ]
+    assert all(status.get() == "Not attempted" for status in widget.provider_status_vars.values())
 
 
 def test_field_error_clears_when_value_becomes_valid(form):
@@ -407,64 +431,6 @@ def test_add_form_metadata_mapping_populates_title_and_author_without_tk_root():
     assert form._get("author") == "Isaac Asimov"
 
 
-def test_connection_failure_refresh_retries_simulated_connection(form):
-    widget, _root, _photo = form
-    widget.connection_outcome.set("Connection Failed")
-    widget._simulate_connection()
-    operation_id = widget._active_operation[1]
-    assert widget.mobile_status.get() == "Connecting to App…"
-    widget._finish_connection(operation_id)
-    assert widget.mobile_status.get() == "Connection Failed"
-    assert str(widget.refresh_button.cget("state")) == "normal"
-
-    widget.connection_outcome.set("Connected — Ready")
-    widget._refresh()
-    operation_id = widget._active_operation[1]
-    widget._finish_connection(operation_id)
-    assert widget.mobile_status.get() == "Connected — Ready"
-    assert str(widget.refresh_button.cget("state")) == "disabled"
-
-
-def test_scan_timeout_uses_ten_seconds_and_refresh_restarts_scan(form):
-    widget, _root, _photo = form
-    widget._connection_ready = True
-    callbacks = {}
-    widget.after = lambda delay, callback: callbacks.setdefault(delay, callback) or f"after-{delay}"
-    widget.after_cancel = lambda _identifier: None
-
-    widget._simulate_scan()
-    assert widget.mobile_status.get() == "Scanning ISBN…"
-    assert 10_000 in callbacks
-    callbacks[10_000]()
-    assert widget.mobile_status.get() == "Scan Failed"
-    assert str(widget.refresh_button.cget("state")) == "normal"
-
-    callbacks.clear()
-    widget._refresh()
-    assert widget.mobile_status.get() == "Scanning ISBN…"
-    assert 10_000 in callbacks
-
-
-def test_scan_success_and_future_photo_handoff_are_simulated(form):
-    widget, _root, photo = form
-    widget._connection_ready = True
-    widget.mock_scan_isbn.set("9780306406157")
-    callbacks = {}
-    widget.after = lambda delay, callback: callbacks.setdefault(delay, callback) or f"after-{delay}"
-    widget.after_cancel = lambda _identifier: None
-
-    widget._simulate_scan()
-    callbacks[200]()
-    assert widget._get("isbn") == "9780306406157"
-    assert widget.mobile_status.get() == "Connected — Ready"
-
-    widget.phone_photo_capture_started()
-    assert widget.mobile_status.get() == "Taking Photo…"
-    widget.receive_photo(photo)
-    assert widget.mobile_status.get() == "Photo Received"
-    assert widget.photo_preview.cget("image")
-
-
 def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     widget, _root, _photo = form
     widget._set("isbn", "9780306406157")
@@ -472,7 +438,6 @@ def test_lookup_failure_is_refreshable_but_isbn_miss_is_not(form):
     widget._active_operation = ("lookup", 44, "9780306406157")
     widget._finish_lookup(44, "9780306406157", MetadataResult("Lookup failed", {}, "Open Library", "timeout", "timeout"))
     assert widget.metadata_status.get().startswith("Metadata unavailable")
-    assert widget.mobile_status.get() == "Idle — Ready"
     assert widget._get("title") == "Keep My Manual Title"
     assert str(widget.refresh_button.cget("state")) == "normal"
 
@@ -501,7 +466,7 @@ def test_unverified_provider_results_do_not_appear_as_a_confirmed_isbn_miss(form
         },
     ))
 
-    assert widget.google_books_status.get() == "Results returned · ISBN not confirmed"
+    assert widget.provider_status_vars["Google Books"].get() == "Results returned · ISBN not confirmed"
     assert widget.metadata_status.get() == "Results returned, but ISBN could not be confirmed · Google Books"
 
 
@@ -526,9 +491,9 @@ def test_successful_fallback_lookup_reports_primary_provider_failure(form):
     assert widget._get("title") == "My Manual Title"
     assert widget._get("publisher") == "Fallback Press"
     assert widget.metadata_status.get().startswith("Partially retrieved")
-    assert widget.open_library_status.get() == "Timed out"
-    assert widget.google_books_status.get() == "Metadata retrieved · some fields missing"
-    assert widget.booktopia_status.get() == "Metadata retrieved"
+    assert widget.provider_status_vars["Open Library"].get() == "Timed out"
+    assert widget.provider_status_vars["Google Books"].get() == "Metadata retrieved · some fields missing"
+    assert widget.provider_status_vars["Booktopia"].get() == "Metadata retrieved"
 
 
 def test_partial_lookup_without_description_reports_book_details_unavailable(form):
@@ -607,7 +572,6 @@ def test_clear_confirms_discard_and_cancel_closes_without_saving(form, monkeypat
     assert widget._get("title") == ""
     assert widget._get("location") == DEFAULT_LOCATION
     assert "status" not in widget._widgets
-    assert widget.mobile_status.get() == "Idle — Ready"
 
     widget.cancel_button.invoke()
     assert not widget.winfo_exists()
@@ -735,7 +699,7 @@ def test_clear_cancels_lookup_callbacks_and_allows_a_new_lookup(form, monkeypatc
 
     widget._clear()
     assert widget._active_operation is None
-    assert widget.open_library_status.get() == "Not attempted"
+    assert widget.provider_status_vars["Open Library"].get() == "Not attempted"
     widget._set("isbn", "9780140449136")
     widget._lookup_metadata()
     new_id = widget._active_operation[1]

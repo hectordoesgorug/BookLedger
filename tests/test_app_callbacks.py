@@ -82,12 +82,12 @@ def _about_guide_text():
     return "\n".join(parts)
 
 
-def test_about_guide_has_nine_practical_pages_and_verified_workflows():
+def test_about_guide_has_ten_practical_pages_and_verified_workflows():
     text = _about_guide_text()
     assert [page[1] for page in ABOUT_GUIDE_PAGES] == [
         "About BookLedger", "Adding books", "Catalog and Inventory", "Sales and reports",
         "Settings and customization", "Metadata and ISBN lookup", "Backup and restore",
-        "Statuses and messages", "Data and moving between computers",
+        "Statuses and messages", "Mobile companion", "Data and moving between computers",
     ]
     for phrase in (
         "Bibliographic record", "physical copy", "Look Up ISBN", "Choose Photo",
@@ -97,6 +97,11 @@ def test_about_guide_has_nine_practical_pages_and_verified_workflows():
         "Not paired", "Paired", "Receiving", "Service error", "colors vary",
         "Partially retrieved", "No matching ISBN record", "could not be confirmed",
         "Metadata unavailable", "Provider and field details", "3 seconds or less",
+        "Scan its QR code", "local IPv4 address", "Single Entry", "Bulk Entry",
+        "No ISBN", "Retake", "hold Queue", "one Add Book form at a time",
+        "reconnect and retry", "Pairing rejected", "Desktop unavailable", "trusted local network",
+        "Starting local service", "Ready for pairing", "Service inactive", "Reconnect now",
+        "local firewall", "session queue", "connection traffic uses unencrypted HTTP",
     ):
         assert phrase.casefold() in text.casefold()
     assert "→" not in text
@@ -241,9 +246,9 @@ def test_about_footer_stays_visible_and_centers_navigation_at_normal_window_size
         bottom = workspace.winfo_rooty() + workspace.winfo_height()
         assert subject.about_back_button.winfo_rooty() + subject.about_back_button.winfo_height() <= bottom
         assert subject.about_next_button.winfo_rooty() + subject.about_next_button.winfo_height() <= bottom
-        assert subject.about_page_count.cget("text") == "1 of 9"
+        assert subject.about_page_count.cget("text") == "1 of 10"
         assert {"strong", "warning", "note"}.issubset(set(subject.about_text.tag_names()))
-        subject._show_about_manual_page(8)
+        subject._show_about_manual_page(9)
         assert subject.about_next_button.instate(["disabled"])
     finally:
         root.destroy()
