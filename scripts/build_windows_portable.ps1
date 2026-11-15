@@ -1,8 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $python = Join-Path $repo '.venv\Scripts\python.exe'
-$bundle = Join-Path $repo 'build\windows\BookLedger'
-$zip = Join-Path $repo 'dist\BookLedger-portable-candidate.zip'
+$buildId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+$buildRoot = Join-Path $repo "build\windows-onefile-$buildId"
+$bundle = Join-Path $buildRoot 'BookLedger'
+$work = Join-Path $buildRoot 'work'
+$zip = Join-Path $repo 'dist\BookLedger-portable-onefile-candidate.zip'
 $apkInput = Join-Path $repo 'release-input\BookLedger-Android.apk'
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -16,11 +19,22 @@ try {
     & $python -m pip check
     if ($LASTEXITCODE -ne 0) { throw 'The build environment has inconsistent dependencies.' }
 
-    & $python -m PyInstaller --noconfirm --clean --distpath (Join-Path $repo 'build\windows') --workpath (Join-Path $repo 'build\windows-work') (Join-Path $repo 'BookLedger.spec')
+    New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+    & $python -m PyInstaller --noconfirm --clean --distpath $bundle --workpath $work (Join-Path $repo 'BookLedger-onefile.spec')
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 
     $prepareArgs = @((Join-Path $repo 'scripts\prepare_portable_distribution.py'), $bundle)
     if (Test-Path -LiteralPath $apkInput -PathType Leaf) {
+        if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\java.exe') -PathType Leaf)) {
+            $jbrCandidates = @(
+                (Join-Path $env:ProgramFiles 'Android\Android Studio\jbr'),
+                (Join-Path $env:LOCALAPPDATA 'Programs\Android Studio\jbr')
+            )
+            $jbr = $jbrCandidates | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'bin\java.exe') -PathType Leaf } | Select-Object -First 1
+            if (-not $jbr) { throw 'APK signature verification requires JAVA_HOME or an Android Studio bundled JBR.' }
+            $env:JAVA_HOME = $jbr
+            $env:PATH = (Join-Path $jbr 'bin') + ';' + $env:PATH
+        }
         $sdkRoot = $env:ANDROID_SDK_ROOT
         if (-not $sdkRoot) { $sdkRoot = $env:ANDROID_HOME }
         if (-not $sdkRoot) { $sdkRoot = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }

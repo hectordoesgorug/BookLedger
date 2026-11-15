@@ -13,7 +13,6 @@ LICENSED_DISTRIBUTIONS = (
     "Pillow",
     "ttkbootstrap",
     "qrcode",
-    "zeroconf",
     "ifaddr",
     "PyInstaller",
     "pyinstaller-hooks-contrib",
@@ -79,7 +78,7 @@ def _copy_licenses(bundle: Path) -> None:
 def prepare(bundle: Path, android_apk: Path | None = None) -> None:
     bundle = bundle.resolve()
     if not bundle.is_dir() or not (bundle / "BookLedger.exe").is_file():
-        raise RuntimeError(f"Expected a completed one-folder build at {bundle}.")
+        raise RuntimeError(f"Expected a completed package with BookLedger.exe at {bundle}.")
     for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"):
         shutil.copy2(ROOT / name, bundle / name)
 

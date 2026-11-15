@@ -1,4 +1,4 @@
-# Pinned Windows x64 runtime and one-folder packaging inputs.
+# Pinned Windows x64 runtime and PyInstaller packaging inputs.
 altgraph==0.17.5
 ifaddr==0.2.0
 packaging==26.3
