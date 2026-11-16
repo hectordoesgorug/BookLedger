@@ -13,8 +13,8 @@ This checklist separates preparation checks from owner-controlled publication st
 - [x] Windows ZIP integrity and package contents verified; no user database, private configuration, keystore, or signing properties are included.
 - [x] APK signature and certificate verified; APK identity and version checked.
 - [x] Windows smoke test passed from a fresh temporary extraction on the build machine. Clean-machine compatibility is not established by this check.
-- [x] Owner-reported final physical smoke session (2026-11-16) used the exact verified v1.0.0 release assets: 13 PASS, 2 SKIPPED, 0 FAIL. The Windows 11 laptop fresh-extraction/launch, core desktop workflows, Android installation and companion workflows, pairing, single/bulk transfer, cataloging, and duplicate handling were reported successful. Device-specific details and whether Android was a fresh install or upgrade were not supplied. See `TEST_REPORT.md` for the full matrix and limitations.
-- [x] The owner intentionally skipped backup/persistence after restart and automatic reconnection after restart in the final physical session, reporting that both had been rigorously tested previously. They remain SKIPPED for this session, not known defects or wholly untested features. Historical evidence does not establish these scenarios on the exact final release assets.
+- [x] Initial owner-reported final physical smoke session (2026-11-16) used the exact verified v1.0.0 release assets: 13 PASS, 2 SKIPPED, 0 FAIL. Windows and Android core workflows, pairing, transfer, cataloging, and duplicate handling were reported successful. Device-specific details and whether Android was a fresh install or upgrade were not supplied.
+- [x] In a subsequent owner-reported round on 2026-11-16, both previously skipped scenarios—Windows backup/persistence after restart and Android/desktop automatic reconnection after restart—were reported PASS. The latest cumulative result is 15 PASS, 0 FAIL, 0 SKIPPED; the original session's 13 PASS / 2 SKIPPED record remains historical. The follow-up clarification does not specify whether these reruns used the exact final release assets. See `TEST_REPORT.md` for details and limits.
 - [x] Privacy notice, third-party notices, and companion distribution materials are present.
 - [x] Focused release-version and packaging tests, plus the full Python suite, passed.
 - [x] No local or remote `v1.0.0` tag was present during this preparation; GitHub currently lists no Releases.
@@ -35,6 +35,6 @@ The same hashes are recorded in `dist/SHA256SUMS.txt`.
 - [ ] Confirm that `v1.0.0` is the public release version and authorize creation of the `v1.0.0` tag.
 - [x] Owner selected GitHub Issues as the public contact route and accepted the existing disclosures without asserting jurisdiction-specific legal compliance. Legal compliance has not been established.
 - [x] The public GitHub About description matches the approved owner-provided wording (checked 2026-11-16).
-- [x] Owner accepted the two final-session skips as residual risks. The owner-reported physical test record is documented above and in `TEST_REPORT.md`; the two scenarios remain unverified on the exact final release assets.
+- [x] The two scenarios skipped in the initial session were retained as SKIPPED in its historical record and subsequently reported PASS by the owner. No jurisdiction-specific legal compliance is asserted.
 - [ ] After approval, publish the tag and GitHub Release with the prepared notes and both artifacts.
 - [ ] After publication, download each asset from GitHub and compare it with the corresponding `SHA256SUMS.txt` entry.

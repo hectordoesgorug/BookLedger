@@ -1,6 +1,6 @@
 # Development and release status
 
-The desktop application and Android companion implementation for v1.0.0 are complete. The Windows portable ZIP and Android 1.0.0+1 APK are prepared locally with recorded checksums. The owner reported 13 PASS and 2 intentionally SKIPPED scenarios in the final physical session; see the [test report](TEST_REPORT.md) and [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md). No v1.0.0 tag or GitHub Release has been published. Owner review, commit/push, tag, and publication remain pending.
+The desktop application and Android companion implementation for v1.0.0 are complete. The Windows portable ZIP and Android 1.0.0+1 APK are prepared locally with recorded checksums. The owner-reported latest physical validation is 15 PASS, 0 FAIL, 0 SKIPPED; its earlier 13 PASS / 2 SKIPPED session and subsequent follow-up are documented in the [test report](TEST_REPORT.md) and [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md). No v1.0.0 tag or GitHub Release has been published. Owner review, commit/push, tag, and publication remain pending.
 
 ## Implemented desktop milestones
 - [x] Modular package structure
@@ -81,7 +81,7 @@ The desktop application and Android companion implementation for v1.0.0 are comp
 ## Outstanding acceptance checks
 
 - The 2026-11-15 Windows smoke check used a fresh extraction on the build machine. In the 2026-11-16 owner-reported final-asset session, fresh extraction and launch without Python passed on a Windows 11 laptop; broader device coverage and device/build details were not supplied.
-- The 2026-11-15 run did not include physical Android end-to-end transfer. The owner reported that final-asset transfer and cataloging passed on 2026-11-16. Backup/persistence after restart and automatic reconnection after restart were intentionally skipped in that final session and accepted as residual risks; prior tests are recorded above but do not verify those scenarios on the exact final release assets.
+- The 2026-11-15 run did not include physical Android end-to-end transfer. The owner reported that final-asset transfer and cataloging passed on 2026-11-16. Backup/persistence after restart and automatic reconnection after restart were skipped in the initial 2026-11-16 session and reported PASS in a subsequent owner round. The follow-up clarification does not specify whether those reruns used the exact final assets; see [test report](TEST_REPORT.md).
 - Windows hotspot/mDNS discovery, actual DHCP-change discovery, and native Tk interaction remain unverified.
 - Live metadata provider behavior can change; synthetic fixtures do not establish current provider responses or site markup.
 

@@ -4,7 +4,7 @@ Record started: 2026-10-19; latest dated entry: 2026-11-16.
 
 This is a record of specific test runs, investigations, and owner-reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; the separate owner-reported final-asset session on 2026-11-16 is recorded below.
 
-## Final v1.0.0 physical smoke session (owner reported, 2026-11-16)
+## Initial final-asset physical smoke session (owner reported, 2026-11-16)
 
 The owner reported performing this physical session with the exact final Windows ZIP and Android APK after verifying the assets. Codex did not perform or independently observe these physical tests. The owner reported no errors. The Windows device was described as a Windows 11 laptop; device model, Windows build, Android model/OS, and whether Android installation was fresh or an upgrade were not supplied.
 
@@ -26,7 +26,18 @@ The owner reported performing this physical session with the exact final Windows
 | 14 | SKIPPED | Backup and persistence after restart. The owner deliberately omitted this from the final session and reports rigorous prior testing. |
 | 15 | SKIPPED | Automatic reconnection after restart. The owner deliberately omitted this from the final session and reports rigorous prior testing. |
 
-**Session total: 13 PASS, 2 SKIPPED, 0 FAIL.** The skips are accepted residual risks for this final session, not known defects or features with no prior testing. Prior test history below includes automated backup/restore coverage and earlier mobile reconnect checks; neither that history nor the owner's statement establishes successful execution of these two scenarios on the exact final release assets. The skipped scenarios remain unverified for those exact assets. No device-specific details or install-versus-upgrade distinction have been inferred.
+**Session total: 13 PASS, 2 SKIPPED, 0 FAIL.** These two scenarios were deliberately omitted from this session and are retained as SKIPPED in its historical record. The owner reported that both had been rigorously tested previously. No device-specific details or install-versus-upgrade distinction have been inferred for this session.
+
+## Follow-up of previously skipped scenarios (owner reported, 2026-11-16)
+
+The owner subsequently reported rerunning both scenarios that were skipped in the session above:
+
+| Scenario | Result | Owner-reported outcome |
+| --- | --- | --- |
+| Windows backup and persistence after restart | PASS | The previously skipped physical smoke scenario passed in the follow-up round. |
+| Android/desktop automatic reconnection after restart | PASS | The previously skipped physical smoke scenario passed in the follow-up round. |
+
+The owner reports the latest aggregate across the 15 scenarios as **15 PASS, 0 FAIL, 0 SKIPPED**. This cumulative latest status combines the original session's 13 reported passes with these two subsequently reported passes; it does not change the original session's 13 PASS / 2 SKIPPED record. Codex did not perform or independently observe either physical test round. The follow-up clarification does not specify whether these two reruns used the exact final release assets, and supplies no additional device or OS details.
 
 ## Configurable metadata provider registry
 
