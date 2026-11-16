@@ -6,7 +6,7 @@ BookLedger is an offline-first book inventory manager for Windows. Track bibliog
 
 **Platform:** Windows 11 x64 desktop; Android companion 1.0.0+1.
 
-**Release status:** v1.0.0 assets are prepared locally but have not been published. There are no public release downloads yet. See the [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md).
+**Release:** [BookLedger v1.0.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0) was published on November 16, 2026. The Windows ZIP, Android APK, and `SHA256SUMS.txt` are available on the release page.
 
 ## Desktop features
 
@@ -23,7 +23,7 @@ The Android app scans ISBN barcodes or accepts manual/no-ISBN entry, captures fr
 
 ## Install BookLedger Desktop
 
-The preferred Windows distribution is the portable one-file ZIP, `BookLedger-v1.0.0-Windows-x64-Portable.zip`. The prepared v1.0.0 release has not yet been published. After publication, download the ZIP from the project's GitHub Releases page.
+The preferred Windows distribution is the portable one-file ZIP, [`BookLedger-v1.0.0-Windows-x64-Portable.zip`](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Windows-x64-Portable.zip), available from the [v1.0.0 release page](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0). Download `SHA256SUMS.txt` from that page to verify the package.
 
 1. Extract the entire ZIP to a folder writable by your Windows account.
 2. Run `BookLedger/BookLedger.exe`.
@@ -33,7 +33,7 @@ On first launch, BookLedger creates its local configuration and data folders. Do
 
 ## Install and pair the Android companion
 
-The Android companion APK is `BookLedger-v1.0.0-Android.apk` (application ID `com.bookledger.mobile`, version `1.0.0+1`). It is distributed by sideloading, not through Google Play. Once the release is published, install the APK from the release page, or export the bundled APK from BookLedger Desktop when using a package that contains it. Android may ask you to allow installs from that source.
+The [Android companion APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk) is `BookLedger-v1.0.0-Android.apk` (application ID `com.bookledger.mobile`, version `1.0.0+1`). It is distributed by sideloading, not through Google Play. You can also export the bundled APK from BookLedger Desktop when using a package that contains it. Android may ask you to allow installs from that source.
 
 Open **Settings → Mobile App Setup** on the desktop, then pair the phone by scanning the QR code or entering the desktop's local IPv4 address. The devices need to reach each other on the same local network. See the [mobile guide](mobile/README.md) for pairing, transfer, and recovery instructions.
 

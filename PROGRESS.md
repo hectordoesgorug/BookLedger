@@ -1,6 +1,6 @@
 # Development and release status
 
-The desktop application and Android companion implementation for v1.0.0 are complete. The Windows portable ZIP and Android 1.0.0+1 APK are prepared locally with recorded checksums. The owner-reported latest physical validation is 15 PASS, 0 FAIL, 0 SKIPPED; its earlier 13 PASS / 2 SKIPPED session and subsequent follow-up are documented in the [test report](TEST_REPORT.md) and [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md). No v1.0.0 tag or GitHub Release has been published. Owner review, commit/push, tag, and publication remain pending.
+BookLedger v1.0.0 was published on November 16, 2026 as a stable GitHub Release. Annotated tag `v1.0.0` points to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`. The [Windows portable ZIP](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Windows-x64-Portable.zip), [Android APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk), and checksum manifest are published at the [release page](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0); the owner confirmed downloading and verifying all three assets. Latest owner-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Handover #42D is closed. Post-release maintenance and future enhancement planning are active; see the [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md) and [test report](TEST_REPORT.md).
 
 ## Implemented desktop milestones
 - [x] Modular package structure
@@ -87,6 +87,15 @@ The desktop application and Android companion implementation for v1.0.0 are comp
 
 ## Deferred future enhancements
 
-- **Dynamic GUI Resizing — Deferred, post-v1.0.0:** Implement responsive desktop GUI layouts that remain usable as the application window is resized. Cover Catalog and Inventory, Add/Edit Book forms, Settings and About, Reports, and other major screens. Consider responsive grid/layout constraints, minimum usable window dimensions, control spacing and alignment, and reflow or adaptive arrangements where appropriate. Avoid indiscriminate scaling of fonts and widgets.
-- **Bulk Metadata Download:** capture or enter multiple desktop books without waiting for each lookup, then retrieve and apply their metadata in a later batch. Mobile batch capture and transfer exist, but desktop cataloging and lookup remain one book at a time.
-- **Merge Libraries:** import a backup into an existing library with safe identity matching and review, instead of replacing the active library. Restore currently replaces the active library; it does not merge.
+These are unprioritized future enhancements; no target release or deadline is assigned.
+
+1. **Dynamic GUI Resizing (desktop):** Make Catalog, Inventory, Add/Edit forms, Settings, About, Reports, and other major screens adapt to window resizing. Preserve minimum usable dimensions, spacing, alignment, and appropriate reflow without indiscriminate font scaling.
+2. **Revisit Hardcover and BigBook Providers (desktop metadata):** Reassess lookup reliability, provider behavior, API integration, and field coverage. Do not presume either provider is broken; determine whether behavior should be changed based on current evidence.
+3. **Single-Instance Desktop Enforcement (desktop):** Prevent simultaneous application instances from using the same portable library and, where feasible, activate the existing window when another launch targets that library. Evaluate safe locking, distinct library paths, and stale-lock recovery.
+4. **Mobile Photo Background Removal (Android):** Investigate optional background removal for captured cover photos. Prefer offline processing when feasible and preserve the original photo.
+5. **Single-Page Mobile Settings (Android):** Consolidate companion settings into one organized, scrollable page instead of separate submenus.
+6. **Remove Obsolete Test Secure Storage Button (Android):** Determine whether the Test Secure Storage control has a production purpose. If it does not, remove the testing UI while preserving actual secure-storage behavior and its tests.
+7. **Non-AI Book-Description Shortener (desktop metadata):** Investigate deterministic shortening of overly long descriptions that preserves important information and does not use an AI service.
+8. **Additional Mobile Camera Controls (Android):** Consider flash/torch and zoom controls where supported by the camera hardware and APIs. Preserve ISBN scanning and cover-photo capture behavior.
+9. **Bulk Metadata Download (desktop):** Allow multiple desktop books to be captured or entered without waiting for each lookup, then retrieve and apply their metadata in a later batch. Mobile batch capture and transfer exist, but desktop cataloging and lookup remain one book at a time.
+10. **Merge Libraries (desktop data management):** Import a backup into an existing library with safe identity matching and review instead of replacing the active library. Preserve the existing USB handover/backup model; restore currently replaces the active library and does not merge.

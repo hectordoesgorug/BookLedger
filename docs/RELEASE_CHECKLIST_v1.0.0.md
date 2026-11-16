@@ -1,6 +1,6 @@
 # BookLedger v1.0.0 Release Checklist
 
-This checklist separates preparation checks from owner-controlled publication steps. A completed local check does not mean a GitHub Release has been published.
+This checklist records v1.0.0 preparation and publication. Historical preparation checks retain the state that applied when each check was performed.
 
 ## Preparation completed
 
@@ -17,7 +17,7 @@ This checklist separates preparation checks from owner-controlled publication st
 - [x] In a subsequent owner-reported round on 2026-11-16, both previously skipped scenarios—Windows backup/persistence after restart and Android/desktop automatic reconnection after restart—were reported PASS. The latest cumulative result is 15 PASS, 0 FAIL, 0 SKIPPED; the original session's 13 PASS / 2 SKIPPED record remains historical. The follow-up clarification does not specify whether these reruns used the exact final release assets. See `TEST_REPORT.md` for details and limits.
 - [x] Privacy notice, third-party notices, and companion distribution materials are present.
 - [x] Focused release-version and packaging tests, plus the full Python suite, passed.
-- [x] No local or remote `v1.0.0` tag was present during this preparation; GitHub currently lists no Releases.
+- [x] No local or remote `v1.0.0` tag or GitHub Release existed during initial preparation; publication is recorded below.
 
 ## Prepared files
 
@@ -29,12 +29,13 @@ This checklist separates preparation checks from owner-controlled publication st
 
 The same hashes are recorded in `dist/SHA256SUMS.txt`.
 
-## Owner approval and publication pending
+## Publication completed
 
-- [ ] Review the prepared source and documentation state; explicitly authorize any commit or push.
-- [ ] Confirm that `v1.0.0` is the public release version and authorize creation of the `v1.0.0` tag.
+- [x] Owner reviewed and approved the release and authorized publication.
+- [x] The annotated `v1.0.0` tag points to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`.
+- [x] Public stable GitHub Release published on November 16, 2026: [BookLedger v1.0.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0). It is not a draft or prerelease.
+- [x] Owner downloaded all three release assets and confirmed their SHA-256 values against `SHA256SUMS.txt`.
+- [x] Latest owner-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Earlier 13 PASS / 2 SKIPPED session and follow-up are preserved in `TEST_REPORT.md`.
 - [x] Owner selected GitHub Issues as the public contact route and accepted the existing disclosures without asserting jurisdiction-specific legal compliance. Legal compliance has not been established.
 - [x] The public GitHub About description matches the approved owner-provided wording (checked 2026-11-16).
-- [x] The two scenarios skipped in the initial session were retained as SKIPPED in its historical record and subsequently reported PASS by the owner. No jurisdiction-specific legal compliance is asserted.
-- [ ] After approval, publish the tag and GitHub Release with the prepared notes and both artifacts.
-- [ ] After publication, download each asset from GitHub and compare it with the corresponding `SHA256SUMS.txt` entry.
+- [x] Handover #42D closed. Post-release maintenance and future enhancement planning are active.
