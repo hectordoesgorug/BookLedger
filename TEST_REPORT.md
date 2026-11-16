@@ -1,6 +1,8 @@
-# Test report
+# Test report history
 
-Date: 2026-10-19
+Record started: 2026-10-19; latest dated entry: 2026-11-15.
+
+This is a historical record of specific test runs and investigations, not a current comprehensive validation certificate. Results and limitations below apply to the dates and environments recorded in each section. The latest recorded Milestone 5 run is listed below; clean-machine Windows compatibility and physical Android end-to-end transfer/cataloging were not established by that run.
 
 ## Configurable metadata provider registry
 

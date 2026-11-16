@@ -1,18 +1,77 @@
 # BookLedger
 
-BookLedger is an offline-first Windows desktop app for managing a personal or small-scale book inventory. Catalog books and individual physical copies, add photos and bibliographic details, and organize copies by condition, location, status, and price. ISBN-based metadata lookup is available when online. The portable Windows release targets Windows 11 x64.
+![BookLedger — Your collection, accounted for](https://raw.githubusercontent.com/hectordoesgorug/BookLedger/main/assets/banner.png)
 
-The initial public release is **v1.0.0**. When published, download `BookLedger-v1.0.0-Windows-x64-Portable.zip` or the Android companion `BookLedger-v1.0.0-Android.apk` from the [GitHub Releases page](https://github.com/hectordoesgorug/BookLedger/releases).
+BookLedger is an offline-first book inventory manager for Windows. Track bibliographic records and individual physical copies in a local SQLite database, with an Android companion for capturing ISBNs and cover photos.
 
-## Install BookLedger
+**Platform:** Windows 11 x64 desktop; Android companion 1.0.0+1.
 
-For Windows, download the portable ZIP, extract the entire archive to a writable folder, then run `BookLedger/BookLedger.exe`. Keep `licenses/`, `mobile/`, `zeroconf/`, `docs/`, and the other package files beside the executable. On first launch BookLedger creates its configuration and data folders.
+**Release status:** v1.0.0 assets are prepared locally but have not been published. There are no public release downloads yet. See the [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md).
 
-For Android, install the separately published APK using Android's standard sideloading flow, or export the bundled APK from BookLedger Desktop. The Android app is a companion for scanning ISBNs and capturing photos; it requires BookLedger Desktop to catalog and manage the transferred inventory. Use Single Entry or Bulk Entry, then pair and transfer over a trusted local network. The local HTTP transfer is unencrypted; see the [mobile guide](mobile/README.md).
+## Desktop features
 
-## Build the portable Windows app
+- Catalog books and separately track each copy, including photo, condition, location, price, and status.
+- Search, filter, and sort the catalog and inventory.
+- Look up ISBN metadata from configurable online providers; manual entry remains available.
+- Track sales and reversals, review Sale History, and view inventory and sales reports.
+- Create copy posters, verify local database and file integrity, and make portable backups.
+- Use core cataloging and inventory features offline. Metadata lookups require an internet connection.
 
-Build on Windows x64 with CPython 3.14.6 and the pinned packages in `requirements-windows-build.txt`. From the repository root, run:
+## Android companion
+
+The Android app scans ISBN barcodes or accepts manual/no-ISBN entry, captures front-cover photos, and transfers single or queued captures to BookLedger Desktop. Bulk Entry queues 5–20 captures. The desktop remains the library manager and catalogs received books one at a time.
+
+## Install BookLedger Desktop
+
+The preferred Windows distribution is the portable one-file ZIP, `BookLedger-v1.0.0-Windows-x64-Portable.zip`. The prepared v1.0.0 release has not yet been published. After publication, download the ZIP from the project's GitHub Releases page.
+
+1. Extract the entire ZIP to a folder writable by your Windows account.
+2. Run `BookLedger/BookLedger.exe`.
+3. Keep the package folders and files beside the executable.
+
+On first launch, BookLedger creates its local configuration and data folders. Do not move or run only the executable by itself.
+
+## Install and pair the Android companion
+
+The Android companion APK is `BookLedger-v1.0.0-Android.apk` (application ID `com.bookledger.mobile`, version `1.0.0+1`). It is distributed by sideloading, not through Google Play. Once the release is published, install the APK from the release page, or export the bundled APK from BookLedger Desktop when using a package that contains it. Android may ask you to allow installs from that source.
+
+Open **Settings → Mobile App Setup** on the desktop, then pair the phone by scanning the QR code or entering the desktop's local IPv4 address. The devices need to reach each other on the same local network. See the [mobile guide](mobile/README.md) for pairing, transfer, and recovery instructions.
+
+## Network and privacy
+
+BookLedger does not synchronize your library to a cloud service. Desktop pairing and capture transfer use token-authenticated, **unencrypted HTTP** on your local network. Pair only on a trusted network; allow BookLedger through the Windows firewall on a trusted/private network if Windows asks.
+
+ISBN metadata lookup contacts the selected provider over HTTPS and sends the ISBN and any credentials needed for that request. Barcode processing uses the bundled on-device ML Kit model, but its SDK may contact Google for model, compatibility, or performance-related activity. See the [Privacy Notice](docs/PRIVACY_NOTICE.md) and [third-party notices](THIRD_PARTY_NOTICES.md) for details.
+
+## Data, backups, and upgrades
+
+The portable data layout is beside the application:
+
+- `data/` contains the database, photos, Trash, managed assets, posters, and logs.
+- `config.json` contains preferences, provider settings, and API credentials.
+- `backups/` contains portable backup archives.
+
+Backups include the database, managed photos and assets, and configuration. They are not encrypted and may contain credentials; store them securely. Restoring a backup **replaces** the active library and does not merge two libraries. BookLedger validates the archive and saves a recovery backup before activation.
+
+To move the library, close BookLedger and move the entire application folder, including `data/`, `config.json`, and `backups/`. Existing `BookLedger_Data/` installations use a validated migration that retains the source until the destination is checked. If both old and current databases exist, BookLedger stops rather than overwriting either.
+
+Before upgrading, close BookLedger and make a backup. Replace `BookLedger.exe`, `zeroconf/`, `mobile/`, `licenses/`, `docs/`, and the bundled program documentation from the new package. Preserve your existing `data/`, `config.json`, and `backups/`. **Do not copy the package's empty `data/` folder over a populated one.** If the application folder is read-only, configuration may use a Windows user-profile fallback; the managed `data/` folder still needs to be writable.
+
+## Documentation and licensing
+
+- [Android companion guide](mobile/README.md)
+- [Privacy Notice](docs/PRIVACY_NOTICE.md)
+- [v1.0.0 release notes](docs/RELEASE_NOTES_v1.0.0.md)
+- [v1.0.0 release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md)
+- [Architecture notes](docs/ARCHITECTURE.md)
+- [MIT License](LICENSE) for original BookLedger code
+- [Third-party notices](THIRD_PARTY_NOTICES.md) and license files in `licenses/`
+
+Third-party components retain their own license terms. Review the notices and verify the exact release package before redistribution.
+
+## Build from source
+
+For the portable Windows build, use Windows x64, CPython 3.14.6, and the pinned packages in `requirements-windows-build.txt`:
 
 ```powershell
 py -3.14 -m venv .venv
@@ -20,36 +79,4 @@ py -3.14 -m venv .venv
 .\scripts\build_windows_portable.ps1
 ```
 
-The script builds the preferred PyInstaller one-file application and creates `dist/BookLedger-portable-onefile-candidate.zip`. The ZIP extracts to a `BookLedger/` folder containing `BookLedger.exe`, the replaceable LGPL-licensed Zeroconf Python source in `zeroconf/`, the optional Android APK in `mobile/`, user data folders, and licensing materials. Python, Tcl/Tk, application dependencies, and application assets are bundled into the executable. At launch, PyInstaller temporarily extracts runtime files under a `_MEI...` directory and removes them when the app exits; BookLedger keeps configuration, database, photos, and backups beside the executable. To replace or modify Zeroconf, replace the `zeroconf/` directory with a compatible source version, retain its `COPYING` file, and mark your changes. The executable and its license materials remain separate so the LGPL component can be replaced. `BookLedger.spec` retains the previous one-folder configuration as a fallback.
-
-To build the combined Windows and Android release candidate, place the verified production-signed APK at `release-input/BookLedger-Android.apk` and run the build script. It verifies the APK signature with Android SDK `apksigner`, using `JAVA_HOME` or Android Studio's bundled JBR for that process, rejects the standard Android debug certificate, and does not sign or alter the APK. When provided, the ZIP contains it at `BookLedger/mobile/BookLedger-Android.apk`; without the staged APK, the script builds a Windows-only candidate. Do not put signing keys or credentials in the staging folder.
-
-To install the companion app from the combined ZIP, copy `BookLedger/mobile/BookLedger-Android.apk` to an Android device and open it with the Files app or another package installer. The separate v1.0.0 release APK has the same contents. Android may require enabling installs from that specific source; follow the system prompt. See [Android's sideloading guidance](https://developer.android.com/distribute/marketing-tools/alternative-distribution). The APK is `com.bookledger.mobile`, version `1.0.0` (version code `1`). It is a companion to the desktop inventory workflow, not a standalone inventory manager, and is distributed by sideloading rather than Google Play.
-
-In BookLedger Desktop, open **Settings → Mobile App Setup → Export APK**, choose a save location, and transfer the exported APK to the device. Canceling the save dialog exports nothing. Export copies the bundled file without changing or re-signing it. This option is available only in a package that contains `mobile/BookLedger-Android.apk`.
-
-See the [BookLedger Privacy Notice](docs/PRIVACY_NOTICE.md) for local storage, network communications, backups, and contact information.
-
-The companion app asks for Camera access when scanning ISBNs or taking cover photos. It also declares Internet and network-state access for local desktop pairing. It does not request microphone or broad shared-storage permissions. Pairing uses unencrypted HTTP on the local network; use a trusted network. Barcode input and results are processed on-device by the bundled ML Kit model, while the SDK may contact Google for model/fix/hardware compatibility updates and usage/performance metrics. See [mobile/README.md](mobile/README.md) and the accompanying third-party notices for details. When you run an online metadata lookup, BookLedger sends the ISBN and any provider credentials needed for that request to the selected provider over HTTPS.
-
-## Run and move BookLedger
-
-Extract the ZIP so it creates one `BookLedger` folder, then run `BookLedger/BookLedger.exe`. The app creates its writable files alongside the executable:
-
-- `data/` contains the database, photos, Trash, managed assets, posters, and logs; it starts empty.
-- `config.json` contains preferences, provider order, and API credentials.
-- `backups/` contains portable backups.
-
-Keep the folder in a location where the current Windows account can write. If the folder is read-only, BookLedger's established configuration fallback may store configuration under the Windows user profile; other managed data still needs a writable `data/` directory. On first launch, BookLedger initializes `config.json` with its default settings, including Clam when the bundled Tk runtime provides it. A valid existing configuration is retained and only missing settings are added. To move the installation, close BookLedger and move or copy the entire folder, including `data/`, `config.json`, and `backups/`. Do not move only the executable.
-
-Before updating, make a backup and close BookLedger. Replace `BookLedger.exe`, `zeroconf/`, `mobile/`, `licenses/`, `docs/`, and the bundled program documentation from the new package. Keep your existing `data/`, `config.json`, and `backups/` in place. **Do not copy the release's empty `data/` directory over a populated one.** The application initializes a missing `config.json` with its defaults and fills only missing settings in an existing configuration.
-
-The portable data layout is `<application folder>/data/`. Existing `BookLedger_Data/` installations use the app's validated, non-destructive migration and retain the source tree until verification succeeds. If both legacy and current databases exist, BookLedger stops and asks that the conflict be resolved; it does not overwrite either database.
-
-## Run from source
-
-Install Python 3.10 or newer with Tk support, then run [`run_bookledger.bat`](run_bookledger.bat) from the project folder. The launcher creates a development environment, installs runtime dependencies when needed, and starts BookLedger.
-
-## Licensing and distribution status
-
-Original BookLedger desktop and mobile source code is licensed under the [MIT License](LICENSE). Third-party components retain their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `licenses/` directory in the package. Backups include the database, managed photos, and `config.json`; they are not encrypted and may contain API credentials, so store them securely. A portable candidate is not a legal clearance or independent clean-machine certification; review notices and verify the exact package before public redistribution.
+The script creates a portable candidate ZIP. To include the Android companion, provide the verified production-signed APK as described in the build script and mobile guide. Keep Android signing properties and keystores outside the repository. For running the desktop from source, install Python 3.10 or newer with Tk support and run [`run_bookledger.bat`](run_bookledger.bat).

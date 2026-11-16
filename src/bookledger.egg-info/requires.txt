@@ -1,8 +1,0 @@
-Pillow>=10.0
-ttkbootstrap>=1.10
-qrcode>=8.2
-zeroconf>=0.132
-
-[dev]
-pytest>=8.0
-pyinstaller>=6.0

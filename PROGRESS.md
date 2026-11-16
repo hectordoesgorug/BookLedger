@@ -1,6 +1,8 @@
-# Development progress
+# Development and release status
 
-## Stage 1 — Foundation (in progress)
+The desktop application and Android companion implementation for v1.0.0 are complete. The Windows portable ZIP and Android 1.0.0+1 APK are prepared locally with recorded checksums; no v1.0.0 tag or GitHub Release has been published. See [the release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md) for remaining owner decisions and validation limits.
+
+## Implemented desktop milestones
 - [x] Modular package structure
 - [x] SQLite schema for bibliographic records, copies, sales, and metadata
 - [x] Catalog service and core validation
@@ -15,7 +17,7 @@
 - [x] Close SQLite connections reliably after success and exceptions; verify backup creation and restoration on Windows
 - [x] Add Book two-panel layout with independently scrolling form, photo preview, simulation status, and two-row actions
 - [x] Field-specific validation messages below inputs with valid-value clearing and finite positive price validation
-- [x] BookLedger Mobile connection/scan UI simulation, retry rules, and 10-second scan timeout
+- [x] Initial BookLedger Mobile connection/scan UI simulation, retry rules, and timeout behavior; the implemented companion and transfer workflow is recorded below
 - [x] Open Library primary metadata lookup with Google Books fallback and per-provider timeouts
 - [x] Booktopia HTML provider activated after Open Library and Google Books; it follows matching ISBN search results and uses a canonical-redirected direct ISBN fallback on HTTP search errors, verifies product-page ISBN evidence, and merges supported missing metadata and descriptions without replacing earlier values
 - [x] Archive.org Advanced Search provider added after Google Books and before Booktopia by default, with bounded candidate checks, per-provider ISBN Lookup Test support, and legacy provider-order preservation
@@ -39,7 +41,7 @@
 - [x] v1-to-v3 database migration preserves location and sale values while enabling multiple sale events per copy
 - [x] Portable `data/` paths, root-level backups, legacy storage copy/verification, conflict detection, and recovery rename
 - [x] Schema v4 migration adds Trash and durable storage-operation records while preserving copy identity and relationships
-- [x] Canonical per-copy JPEG filenames and shared staged photo processing for desktop selection and future mobile handoff
+- [x] Canonical per-copy JPEG filenames and shared staged photo processing for desktop selection and incoming mobile photos
 - [x] Copy-level Trash, LIFO restore, Clear Trash, explicit recovery retry, protected two-step Purge, and read-only storage verifier
 - [x] Provider-derived title normalization with acronym and short-word handling; manual titles remain unchanged
 - [x] Backup format minimally includes Trash photo files
@@ -50,8 +52,6 @@
 - [x] Booktopia error-response bodies are read within the existing size limit and accepted only for a canonical requested-ISBN product URL with matching page ISBN evidence and supported metadata; unverified/error-only bodies retain provider errors
 - [x] If Booktopia's ISBN search returns an HTTP error without a verified product page, the provider makes one direct ISBN URL request and accepts data only after a same-site redirect to a canonical product URL with matching page ISBN evidence and supported metadata
 - [x] Direct ISBN fallback regression and full suite: 36 Booktopia tests passed; `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-direct-isbn-full-final2` — 160 passed, 1 skipped because Tcl/Tk is incomplete; compileall and `git diff --check` passed
-- [ ] Live Open Library, Google Books, and Booktopia requests could not be checked because DNS resolution is unavailable in this environment. The `9780716736387` search and canonical product requests failed DNS resolution on re-test, so its current HTTP status, redirect chain, and error-page content remain unknown. Indexed Booktopia page text is readable, but no raw HTML was available to verify the current Description-tab-to-panel relationship or confirm the parser against that live structure. Synthetic fixtures do not prove live extraction. Booktopia's Terms of Business identify third-party copyright in bibliographic data but do not establish permission for automated metadata retrieval. Manual Windows startup/migration/lifecycle acceptance remains pending
-- [ ] Windows packaging and frozen-executable verification (no packaging spec or executable exists)
 - [ ] Test GUI manually on Windows (native Windows check pending; installed Tcl/Tk files are incomplete)
 
 ## Configurable metadata provider registry
@@ -78,9 +78,13 @@
 - [x] Sequential cataloging, explicit discard, incomplete-batch recovery, and Add/Edit locking during active reception
 - [ ] Poco X6 end-to-end transfer and cataloging, Windows hotspot/mDNS, actual DHCP-change discovery, and native Tk form interaction remain unverified
 
-## Next stages
-1. Visually review the Catalog grid, Inventory table, and Add/Edit layouts on a complete native Windows Tk installation.
-2. Add import/export and fuller reports.
-3. Expand migration and interrupted-operation recovery tests.
-4. Package the stable desktop app.
-5. Perform physical end-to-end Milestone 5 acceptance testing.
+## Outstanding acceptance checks
+
+- Clean-machine Windows compatibility has not been established; the recorded Windows smoke test used a fresh extraction on the build machine.
+- Physical Android end-to-end transfer and desktop cataloging, Windows hotspot/mDNS discovery, actual DHCP-change discovery, and native Tk interaction remain unverified as recorded in the dated test history.
+- Live metadata provider behavior can change; synthetic fixtures do not establish current provider responses or site markup.
+
+## Deferred future enhancements
+
+- **Bulk Metadata Download:** capture or enter multiple desktop books without waiting for each lookup, then retrieve and apply their metadata in a later batch. Mobile batch capture and transfer exist, but desktop cataloging and lookup remain one book at a time.
+- **Merge Libraries:** import a backup into an existing library with safe identity matching and review, instead of replacing the active library. Restore currently replaces the active library; it does not merge.

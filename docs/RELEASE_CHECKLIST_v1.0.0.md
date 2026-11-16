@@ -28,7 +28,7 @@ The same hashes are recorded in `dist/SHA256SUMS.txt`.
 
 ## Owner approval and publication pending
 
-- [ ] Review the uncommitted source and documentation changes, then authorize any commit or push.
+- [ ] Review the prepared source and documentation state; explicitly authorize any commit or push.
 - [ ] Confirm that `v1.0.0` is the public release version and authorize creation of the `v1.0.0` tag.
 - [ ] Confirm intended release jurisdictions and whether the public GitHub Issues privacy contact is sufficient; obtain any required legal review or private contact details.
 - [ ] Decide whether additional clean-machine Windows and physical Android installation/upgrade tests are required before publication.
