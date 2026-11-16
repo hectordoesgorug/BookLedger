@@ -1,6 +1,6 @@
 # Development and release status
 
-The desktop application and Android companion implementation for v1.0.0 are complete. The Windows portable ZIP and Android 1.0.0+1 APK are prepared locally with recorded checksums; no v1.0.0 tag or GitHub Release has been published. See [the release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md) for remaining owner decisions and validation limits.
+The desktop application and Android companion implementation for v1.0.0 are complete. The Windows portable ZIP and Android 1.0.0+1 APK are prepared locally with recorded checksums. The owner reported 13 PASS and 2 intentionally SKIPPED scenarios in the final physical session; see the [test report](TEST_REPORT.md) and [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md). No v1.0.0 tag or GitHub Release has been published. Owner review, commit/push, tag, and publication remain pending.
 
 ## Implemented desktop milestones
 - [x] Modular package structure
@@ -76,15 +76,17 @@ The desktop application and Android companion implementation for v1.0.0 are comp
 - [x] Desktop validates and atomically stages incoming JPEGs under `data/incoming/`; transfer retries are idempotent by capture UUID
 - [x] Incoming captures remain outside ordinary inventory until cataloged through the existing Add Book form; saved copies retain the incoming UUID to recover safely after restart
 - [x] Sequential cataloging, explicit discard, incomplete-batch recovery, and Add/Edit locking during active reception
-- [ ] Poco X6 end-to-end transfer and cataloging, Windows hotspot/mDNS, actual DHCP-change discovery, and native Tk form interaction remain unverified
+- [ ] At the 2026-11-15 Milestone 5 run, physical end-to-end transfer/cataloging had not yet been performed; the owner later reported passing single/bulk transfer and cataloging with the exact final assets on 2026-11-16 (see [test report](TEST_REPORT.md)). Windows hotspot/mDNS, actual DHCP-change discovery, and native Tk form interaction remain unverified.
 
 ## Outstanding acceptance checks
 
-- Clean-machine Windows compatibility has not been established; the recorded Windows smoke test used a fresh extraction on the build machine.
-- Physical Android end-to-end transfer and desktop cataloging, Windows hotspot/mDNS discovery, actual DHCP-change discovery, and native Tk interaction remain unverified as recorded in the dated test history.
+- The 2026-11-15 Windows smoke check used a fresh extraction on the build machine. In the 2026-11-16 owner-reported final-asset session, fresh extraction and launch without Python passed on a Windows 11 laptop; broader device coverage and device/build details were not supplied.
+- The 2026-11-15 run did not include physical Android end-to-end transfer. The owner reported that final-asset transfer and cataloging passed on 2026-11-16. Backup/persistence after restart and automatic reconnection after restart were intentionally skipped in that final session and accepted as residual risks; prior tests are recorded above but do not verify those scenarios on the exact final release assets.
+- Windows hotspot/mDNS discovery, actual DHCP-change discovery, and native Tk interaction remain unverified.
 - Live metadata provider behavior can change; synthetic fixtures do not establish current provider responses or site markup.
 
 ## Deferred future enhancements
 
+- **Dynamic GUI Resizing — Deferred, post-v1.0.0:** Implement responsive desktop GUI layouts that remain usable as the application window is resized. Cover Catalog and Inventory, Add/Edit Book forms, Settings and About, Reports, and other major screens. Consider responsive grid/layout constraints, minimum usable window dimensions, control spacing and alignment, and reflow or adaptive arrangements where appropriate. Avoid indiscriminate scaling of fonts and widgets.
 - **Bulk Metadata Download:** capture or enter multiple desktop books without waiting for each lookup, then retrieve and apply their metadata in a later batch. Mobile batch capture and transfer exist, but desktop cataloging and lookup remain one book at a time.
 - **Merge Libraries:** import a backup into an existing library with safe identity matching and review, instead of replacing the active library. Restore currently replaces the active library; it does not merge.

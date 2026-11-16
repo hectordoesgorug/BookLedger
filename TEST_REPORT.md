@@ -1,8 +1,32 @@
 # Test report history
 
-Record started: 2026-10-19; latest dated entry: 2026-11-15.
+Record started: 2026-10-19; latest dated entry: 2026-11-16.
 
-This is a historical record of specific test runs and investigations, not a current comprehensive validation certificate. Results and limitations below apply to the dates and environments recorded in each section. The latest recorded Milestone 5 run is listed below; clean-machine Windows compatibility and physical Android end-to-end transfer/cataloging were not established by that run.
+This is a record of specific test runs, investigations, and owner-reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; the separate owner-reported final-asset session on 2026-11-16 is recorded below.
+
+## Final v1.0.0 physical smoke session (owner reported, 2026-11-16)
+
+The owner reported performing this physical session with the exact final Windows ZIP and Android APK after verifying the assets. Codex did not perform or independently observe these physical tests. The owner reported no errors. The Windows device was described as a Windows 11 laptop; device model, Windows build, Android model/OS, and whether Android installation was fresh or an upgrade were not supplied.
+
+| # | Result | Owner-reported scenario |
+| ---: | --- | --- |
+| 1 | PASS | Windows ZIP size and SHA-256 matched. |
+| 2 | PASS | Fresh Windows extraction and launch without Python. |
+| 3 | PASS | Desktop version, navigation, Settings, About, and theme selection. |
+| 4 | PASS | Disposable book add, edit, search, and photo handling. |
+| 5 | PASS | Exact Android APK verified and installed/upgraded; fresh-install versus upgrade was not specified. |
+| 6 | PASS | Android version and camera permissions. |
+| 7 | PASS | ISBN scanning, manual ISBN entry, and No ISBN. |
+| 8 | PASS | Photo capture and preview. |
+| 9 | PASS | Single Entry and Bulk Entry workflows. |
+| 10 | PASS | QR and manual pairing. |
+| 11 | PASS | Single Entry transfer with ISBN and photo. |
+| 12 | PASS | Bulk Entry transfer. |
+| 13 | PASS | Desktop cataloging and duplicate handling. |
+| 14 | SKIPPED | Backup and persistence after restart. The owner deliberately omitted this from the final session and reports rigorous prior testing. |
+| 15 | SKIPPED | Automatic reconnection after restart. The owner deliberately omitted this from the final session and reports rigorous prior testing. |
+
+**Session total: 13 PASS, 2 SKIPPED, 0 FAIL.** The skips are accepted residual risks for this final session, not known defects or features with no prior testing. Prior test history below includes automated backup/restore coverage and earlier mobile reconnect checks; neither that history nor the owner's statement establishes successful execution of these two scenarios on the exact final release assets. The skipped scenarios remain unverified for those exact assets. No device-specific details or install-versus-upgrade distinction have been inferred.
 
 ## Configurable metadata provider registry
 
