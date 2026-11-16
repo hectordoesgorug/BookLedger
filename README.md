@@ -51,6 +51,8 @@ The portable data layout is beside the application:
 - `config.json` contains preferences, provider settings, and API credentials.
 - `backups/` contains portable backup archives.
 
+Only one BookLedger desktop process can access a library at a time. A second launch for the same library displays a message and exits; separate portable folders can run independently.
+
 Backups include the database, managed photos and assets, and configuration. They are not encrypted and may contain credentials; store them securely. Restoring a backup **replaces** the active library and does not merge two libraries. BookLedger validates the archive and saves a recovery backup before activation.
 
 To move the library, close BookLedger and move the entire application folder, including `data/`, `config.json`, and `backups/`. Existing `BookLedger_Data/` installations use a validated migration that retains the source until the destination is checked. If both old and current databases exist, BookLedger stops rather than overwriting either.

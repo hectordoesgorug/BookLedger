@@ -50,6 +50,11 @@ from bookledger.ui.mobile_app_setup import MobileAppSetupPanel
 from bookledger.services.mobile_connection import MobileConnectionService
 from bookledger.services.mobile_incoming import MobileIncomingStore
 from bookledger.services.mobile_activity import MobileActivityStore
+from bookledger.services.single_instance import (
+    LibraryAlreadyRunning,
+    LibraryInstanceLock,
+    LibraryLockError,
+)
 from bookledger.ui.status_colors import ERROR_COLOR, INVENTORY_STATUS_COLORS, NEUTRAL_COLOR, SUCCESS_COLOR, WARNING_COLOR, status_message_color
 
 CATALOG_CARD_WIDTH = 250
@@ -235,14 +240,14 @@ except ImportError:
 
 
 class BookLedgerApp(_WindowBase):
-    def __init__(self):
+    def __init__(self, paths: AppPaths | None = None):
         if _HAS_TTKBOOTSTRAP:
             super().__init__(themename="flatly")
         else:
             super().__init__()
         apply_application_icon(self)
         self._mousewheel_router = MouseWheelRouter(self)
-        self.paths = AppPaths()
+        self.paths = paths or AppPaths()
         self.paths.prepare()
         self.db = Database(self.paths.database)
         self.paths.migrate_legacy_photos(self.db)
@@ -3090,9 +3095,41 @@ class BookLedgerApp(_WindowBase):
 
 
 def main():
-    app = BookLedgerApp()
-    app.mainloop()
+    paths = AppPaths()
+    try:
+        library_lock = LibraryInstanceLock(paths.root)
+    except LibraryAlreadyRunning:
+        _show_startup_message(
+            "BookLedger is already open for this library. Close the other window before starting another copy.",
+            warning=True,
+        )
+        return 0
+    except LibraryLockError as exc:
+        _show_startup_message(
+            f"BookLedger could not verify exclusive access to this library, so it will not start.\n\n{exc}"
+        )
+        return 1
+
+    try:
+        app = BookLedgerApp(paths)
+        app.mainloop()
+        return 0
+    finally:
+        library_lock.close()
+
+
+def _show_startup_message(message: str, *, warning: bool = False) -> None:
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            flags = (0x30 if warning else 0x10) | 0x10000  # Icon plus MB_SETFOREGROUND
+            if ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, flags):
+                return
+        except Exception:
+            pass
+    print(f"{APP_NAME}: {message}", file=sys.stderr)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
