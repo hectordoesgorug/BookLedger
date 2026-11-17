@@ -19,9 +19,7 @@ import 'package:mobile/settings/settings_screen.dart';
 Future<SingleEntryWorkflow> _pairedWorkflow(String photoPath) async {
   final workflow = SingleEntryWorkflow();
   expect(await workflow.scanIsbn('9780306406157'), isTrue);
-  expect(workflow.saveIsbn(), isTrue);
   expect(await workflow.photoCaptured(photoPath), isTrue);
-  expect(workflow.savePhoto(), isTrue);
   return workflow;
 }
 
@@ -81,6 +79,7 @@ class _FakeConnectionTransport implements ConnectionTransport {
   final validationResults = <DesktopEndpoint?>[];
   int unpairCalls = 0;
   int beginBatchCalls = 0;
+  bool completeResult = true;
 
   @override
   Future<DesktopPairing> pair(
@@ -135,7 +134,7 @@ class _FakeConnectionTransport implements ConnectionTransport {
     DesktopEndpoint endpoint,
     String token,
     String batchId,
-  ) async => true;
+  ) async => completeResult;
 
   @override
   void close() {}
@@ -194,12 +193,12 @@ void main() {
         ),
       );
 
-      final scanButton = tester.widget<ElevatedButton>(
-        find.widgetWithText(ElevatedButton, 'Scan'),
+      final scanButton = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Scan'),
       );
       expect(scanButton.onPressed, isNotNull);
       expect(find.text('Scan Number'), findsNothing);
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Scan'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Scan'));
       await tester.pumpAndSettle();
       expect(workflow.scannerActive, isTrue);
 
@@ -208,6 +207,49 @@ void main() {
       workflow.dispose();
     }
   });
+
+  testWidgets(
+    'intake has fixed 2 by 2 actions on a small screen with large text',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      for (final mode in CaptureMode.values) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: MediaQuery(
+              data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
+              child: CaptureScreen(mode: mode),
+            ),
+          ),
+        );
+        final grid = tester.widget<GridView>(find.byType(GridView));
+        expect(
+          (grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount)
+              .crossAxisCount,
+          2,
+        );
+        expect(find.text('Save'), findsNothing);
+        expect(find.widgetWithText(ElevatedButton, 'Scan'), findsNothing);
+        expect(find.widgetWithText(OutlinedButton, 'Scan'), findsOneWidget);
+        final photo = tester.getTopLeft(
+          find.widgetWithText(ElevatedButton, 'Take Photo'),
+        );
+        final retake = tester.getTopLeft(
+          find.widgetWithText(ElevatedButton, 'Retake'),
+        );
+        final clear = tester.getTopLeft(
+          find.widgetWithText(ElevatedButton, 'Clear'),
+        );
+        expect(photo.dy, retake.dy);
+        expect(clear.dy, greaterThan(retake.dy));
+        expect(clear.dx, retake.dx);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
 
   testWidgets('No ISBN choice starts photo capture in both modes', (
     WidgetTester tester,
@@ -328,19 +370,19 @@ void main() {
     expect(find.text('Enter Manually'), findsOneWidget);
     expect(find.text('No ISBN'), findsOneWidget);
     expect(find.text('Scan'), findsOneWidget);
-    final scanButton = tester.widget<ElevatedButton>(
-      find.widgetWithText(ElevatedButton, 'Scan'),
+    final scanButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Scan'),
     );
     expect(scanButton.onPressed, isNotNull);
     expect(find.text('Take Photo'), findsOneWidget);
     expect(find.text('Retake'), findsOneWidget);
-    expect(find.text('Save'), findsOneWidget);
+    expect(find.text('Save'), findsNothing);
     expect(find.text('Send'), findsOneWidget);
     expect(find.text('Clear'), findsOneWidget);
     expect(find.text('Not paired'), findsOneWidget);
     expect(find.text('Share Photo'), findsNothing);
 
-    for (final label in ['Take Photo', 'Retake', 'Save', 'Send', 'Clear']) {
+    for (final label in ['Take Photo', 'Retake', 'Send', 'Clear']) {
       final button = tester.widget<ElevatedButton>(
         find.widgetWithText(ElevatedButton, label),
       );
@@ -425,12 +467,10 @@ void main() {
     expect(controller.isConnected, isTrue);
     final workflow = _NoFileCleanupWorkflow();
     expect(await workflow.scanIsbn('9780306406157'), isTrue);
-    expect(workflow.saveIsbn(), isTrue);
     expect(
       await workflow.photoCaptured('successful-transfer-photo.jpg'),
       isTrue,
     );
-    expect(workflow.savePhoto(), isTrue);
     addTearDown(workflow.dispose);
 
     await tester.pumpWidget(
@@ -466,6 +506,59 @@ void main() {
         .hideCurrentSnackBar();
     await tester.pump(const Duration(milliseconds: 300));
   });
+
+  testWidgets(
+    'failed Single transfer retains capture and reconnect allows explicit retry',
+    (tester) async {
+      final endpoint = _savedPairing().endpoints.first;
+      final transport = _FakeConnectionTransport()
+        ..validationResult = endpoint
+        ..completeResult = false;
+      final controller = MobileConnectionController(
+        store: _MemoryPairingStore()..pairing = _savedPairing(),
+        transport: transport,
+        discovery: _NoDesktopDiscovery(),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pump();
+      await tester.pump();
+      final workflow = await _pairedWorkflow('retry.jpg');
+      addTearDown(workflow.dispose);
+      final id = workflow.captureId;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CaptureScreen(
+            mode: CaptureMode.single,
+            workflow: workflow,
+            connectionController: controller,
+          ),
+        ),
+      );
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Send'));
+      await tester.pumpAndSettle();
+      expect(controller.isBusy, isFalse);
+      expect(workflow.captureId, id);
+      expect(workflow.photoPath, 'retry.jpg');
+      expect(workflow.isCaptureReady, isTrue);
+      expect(transport.beginBatchCalls, 1);
+      await controller.manualReconnect();
+      await tester.pump();
+      expect(
+        tester
+            .widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Send'))
+            .onPressed,
+        isNotNull,
+      );
+      expect(transport.beginBatchCalls, 1);
+      transport.completeResult = true;
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Send'));
+      await tester.pumpAndSettle();
+      expect(transport.beginBatchCalls, 2);
+      expect(workflow.hasCaptureData, isFalse);
+      await controller.clearLocalPairing();
+    },
+  );
 
   testWidgets('Single Entry Send follows authenticated reconnection', (
     WidgetTester tester,
@@ -1329,11 +1422,11 @@ void main() {
     expect(find.text('Share Photo'), findsNothing);
     expect(find.text('Hold Queue to finish batch early.'), findsNothing);
 
-    final scanButton = tester.widget<ElevatedButton>(
-      find.widgetWithText(ElevatedButton, 'Scan'),
+    final scanButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Scan'),
     );
     expect(scanButton.onPressed, isNotNull);
-    for (final label in ['Take Photo', 'Retake', 'Save', 'Clear']) {
+    for (final label in ['Take Photo', 'Retake', 'Clear']) {
       final button = tester.widget<ElevatedButton>(
         find.widgetWithText(ElevatedButton, label),
       );
@@ -1348,8 +1441,15 @@ void main() {
   });
 
   testWidgets(
-    'successful queue insertion resets capture and retains the photo reference',
+    'successful queue insertion starts next scan and retains queued photo',
     (WidgetTester tester) async {
+      const channel = MethodChannel('flutter.baseflow.com/permissions/methods');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => 1);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
       final queue = _testQueue(5);
       final workflow = await _pairedWorkflow('queued-photo.jpg');
       addTearDown(() {
@@ -1376,6 +1476,16 @@ void main() {
       expect(workflow.stage, SingleCaptureStage.empty);
       expect(workflow.photoPath, isNull);
       expect(queue.entries.single.photoPath, 'queued-photo.jpg');
+      expect(workflow.scannerActive, isTrue);
+      workflow.cancelIsbnScan();
+      await tester.pump();
+      expect(find.text('No ISBN'), findsOneWidget);
+      expect(
+        tester
+            .widget<QueueActionButton>(find.byType(QueueActionButton))
+            .canLongPress,
+        isTrue,
+      );
     },
   );
 
@@ -1408,7 +1518,7 @@ void main() {
 
     expect(queue.count, 0);
     expect(find.text('0 / 5'), findsOneWidget);
-    expect(workflow.stage, SingleCaptureStage.paired);
+    expect(workflow.stage, SingleCaptureStage.ready);
     expect(workflow.displayedIsbn, '9780306406157');
     expect(workflow.photoPath, 'missing-photo.jpg');
     expect(
@@ -1446,6 +1556,7 @@ void main() {
 
     expect(queue.count, 5);
     expect(queue.isBatchReady, isTrue);
+    expect(workflow.scannerActive, isFalse);
     expect(find.text('5 / 5'), findsOneWidget);
     expect(
       tester.widget<QueueActionButton>(find.byType(QueueActionButton)).label,
@@ -1478,7 +1589,10 @@ void main() {
     expect(queue.count, 1);
     expect(find.text('1 / 15'), findsOneWidget);
     expect(find.text('Send'), findsOneWidget);
-    expect(find.text('Batch ready to send.'), findsOneWidget);
+    expect(
+      find.widgetWithText(SnackBar, 'Batch ready to send.'),
+      findsOneWidget,
+    );
     expect(
       tester.widget<QueueActionButton>(find.byType(QueueActionButton)).canTap,
       isFalse,

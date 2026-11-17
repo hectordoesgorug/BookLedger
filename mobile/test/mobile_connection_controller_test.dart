@@ -305,11 +305,9 @@ void main() {
       } else {
         expect(workflow.beginIsbnScan(), isTrue);
         expect(await workflow.scanIsbn(isbn), isTrue);
-        expect(workflow.saveIsbn(), isTrue);
       }
       expect(workflow.photoCameraActive, isTrue);
       expect(await workflow.photoCaptured('capture-$index.jpg'), isTrue);
-      expect(workflow.savePhoto(), isTrue);
 
       final entry = CaptureEntry(
         captureId: workflow.captureId,
@@ -348,7 +346,6 @@ void main() {
     expect(workflow.chooseManualIsbn('0-306-40615-2'), isTrue);
     expect(workflow.captureIsbn, '0306406152');
     expect(await workflow.photoCaptured('manual.jpg'), isTrue);
-    expect(workflow.savePhoto(), isTrue);
     final entry = CaptureEntry(
       captureId: workflow.captureId,
       isbn: workflow.captureIsbn,

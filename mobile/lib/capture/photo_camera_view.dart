@@ -19,6 +19,7 @@ class PhotoCameraView extends StatefulWidget {
     required this.onZoomChanged,
     required this.onCaptured,
     required this.onCancel,
+    this.onCaptureFailed,
     super.key,
   });
 
@@ -29,6 +30,7 @@ class PhotoCameraView extends StatefulWidget {
   final ValueChanged<double> onZoomChanged;
   final Future<void> Function(String path) onCaptured;
   final VoidCallback onCancel;
+  final VoidCallback? onCaptureFailed;
 
   @override
   State<PhotoCameraView> createState() => _PhotoCameraViewState();
@@ -427,6 +429,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
           _takingPhoto = false;
           _errorMessage = 'The photo could not be captured. Please try again.';
         });
+        widget.onCaptureFailed?.call();
       }
       if (_controller == null && _appResumed) {
         unawaited(_initializeCamera());

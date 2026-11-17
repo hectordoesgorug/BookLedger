@@ -1,3 +1,11 @@
+## Android Issue #16 - November 17, 2026
+
+Revised intake uses identifier selection, photography, then explicit Send/Queue without Save. Tests cover immediate readiness, correction/Retake preservation, stale camera-session rejection, next-scan progression, capacity/early finish, reconnect and failed-transfer retry, small-screen layout, camera controls and Settings.
+
+Physical Android 16 checks: debug APK installed; initial 2x2 layout inspected; No ISBN opened the camera; test photograph captured; manual ISBN correction retained it; canceled Retake restored it; Bulk Queue advanced to the next scanner (1/5); scanner cancellation retained the queue; hold Queue produced Send for the partial batch. No inventory was transferred. Initial launches displayed Android input-focus ANR dialogs; after dismissal and granting Camera permission the intake screens responded. The startup warning has not been isolated. Full-capacity progression, real barcode detection, permission denial, saved-preference restart, and authenticated reconnect/transfer remain unverified on hardware. The debug APK is left installed for owner testing.
+
+Automated results: `flutter test` - 124 passed, 0 failed, 0 skipped. `flutter analyze` - no issues. `dart format --output=none --set-exit-if-changed lib test` - 35 files, 0 changed. `flutter build apk --debug` succeeded; Gradle warned about restricted `System.load` native access, and dependency resolution reported 19 newer incompatible versions (no dependency changes made). `git diff --check` passed. No desktop code changed; desktop tests were not rerun. Camera-failure recovery and readable identifier-choice controls were included in the final APK rebuild; the final APK was installed without uninstalling or clearing app data.
+
 # Test report history
 
 Record started: 2026-10-19; latest dated entry: 2026-11-17.

@@ -2,6 +2,10 @@
 
 BookLedger v1.0.0 was published on November 16, 2026 as a stable GitHub Release. Annotated tag `v1.0.0` points to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`. The [Windows portable ZIP](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Windows-x64-Portable.zip), [Android APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk), and checksum manifest are published at the [release page](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0); the owner confirmed downloading and verifying all three assets. Latest owner-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Handover #42D is closed. Post-release maintenance and future enhancement planning are active; see the [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md) and [test report](TEST_REPORT.md).
 
+## Android Issue #16 (November 17, 2026; pending owner review)
+
+Implemented the fixed 2×2 intake actions, canvas identifier choices, automatic photograph readiness, photo-preserving Change/Retake, and next-book scanning after successful Bulk Queue. Transfer protocol and acknowledgment rules are unchanged. Debug APK installed for owner testing. Automated verification and device limitations are recorded in TEST_REPORT.md; no commit or publication performed.
+
 ## Implemented desktop milestones
 - [x] Modular package structure
 - [x] SQLite schema for bibliographic records, copies, sales, and metadata

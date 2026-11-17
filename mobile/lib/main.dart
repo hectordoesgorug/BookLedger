@@ -448,6 +448,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       _isBulk &&
       !_batchReady &&
       !_queueing &&
+      !_transferring &&
       _bulkQueue!.count > 0 &&
       !_workflow.hasCaptureData &&
       !_workflow.scannerActive &&
@@ -609,14 +610,6 @@ class _CaptureScreenState extends State<CaptureScreen>
     }
   }
 
-  void _saveCaptureStep() {
-    if (_workflow.stage == SingleCaptureStage.isbnScanned) {
-      _workflow.saveIsbn();
-    } else if (_workflow.stage == SingleCaptureStage.photoCaptured) {
-      _workflow.savePhoto();
-    }
-  }
-
   Future<void> _clearCapture() async {
     if (!_workflow.hasCaptureData) {
       return;
@@ -646,8 +639,8 @@ class _CaptureScreenState extends State<CaptureScreen>
     }
   }
 
-  Future<void> _handlePhotoCaptured(String path) async {
-    if (!await _workflow.photoCaptured(path)) {
+  Future<void> _handlePhotoCaptured(String path, int session) async {
+    if (!await _workflow.photoCaptured(path, session: session)) {
       try {
         await File(path).delete();
       } on FileSystemException {
@@ -678,6 +671,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
       if (mounted) {
         _workflow.resetAfterSuccessfulQueue();
+        if (!queue.isBatchReady) await _openScanner();
       }
     } catch (_) {
       if (mounted) {
@@ -790,65 +784,30 @@ class _CaptureScreenState extends State<CaptureScreen>
       ..showSnackBar(successNotification(context, message));
   }
 
-  List<String> get _labels => <String>[
-    'Scan',
+  List<String> get _labels => [
     'Take Photo',
     'Retake',
-    'Save',
-    _batchReady ? 'Send' : (_isBulk ? 'Queue' : 'Send'),
+    _isBulk && !_batchReady ? 'Queue' : 'Send',
     'Clear',
   ];
 
-  bool _buttonEnabled(int index) {
-    if (_isBulk) {
-      if (_batchReady) {
-        return false;
-      }
-      if (_queueing || _transferring) {
-        return false;
-      }
-      switch (index) {
-        case 0:
-          return !_workflow.photoCameraActive && !_workflow.scannerActive;
-        case 1:
-          return _workflow.photoCameraActive;
-        case 2:
-          return !_workflow.photoCameraActive &&
-              !_workflow.scannerActive &&
-              (_workflow.stage == SingleCaptureStage.photoCaptured ||
-                  _workflow.stage == SingleCaptureStage.paired);
-        case 3:
-          return !_workflow.scannerActive &&
-              (_workflow.stage == SingleCaptureStage.isbnScanned ||
-                  _workflow.stage == SingleCaptureStage.photoCaptured);
-        case 4:
-          return false;
-        case 5:
-          return _workflow.hasCaptureData;
-        default:
-          return false;
-      }
-    }
+  bool get _operationActive =>
+      _queueing || _transferring || widget.connectionController?.isBusy == true;
 
+  bool _buttonEnabled(int index) {
+    if (_operationActive || (_isBulk && _batchReady)) return false;
     switch (index) {
       case 0:
-        return !_workflow.photoCameraActive && !_workflow.scannerActive;
+        return _workflow.photoCameraActive ||
+            (_workflow.isbnChosen &&
+                _workflow.photoPath == null &&
+                !_workflow.scannerActive);
       case 1:
-        return _workflow.photoCameraActive;
+        return _workflow.isCaptureReady;
       case 2:
-        return !_workflow.photoCameraActive &&
-            !_workflow.scannerActive &&
-            (_workflow.stage == SingleCaptureStage.photoCaptured ||
-                _workflow.stage == SingleCaptureStage.paired);
-      case 3:
-        return !_workflow.scannerActive &&
-            (_workflow.stage == SingleCaptureStage.isbnScanned ||
-                _workflow.stage == SingleCaptureStage.photoCaptured);
-      case 4:
         return _workflow.isCaptureReady &&
-            widget.connectionController?.isConnected == true &&
-            !_transferring;
-      case 5:
+            widget.connectionController?.isConnected == true;
+      case 3:
         return _workflow.hasCaptureData;
       default:
         return false;
@@ -858,44 +817,33 @@ class _CaptureScreenState extends State<CaptureScreen>
   void _onCaptureButtonPressed(int index) {
     switch (index) {
       case 0:
-        unawaited(_openScanner());
-      case 1:
-        _requestPhotoCapture();
-      case 2:
-        unawaited(_openPhotoCamera());
-      case 3:
-        _saveCaptureStep();
-      case 4:
-        if (_batchReady) {
-          unawaited(_sendBulkBatch());
-        } else if (_isBulk) {
-          unawaited(_queueCurrentCapture());
+        if (_workflow.photoCameraActive) {
+          _requestPhotoCapture();
         } else {
-          unawaited(_sendSingleCapture());
+          unawaited(_openPhotoCamera());
         }
-      case 5:
+      case 1:
+        unawaited(_openPhotoCamera());
+      case 2:
+        unawaited(_sendSingleCapture());
+      case 3:
         unawaited(_clearCapture());
     }
   }
 
   String _stageDescription() {
-    if (_workflow.scannerActive) {
-      return 'Scan an ISBN to replace the current capture.';
+    if (_workflow.changingIdentifier) {
+      return 'Choose a corrected identifier or cancel.';
     }
+    if (_workflow.scannerActive) return 'Scan the book ISBN.';
     switch (_workflow.stage) {
       case SingleCaptureStage.empty:
-        return _workflow.isbnChosen
-            ? 'Ready to photograph the front cover.'
-            : 'Choose how to identify this book.';
-      case SingleCaptureStage.isbnScanned:
-        return 'ISBN scanned. Save it to continue.';
-      case SingleCaptureStage.isbnSaved:
-        return 'ISBN saved. Take a photo of the front cover.';
+        return 'Choose how to identify this book.';
+      case SingleCaptureStage.identifierSelected:
+        return 'Ready to photograph the front cover. Tap Take Photo to reopen the camera.';
       case SingleCaptureStage.photoCamera:
         return 'Camera active. Frame the front cover and take a photo.';
-      case SingleCaptureStage.photoCaptured:
-        return 'Photo captured. Save to confirm this capture.';
-      case SingleCaptureStage.paired:
+      case SingleCaptureStage.ready:
         return _isBulk
             ? 'Capture ready to add to the queue.'
             : 'Capture ready to send.';
@@ -903,6 +851,14 @@ class _CaptureScreenState extends State<CaptureScreen>
   }
 
   Widget _captureCanvas(BuildContext context) {
+    if (_batchReady) {
+      return const Center(
+        child: Text(
+          'Batch ready to send.',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    }
     if (_workflow.scannerActive) {
       return IsbnScannerPreview(
         onIsbnCaptured: (isbn) => unawaited(_acceptScannedIsbn(isbn)),
@@ -910,25 +866,50 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
     }
     if (!_workflow.isbnChosen && !_workflow.photoCameraActive) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () => unawaited(_openManualIsbn()),
-              icon: const Icon(Icons.dialpad),
-              label: const Text('Enter Manually'),
+      return Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white70),
+                  ),
+                  onPressed: () => unawaited(_openScanner()),
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: const Text('Scan'),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white70),
+                  ),
+                  onPressed: () => unawaited(_openManualIsbn()),
+                  icon: const Icon(Icons.dialpad),
+                  label: const Text('Enter Manually'),
+                ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  style: TextButton.styleFrom(foregroundColor: Colors.white),
+                  onPressed: () {
+                    _workflow.chooseNoIsbn();
+                  },
+                  icon: const Icon(Icons.not_interested),
+                  label: const Text('No ISBN'),
+                ),
+                if (_workflow.changingIdentifier)
+                  TextButton(
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    onPressed: _workflow.cancelIdentifierChange,
+                    child: const Text('Cancel change'),
+                  ),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextButton.icon(
-              onPressed: () {
-                _workflow.chooseNoIsbn();
-              },
-              icon: const Icon(Icons.not_interested),
-              label: const Text('No ISBN'),
-            ),
-          ],
+          ),
         ),
       );
     }
@@ -939,16 +920,25 @@ class _CaptureScreenState extends State<CaptureScreen>
           child: Center(child: CircularProgressIndicator()),
         );
       }
+      final session = _workflow.cameraSession;
       return Stack(
         fit: StackFit.expand,
         children: [
           PhotoCameraView(
+            key: ValueKey(session),
             captureRequestId: _photoCaptureRequestId,
             guideMode: _guideMode,
             onGuideModeChanged: _handleGuideModeChanged,
             preferredZoom: _preferredZoom,
             onZoomChanged: _handleZoomChanged,
-            onCaptured: _handlePhotoCaptured,
+            onCaptured: (path) => _handlePhotoCaptured(path, session),
+            onCaptureFailed: () {
+              if (!mounted || session != _workflow.cameraSession) return;
+              _workflow.cancelPhotoCapture();
+              _showQueueMessage(
+                'Photo capture failed. The previous photo and identifier are retained; try again.',
+              );
+            },
             onCancel: _workflow.cancelPhotoCapture,
           ),
           if (_workflow.captureIsbn != null)
@@ -1005,7 +995,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       child: Row(
         children: [
           Icon(
-            _workflow.stage == SingleCaptureStage.paired
+            _workflow.stage == SingleCaptureStage.ready
                 ? Icons.check_circle_outline
                 : Icons.info_outline,
             color: colors.onSecondaryContainer,
@@ -1031,11 +1021,9 @@ class _CaptureScreenState extends State<CaptureScreen>
               ],
             ),
           ),
-          if (_workflow.isbnChosen &&
-              !_workflow.photoCameraActive &&
-              !_workflow.scannerActive)
+          if (_workflow.isbnChosen)
             TextButton(
-              onPressed: _workflow.returnToIsbnChoice,
+              onPressed: _operationActive ? null : _workflow.returnToIsbnChoice,
               child: const Text('Change'),
             ),
         ],
@@ -1105,20 +1093,20 @@ class _CaptureScreenState extends State<CaptureScreen>
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: _labels.length,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
+                    crossAxisCount: 2,
                     mainAxisExtent: 56,
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
                   ),
                   itemBuilder: (context, index) {
-                    if (_isBulk && index == 4) {
+                    if (_isBulk && index == 2) {
                       return QueueActionButton(
                         label: _batchReady ? 'Send' : 'Queue',
                         canTap: _batchReady
                             ? widget.connectionController?.isConnected ==
                                       true &&
-                                  !_transferring
-                            : _workflow.isCaptureReady && !_queueing,
+                                  !_operationActive
+                            : _workflow.isCaptureReady && !_operationActive,
                         canLongPress: _canFinishBatch,
                         onTap: _batchReady
                             ? () => unawaited(_sendBulkBatch())

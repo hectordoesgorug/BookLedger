@@ -208,6 +208,32 @@ Future<void> _pumpPhotoCamera(
 }
 
 void main() {
+  testWidgets('failed Retake restores the retained photo and readiness', (
+    tester,
+  ) async {
+    final camera = await _installFakeCamera(tester);
+    final workflow = SingleEntryWorkflow()..chooseNoIsbn();
+    await workflow.photoCaptured('retained.jpg');
+    final id = workflow.captureId;
+    workflow.beginPhotoCapture();
+    camera.capturePath = null;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CaptureScreen(mode: CaptureMode.single, workflow: workflow),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Take Photo'));
+    await tester.pumpAndSettle();
+    expect(workflow.isCaptureReady, isTrue);
+    expect(workflow.photoCameraActive, isFalse);
+    expect(workflow.photoPath, 'retained.jpg');
+    expect(workflow.captureId, id);
+    expect(find.byType(PhotoCameraView), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    workflow.dispose();
+  });
+
   testWidgets('torch starts off, toggles, and turns off at disposal', (
     WidgetTester tester,
   ) async {

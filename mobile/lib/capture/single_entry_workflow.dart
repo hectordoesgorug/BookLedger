@@ -6,25 +6,18 @@ import 'package:flutter/foundation.dart';
 
 import 'isbn_validator.dart';
 
-enum SingleCaptureStage {
-  empty,
-  isbnScanned,
-  isbnSaved,
-  photoCamera,
-  photoCaptured,
-  paired,
-}
+enum SingleCaptureStage { empty, identifierSelected, photoCamera, ready }
 
 class SingleEntryWorkflow extends ChangeNotifier {
-  String? _scannedIsbn;
-  String? _savedIsbn;
+  String? _isbn;
   String? _photoPath;
   String _captureId = _newUuid();
   bool _isbnChosen = false;
-  bool _captureConfirmed = false;
+  bool _changingIdentifier = false;
   bool _scannerActive = false;
   bool _photoCameraActive = false;
   bool _disposed = false;
+  int _cameraSession = 0;
 
   static String _newUuid() {
     final random = Random.secure();
@@ -38,160 +31,121 @@ class SingleEntryWorkflow extends ChangeNotifier {
   }
 
   SingleCaptureStage get stage {
-    if (_photoCameraActive) {
-      return SingleCaptureStage.photoCamera;
-    }
-    if (_photoPath != null) {
-      return _captureConfirmed
-          ? SingleCaptureStage.paired
-          : SingleCaptureStage.photoCaptured;
-    }
-    if (_scannedIsbn != null) {
-      return SingleCaptureStage.isbnScanned;
-    }
-    return _isbnChosen
-        ? SingleCaptureStage.isbnSaved
+    if (_photoCameraActive) return SingleCaptureStage.photoCamera;
+    if (isCaptureReady) return SingleCaptureStage.ready;
+    return isbnChosen
+        ? SingleCaptureStage.identifierSelected
         : SingleCaptureStage.empty;
   }
 
-  String? get displayedIsbn => _scannedIsbn ?? _savedIsbn;
+  String? get displayedIsbn => _isbn;
+  String? get captureIsbn => _isbn;
+  String? get pairedIsbn => isCaptureReady ? _isbn : null;
   String? get photoPath => _photoPath;
-  String? get pairedIsbn => _captureConfirmed ? captureIsbn : null;
-  String? get captureIsbn => _scannedIsbn ?? _savedIsbn;
   String get captureId => _captureId;
-  bool get isCaptureReady => _captureConfirmed && _photoPath != null;
-  bool get isbnChosen => _isbnChosen;
-  bool get isNoIsbn => _isbnChosen && captureIsbn == null;
+  int get cameraSession => _cameraSession;
+  bool get changingIdentifier => _changingIdentifier;
+  bool get isCaptureReady =>
+      isbnChosen &&
+      _photoPath != null &&
+      !_scannerActive &&
+      !_photoCameraActive;
+  bool get isbnChosen => _isbnChosen && !_changingIdentifier;
+  bool get isNoIsbn => isbnChosen && _isbn == null;
   bool get scannerActive => _scannerActive;
   bool get photoCameraActive => _photoCameraActive;
   bool get hasCaptureData => _isbnChosen || _photoPath != null;
 
   bool beginIsbnScan() {
-    if (_scannerActive || _photoCameraActive) {
-      return false;
-    }
+    if (_disposed || _scannerActive || _photoCameraActive) return false;
     _scannerActive = true;
     _notifyListeners();
     return true;
   }
 
   void cancelIsbnScan() {
-    if (!_scannerActive) {
-      return;
-    }
     _scannerActive = false;
     _notifyListeners();
   }
 
   Future<bool> scanIsbn(String rawValue) async {
     final isbn = IsbnValidator.normalizeAndValidate(rawValue);
-    if (isbn == null) {
-      return false;
-    }
+    if (isbn == null || _disposed) return false;
     _scannerActive = false;
-    _scannedIsbn = isbn;
-    _savedIsbn = null;
-    _isbnChosen = true;
-    _captureConfirmed = false;
-    _notifyListeners();
-    return true;
-  }
-
-  bool saveIsbn() {
-    if (stage != SingleCaptureStage.isbnScanned || _scannedIsbn == null) {
-      return false;
-    }
-    _savedIsbn = _scannedIsbn;
-    _scannedIsbn = null;
-    _photoCameraActive = true;
-    _notifyListeners();
+    _selectIdentifier(isbn);
     return true;
   }
 
   bool chooseManualIsbn(String rawValue) {
     final isbn = IsbnValidator.normalizeAndValidate(rawValue);
-    if (isbn == null || _photoCameraActive || _scannerActive) {
+    if (isbn == null || _disposed || _photoCameraActive || _scannerActive) {
       return false;
     }
-    _scannedIsbn = null;
-    _savedIsbn = isbn;
-    _isbnChosen = true;
-    _captureConfirmed = false;
-    if (_photoPath == null) {
-      _photoCameraActive = true;
-    }
-    _notifyListeners();
+    _selectIdentifier(isbn);
     return true;
   }
 
   bool chooseNoIsbn() {
-    if (_photoCameraActive || _scannerActive) {
-      return false;
-    }
-    _scannedIsbn = null;
-    _savedIsbn = null;
-    _isbnChosen = true;
-    _captureConfirmed = false;
-    if (_photoPath == null) {
-      _photoCameraActive = true;
-    }
-    _notifyListeners();
+    if (_disposed || _photoCameraActive || _scannerActive) return false;
+    _selectIdentifier(null);
     return true;
   }
 
+  void _selectIdentifier(String? isbn) {
+    _isbn = isbn;
+    _isbnChosen = true;
+    _changingIdentifier = false;
+    _photoCameraActive = _photoPath == null;
+    _cameraSession++;
+    _notifyListeners();
+  }
+
   void returnToIsbnChoice() {
-    if (_photoCameraActive || _scannerActive) {
-      return;
-    }
-    _scannedIsbn = null;
-    _savedIsbn = null;
-    _isbnChosen = false;
-    _captureConfirmed = false;
+    if (_disposed) return;
+    _cameraSession++;
+    _photoCameraActive = false;
+    _scannerActive = false;
+    _changingIdentifier = _isbnChosen;
+    _notifyListeners();
+  }
+
+  void cancelIdentifierChange() {
+    _changingIdentifier = false;
+    _scannerActive = false;
     _notifyListeners();
   }
 
   bool beginPhotoCapture() {
-    if (!_isbnChosen ||
-        _scannedIsbn != null ||
-        _photoCameraActive ||
-        _scannerActive) {
+    if (_disposed || !isbnChosen || _photoCameraActive || _scannerActive) {
       return false;
     }
     _photoCameraActive = true;
-    _captureConfirmed = false;
+    _cameraSession++;
     _notifyListeners();
     return true;
   }
 
   void cancelPhotoCapture() {
-    if (!_photoCameraActive) {
-      return;
-    }
+    _cameraSession++;
     _photoCameraActive = false;
     _notifyListeners();
   }
 
-  Future<bool> photoCaptured(String path) async {
-    if (!_photoCameraActive || !_isbnChosen) {
+  Future<bool> photoCaptured(String path, {int? session}) async {
+    if (_disposed ||
+        !_photoCameraActive ||
+        !isbnChosen ||
+        path.isEmpty ||
+        (session != null && session != _cameraSession)) {
       return false;
     }
     final previousPhotoPath = _photoPath;
     _photoPath = path;
-    _captureConfirmed = false;
     _photoCameraActive = false;
     _notifyListeners();
     if (previousPhotoPath != path) {
       await _deletePhoto(previousPhotoPath);
     }
-    return true;
-  }
-
-  bool savePhoto() {
-    if (stage != SingleCaptureStage.photoCaptured || !_isbnChosen) {
-      return false;
-    }
-    _captureConfirmed = true;
-    _notifyListeners();
     return true;
   }
 
@@ -201,12 +155,12 @@ class SingleEntryWorkflow extends ChangeNotifier {
     if (!isCaptureReady || _photoPath == null) {
       return false;
     }
-    _scannedIsbn = null;
-    _savedIsbn = null;
+    _isbn = null;
+    _changingIdentifier = false;
+    _cameraSession++;
     _photoPath = null;
     _captureId = _newUuid();
     _isbnChosen = false;
-    _captureConfirmed = false;
     _scannerActive = false;
     _photoCameraActive = false;
     _notifyListeners();
@@ -215,12 +169,12 @@ class SingleEntryWorkflow extends ChangeNotifier {
 
   Future<void> clear() async {
     final previousPhotoPath = _photoPath;
-    _scannedIsbn = null;
-    _savedIsbn = null;
+    _isbn = null;
+    _changingIdentifier = false;
+    _cameraSession++;
     _photoPath = null;
     _captureId = _newUuid();
     _isbnChosen = false;
-    _captureConfirmed = false;
     _scannerActive = false;
     _photoCameraActive = false;
     _notifyListeners();
