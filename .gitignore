@@ -13,6 +13,7 @@ env/
 
 # Local data and backups
 BookLedger_Data.migrated/
+.bookledger-instance.lock
 config.json
 data/
 backups/
