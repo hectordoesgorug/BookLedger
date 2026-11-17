@@ -1,3 +1,18 @@
+## Android release-readiness audit - November 17, 2026
+
+Baseline: clean `main` at `b50d2cfb900f593779d693dc11accd7b4d88afaa`, matching `origin/main`. The audit report is `docs/ANDROID_RELEASE_READINESS_AUDIT.md`; this entry records new runs without replacing earlier results.
+
+- `flutter test --reporter expanded`: **126 passed, 0 failed, 0 skipped** across 12 test files. The suite covers ISBN validation and scanning callbacks, manual/no-ISBN capture, photo correction and Retake, Queue insertion and capacity, early completion, mocked transfer/reconnection/retry, camera controls, Settings, Clear Data, and layout.
+- `flutter analyze`: **no issues**.
+- `dart format --output=none --set-exit-if-changed lib test`: **35 files checked, 0 changed**.
+- `flutter build apk --debug`: **succeeded**. Gradle reported a JDK restricted-native-access warning; dependency resolution reported 19 newer package versions incompatible with current constraints. No packages were upgraded.
+- `.venv\Scripts\python.exe -m pytest -q`: **516 passed, 19 skipped, 0 failed**. The skips concern Tk/display-dependent tests in this environment; they are not Android test skips.
+- `git diff --check`: **passed** on the final documentation diff; Git reported only its configured LF-to-CRLF notice for `THIRD_PARTY_NOTICES.md`.
+
+On a Xiaomi/Poco 23122PCD1G running Android 16 (API 36), the built debug APK was installed as a fresh install after the phone accepted its install prompt; no app data was cleared. Cold first launch (6.29 seconds), warm resume (0.27 seconds), and cold launch after force-stop with Camera permission granted (5.93 seconds) reached a responsive home screen. A second background/foreground resume while the photo camera was active returned to a working preview with Torch off. Bounded logcat searches and visible observation found no BookLedger ANR; the earlier ANR cause remains unknown.
+
+Disposable physical checks passed for initial Scan/Manual/No ISBN choices, No ISBN photo capture without Save, disabled Send while unpaired, photo-preserving Cancel Change and Manual correction, canceled Retake, successful Retake replacement (old app-private photo removed), camera Guide/Zoom persistence across force-stop, and Torch reset after backgrounding. Bulk capacity 5: Queue reached 1/5 and opened the scanner, scanner X retained the queued entry, a hold outside the scanner made Send appear without sending, and a separate five-photo batch progressed to 5/5 with no sixth scanner. Test captures were removed through normal app navigation and app-private cache inspection; the debug APK remains installed. A real barcode scan, capacity 20 physical run, authenticated reconnect, transfer and desktop acknowledgment, production-signed upgrade, and fresh release build were **not performed** in this audit.
+
 ## Android Issue #16 - November 17, 2026
 
 Revised intake uses identifier selection, photography, then explicit Send/Queue without Save. Tests cover immediate readiness, correction/Retake preservation, stale camera-session rejection, next-scan progression, capacity/early finish, reconnect and failed-transfer retry, small-screen layout, camera controls and Settings.

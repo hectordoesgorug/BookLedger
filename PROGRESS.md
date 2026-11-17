@@ -2,9 +2,11 @@
 
 BookLedger v1.0.0 was published on November 16, 2026 as a stable GitHub Release. Annotated tag `v1.0.0` points to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`. The [Windows portable ZIP](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Windows-x64-Portable.zip), [Android APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk), and checksum manifest are published at the [release page](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0); the owner confirmed downloading and verifying all three assets. Latest owner-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Handover #42D is closed. Post-release maintenance and future enhancement planning are active; see the [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md) and [test report](TEST_REPORT.md).
 
-## Android Issue #16 (November 17, 2026; pending owner review)
+## Android Issue #16 (November 17, 2026; implemented)
 
-Implemented the fixed 2×2 intake actions, canvas identifier choices, automatic photograph readiness, photo-preserving Change/Retake, and next-book scanning after successful Bulk Queue. Transfer protocol and acknowledgment rules are unchanged. Debug APK installed for owner testing. Automated verification and device limitations are recorded in TEST_REPORT.md; no commit or publication performed.
+Implemented the fixed 2Ã—2 intake actions, canvas identifier choices, automatic photograph readiness, photo-preserving Change/Retake, and next-book scanning after successful Bulk Queue. Transfer protocol and acknowledgment rules are unchanged. The implementation and subsequent control refinements are committed on `main`; they have not been published in a new release. Automated verification and device limitations are recorded in TEST_REPORT.md and the Android release-readiness audit.
+
+Post-release Android issues #6, #5, #8, #19, and #16 are implemented in the current source. Their release readiness, including remaining live-transfer and production-upgrade checks, is assessed in [the November 17 Android audit](docs/ANDROID_RELEASE_READINESS_AUDIT.md).
 
 ## Implemented desktop milestones
 - [x] Modular package structure
@@ -89,17 +91,17 @@ Implemented the fixed 2×2 intake actions, canvas identifier choices, automatic p
 - Windows hotspot/mDNS discovery, actual DHCP-change discovery, and native Tk interaction remain unverified.
 - Live metadata provider behavior can change; synthetic fixtures do not establish current provider responses or site markup.
 
-## Deferred future enhancements
+## Post-release issue tracker
 
-GitHub Issues is the primary tracker for future development tasks, requirements, acceptance criteria, and issue status. `PROGRESS.md` remains the high-level roadmap and milestone history. Future implementation work should reference the relevant GitHub Issue. Close completed issues in GitHub, and update this file when changes warrant a milestone-level progress update.
+GitHub Issues is the primary tracker for development tasks, requirements, acceptance criteria, and issue status. `PROGRESS.md` remains the high-level roadmap and milestone history. Future implementation work should reference the relevant GitHub Issue. Close completed issues in GitHub, and update this file when changes warrant a milestone-level progress update. The following original backlog list retains completed entries for context.
 
 1. [**Dynamic GUI Resizing**](https://github.com/hectordoesgorug/BookLedger/issues/1) (desktop): Adapt Catalog, Inventory, forms, Settings, About, Reports, and other major screens to window resizing. Preserve usable minimum dimensions, spacing, alignment, and appropriate reflow without indiscriminate font scaling.
 2. [**Revisit Hardcover and BigBook Providers**](https://github.com/hectordoesgorug/BookLedger/issues/2) (desktop metadata): Reassess lookup reliability, provider behavior, API integration, and field coverage. Do not presume either provider is broken; use current evidence to decide whether behavior should change.
-3. [**Single-Instance Desktop Enforcement**](https://github.com/hectordoesgorug/BookLedger/issues/3) (desktop): Prevent simultaneous instances from using the same portable library and, where feasible, activate the existing window on a second launch. Consider safe locking, distinct library paths, and stale-lock recovery.
+3. [**Single-Instance Desktop Enforcement**](https://github.com/hectordoesgorug/BookLedger/issues/3) (desktop; implemented): Prevent simultaneous instances from using the same portable library and, where feasible, activate the existing window on a second launch. Consider safe locking, distinct library paths, and stale-lock recovery.
 4. [**Mobile Photo Background Removal**](https://github.com/hectordoesgorug/BookLedger/issues/4) (Android): Investigate optional background removal for captured cover photos. Prefer offline processing where feasible and preserve original photos.
-5. [**Single-Page Mobile Settings**](https://github.com/hectordoesgorug/BookLedger/issues/5) (Android): Consolidate companion settings into one organized, scrollable page while retaining existing behavior.
-6. [**Remove Obsolete Test Secure Storage Button**](https://github.com/hectordoesgorug/BookLedger/issues/6) (Android): Determine whether the control serves a production purpose. If not, remove the testing UI while preserving production secure-storage behavior and tests.
+5. [**Single-Page Mobile Settings**](https://github.com/hectordoesgorug/BookLedger/issues/5) (Android; implemented): Consolidate companion settings into one organized, scrollable page while retaining existing behavior.
+6. [**Remove Obsolete Test Secure Storage Button**](https://github.com/hectordoesgorug/BookLedger/issues/6) (Android; implemented): Determine whether the control serves a production purpose. If not, remove the testing UI while preserving production secure-storage behavior and tests.
 7. [**Non-AI Book-Description Shortener**](https://github.com/hectordoesgorug/BookLedger/issues/7) (desktop metadata): Investigate deterministic shortening of overly long descriptions that preserves important information and uses no AI service.
-8. [**Additional Mobile Camera Controls**](https://github.com/hectordoesgorug/BookLedger/issues/8) (Android): Consider flash/torch and zoom controls where the camera hardware and APIs support them. Preserve ISBN scanning and cover-photo capture behavior.
+8. [**Additional Mobile Camera Controls**](https://github.com/hectordoesgorug/BookLedger/issues/8) (Android; implemented): Consider flash/torch and zoom controls where the camera hardware and APIs support them. Preserve ISBN scanning and cover-photo capture behavior.
 9. [**Bulk Metadata Download**](https://github.com/hectordoesgorug/BookLedger/issues/9) (desktop): Allow multiple desktop books to be captured or entered without waiting for each lookup, then retrieve and apply their metadata in a later batch. Mobile batch capture and transfer exist; desktop cataloging and lookup remain one book at a time.
 10. [**Merge Libraries**](https://github.com/hectordoesgorug/BookLedger/issues/10) (desktop data management): Import a backup into an existing library with safe identity matching and review instead of replacing the active library. Preserve the local USB handover/backup model; restore currently replaces the active library and does not merge.
