@@ -81,7 +81,7 @@ class AboutScreen extends StatelessWidget {
           ]),
           _section(context, 'Single Entry', [
             _steps(context, [
-              'Choose Single Entry, then scan an ISBN, enter it manually, or choose No ISBN.',
+              'Choose Single Entry, then choose Scan, Manual, or No ISBN.',
               'Take a cover photograph, then review it. Change corrects the identifier while keeping the photo; canceling Retake restores the previous photo.',
               'When connected, choose Send and keep the app open until the desktop acknowledges receipt.',
               'Complete the book details in the desktop form. A successful transfer sends the capture; cataloging happens on the desktop.',
@@ -91,7 +91,7 @@ class AboutScreen extends StatelessWidget {
             _steps(context, [
               'Choose Bulk Entry and select a queue size from 5 to 20.',
               'For each book, scan or enter its ISBN (or choose No ISBN), photograph the cover, then choose Queue. Scanning starts automatically for the next book when capacity remains.',
-              'The queue shows how many captures are ready. At capacity, choose Send. To send fewer, cancel the next scanner and hold Queue to finish the batch early.',
+              'The queue shows how many captures are ready. At capacity, choose Send. To send fewer, close the next ISBN scanner with its X button, then hold Queue to finish the batch early. Holding Queue is unavailable during scanning or an unfinished capture.',
               'Choose Send and keep the app open for the desktop acknowledgement. Unacknowledged captures remain available for retry.',
               'Complete each received book in the desktop form. The queue does not provide per-entry removal.',
             ]),

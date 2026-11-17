@@ -866,48 +866,55 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
     }
     if (!_workflow.isbnChosen && !_workflow.photoCameraActive) {
+      final identifierStyle = OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: const BorderSide(color: Colors.white70),
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      );
       return Center(
         child: SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white70),
+            child: SizedBox(
+              width: 180,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  OutlinedButton.icon(
+                    style: identifierStyle,
+                    onPressed: () => unawaited(_openScanner()),
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan'),
                   ),
-                  onPressed: () => unawaited(_openScanner()),
-                  icon: const Icon(Icons.qr_code_scanner),
-                  label: const Text('Scan'),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white70),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: identifierStyle,
+                    onPressed: () => unawaited(_openManualIsbn()),
+                    icon: const Icon(Icons.dialpad),
+                    label: const Text('Manual'),
                   ),
-                  onPressed: () => unawaited(_openManualIsbn()),
-                  icon: const Icon(Icons.dialpad),
-                  label: const Text('Enter Manually'),
-                ),
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  style: TextButton.styleFrom(foregroundColor: Colors.white),
-                  onPressed: () {
-                    _workflow.chooseNoIsbn();
-                  },
-                  icon: const Icon(Icons.not_interested),
-                  label: const Text('No ISBN'),
-                ),
-                if (_workflow.changingIdentifier)
-                  TextButton(
-                    style: TextButton.styleFrom(foregroundColor: Colors.white),
-                    onPressed: _workflow.cancelIdentifierChange,
-                    child: const Text('Cancel change'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: identifierStyle,
+                    onPressed: () {
+                      _workflow.chooseNoIsbn();
+                    },
+                    icon: const Icon(Icons.not_interested),
+                    label: const Text('No ISBN'),
                   ),
-              ],
+                  if (_workflow.changingIdentifier)
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _workflow.cancelIdentifierChange,
+                      child: const Text('Cancel change'),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

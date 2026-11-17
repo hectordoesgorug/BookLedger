@@ -251,6 +251,39 @@ void main() {
     },
   );
 
+  testWidgets('identifier choices share width, height, outline and order', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: CaptureScreen(mode: CaptureMode.single)),
+    );
+    final choices = [
+      'Scan',
+      'Manual',
+      'No ISBN',
+    ].map((label) => find.widgetWithText(OutlinedButton, label)).toList();
+    final firstSize = tester.getSize(choices.first);
+    expect(firstSize.height, greaterThanOrEqualTo(48));
+    for (final choice in choices) {
+      expect(tester.getSize(choice), firstSize);
+      final button = tester.widget<OutlinedButton>(choice);
+      final border = button.style!.side!.resolve({})!;
+      expect(border.width, greaterThan(0));
+      expect(border.color.a, greaterThan(0));
+    }
+    expect(
+      tester.getTopLeft(choices[0]).dy,
+      lessThan(tester.getTopLeft(choices[1]).dy),
+    );
+    expect(
+      tester.getTopLeft(choices[1]).dy,
+      lessThan(tester.getTopLeft(choices[2]).dy),
+    );
+    await tester.tap(choices[1]);
+    await tester.pumpAndSettle();
+    expect(find.text('Enter ISBN manually'), findsOneWidget);
+  });
+
   testWidgets('No ISBN choice starts photo capture in both modes', (
     WidgetTester tester,
   ) async {
@@ -268,7 +301,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.widgetWithText(TextButton, 'No ISBN'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'No ISBN'));
       await tester.pump();
       expect(workflow.captureIsbn, isNull);
       expect(workflow.isNoIsbn, isTrue);
@@ -290,7 +323,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Enter Manually'));
+    await tester.tap(find.text('Manual'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '0-306-40615-2');
     await tester.testTextInput.receiveAction(TextInputAction.done);
@@ -367,7 +400,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Scan Number'), findsNothing);
-    expect(find.text('Enter Manually'), findsOneWidget);
+    expect(find.text('Manual'), findsOneWidget);
     expect(find.text('No ISBN'), findsOneWidget);
     expect(find.text('Scan'), findsOneWidget);
     final scanButton = tester.widget<OutlinedButton>(
@@ -1477,8 +1510,15 @@ void main() {
       expect(workflow.photoPath, isNull);
       expect(queue.entries.single.photoPath, 'queued-photo.jpg');
       expect(workflow.scannerActive, isTrue);
-      workflow.cancelIsbnScan();
-      await tester.pump();
+      expect(
+        tester
+            .widget<QueueActionButton>(find.byType(QueueActionButton))
+            .canLongPress,
+        isFalse,
+      );
+      await tester.tap(find.byTooltip('Exit ISBN scanning'));
+      await tester.pumpAndSettle();
+      expect(workflow.scannerActive, isFalse);
       expect(find.text('No ISBN'), findsOneWidget);
       expect(
         tester
@@ -1486,8 +1526,75 @@ void main() {
             .canLongPress,
         isTrue,
       );
+      await tester.tap(find.byKey(const ValueKey('queue-action')));
+      await tester.pumpAndSettle();
+      expect(queue.isBatchReady, isFalse);
+      final canceled = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('queue-action'))),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      await canceled.cancel();
+      await tester.pumpAndSettle();
+      expect(queue.isBatchReady, isFalse);
+      final batchId = queue.batchId;
+      final entry = queue.entries.single;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('queue-action'))),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Hold…'), findsOneWidget);
+      expect(queue.isBatchReady, isFalse);
+      await tester.pump(const Duration(seconds: 4));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(queue.isBatchReady, isTrue);
+      expect(find.text('Send'), findsOneWidget);
+      expect(queue.batchId, batchId);
+      expect(queue.entries.single.captureId, entry.captureId);
+      expect(queue.count, 1);
+      await tester.longPress(find.byKey(const ValueKey('queue-action')));
+      await tester.pumpAndSettle();
+      expect(queue.count, 1);
+      expect(queue.batchId, batchId);
+      expect(workflow.scannerActive, isFalse);
+      expect(
+        tester.widget<QueueActionButton>(find.byType(QueueActionButton)).canTap,
+        isFalse,
+      );
     },
   );
+
+  testWidgets('holding Queue cannot finish a batch with an unqueued capture', (
+    tester,
+  ) async {
+    final queue = _testQueue(5);
+    await _addTestEntries(queue, 1);
+    final workflow = SingleEntryWorkflow()..chooseNoIsbn();
+    workflow.cancelPhotoCapture();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CaptureScreen(
+          mode: CaptureMode.bulk,
+          bulkQueue: queue,
+          workflow: workflow,
+        ),
+      ),
+    );
+    expect(
+      tester
+          .widget<QueueActionButton>(find.byType(QueueActionButton))
+          .canLongPress,
+      isFalse,
+    );
+    await tester.longPress(find.byKey(const ValueKey('queue-action')));
+    await tester.pumpAndSettle();
+    expect(queue.isBatchReady, isFalse);
+    expect(queue.count, 1);
+    expect(workflow.isNoIsbn, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    queue.dispose();
+    workflow.dispose();
+  });
 
   testWidgets('failed queue insertion preserves the current capture', (
     WidgetTester tester,
@@ -1670,7 +1777,7 @@ void main() {
       tester.getCenter(find.byKey(const ValueKey('queue-action'))),
     );
     await tester.pump(const Duration(milliseconds: 100));
-    await gesture.up();
+    await gesture.cancel();
     await tester.pumpAndSettle();
 
     expect(queue.isBatchReady, isFalse);
