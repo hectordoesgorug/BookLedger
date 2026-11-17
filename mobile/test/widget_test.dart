@@ -633,6 +633,7 @@ void main() {
         'Getting Started',
         'Single Entry',
         'Bulk Entry',
+        'Camera Controls',
         'Pairing and Connectivity',
         'Troubleshooting',
         'Version and Project Information',
@@ -648,7 +649,40 @@ void main() {
         expect(find.text(heading), findsOneWidget);
       }
       expect(find.text('BookLedger Mobile • v1.2.3'), findsOneWidget);
+      for (
+        var scroll = 0;
+        scroll < 10 && find.text('Camera Controls').evaluate().isEmpty;
+        scroll++
+      ) {
+        await tester.drag(find.byType(ListView).last, const Offset(0, 350));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('Camera Controls'), findsOneWidget);
+      expect(
+        find.textContaining('continuous camera lighting on or off'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('slider to zoom in or out'), findsOneWidget);
+      expect(
+        find.textContaining('cycle through L-shaped corner guides'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('visual alignment references only'),
+        findsOneWidget,
+      );
       expect(find.byType(Scrollable), findsWidgets);
+      for (
+        var scroll = 0;
+        scroll < 10 && find.text('BookLedger on GitHub').evaluate().isEmpty;
+        scroll++
+      ) {
+        await tester.drag(find.byType(ListView).last, const Offset(0, -350));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('BookLedger on GitHub'), findsOneWidget);
+      await tester.drag(find.byType(ListView).last, const Offset(0, -160));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('BookLedger on GitHub'));
       await tester.tap(find.text('BookLedger on GitHub'));
       await tester.pumpAndSettle();

@@ -7,17 +7,22 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'camera_photo_storage.dart';
+import 'framing_guides.dart';
 import 'photo_camera_configuration.dart';
 
 class PhotoCameraView extends StatefulWidget {
   const PhotoCameraView({
     required this.captureRequestId,
+    required this.guideMode,
+    required this.onGuideModeChanged,
     required this.onCaptured,
     required this.onCancel,
     super.key,
   });
 
   final int captureRequestId;
+  final FramingGuideMode guideMode;
+  final ValueChanged<FramingGuideMode> onGuideModeChanged;
   final Future<void> Function(String path) onCaptured;
   final VoidCallback onCancel;
 
@@ -33,6 +38,15 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
   bool _captureRequestedWhileLoading = false;
   bool _cameraInitializationInFlight = false;
   bool _appResumed = true;
+  bool _torchAvailable = true;
+  bool _torchOn = false;
+  bool _zoomAvailable = false;
+  double _minimumZoomLevel = 1;
+  double _maximumZoomLevel = 1;
+  double _zoomLevel = 1;
+  double _appliedZoomLevel = 1;
+  double? _queuedZoomLevel;
+  bool _zoomUpdateInFlight = false;
   String? _errorMessage;
   int _cameraGeneration = 0;
 
@@ -58,11 +72,13 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         state == AppLifecycleState.hidden) {
       _appResumed = false;
       _cameraGeneration++;
+      _queuedZoomLevel = null;
       final controller = _controller;
       _controller = null;
       if (mounted) {
         setState(() {
           _loading = false;
+          _torchOn = false;
           _errorMessage = 'Camera paused while the app was in the background.';
         });
       }
@@ -114,19 +130,53 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       );
       await candidate.initialize();
 
-      // Use the widest zoom level this camera exposes. Clamp to 1x because
-      // CameraController's cross-platform contract defines zoom from 1x up.
-      final minZoom = await candidate.getMinZoomLevel();
-      final maxZoom = await candidate.getMaxZoomLevel();
-      final widestSupportedZoom = widestSupportedZoomLevel(
-        minimum: minZoom,
-        maximum: maxZoom,
-      );
-      await candidate.setZoomLevel(widestSupportedZoom);
+      var minZoom = 1.0;
+      var maxZoom = 1.0;
+      var initialZoom = 1.0;
+      var zoomAvailable = false;
+      try {
+        minZoom = await candidate.getMinZoomLevel();
+        maxZoom = await candidate.getMaxZoomLevel();
+        if (minZoom.isFinite && maxZoom.isFinite && minZoom <= maxZoom) {
+          initialZoom = initialPhotoZoomLevel(
+            minimum: minZoom,
+            maximum: maxZoom,
+          );
+          zoomAvailable = hasAdjustableZoom(minimum: minZoom, maximum: maxZoom);
+          await candidate.setZoomLevel(initialZoom);
+        } else {
+          minZoom = 1;
+          maxZoom = 1;
+        }
+      } on Object catch (error, stackTrace) {
+        developer.log(
+          'Photo camera zoom controls are unavailable.',
+          name: 'BookLedger.camera',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        minZoom = 1;
+        maxZoom = 1;
+        initialZoom = 1;
+        zoomAvailable = false;
+      }
+
+      var torchAvailable = true;
+      try {
+        await candidate.setFlashMode(FlashMode.off);
+      } on Object catch (error, stackTrace) {
+        developer.log(
+          'Photo camera torch control is unavailable.',
+          name: 'BookLedger.camera',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        torchAvailable = false;
+      }
       developer.log(
         'Photo camera ${selectedCamera.name} (${selectedCamera.lensType}), '
         'preview ${candidate.value.previewSize}, '
-        'zoom range $minZoom–$maxZoom; selected $widestSupportedZoom.',
+        'zoom range $minZoom–$maxZoom; selected $initialZoom.',
         name: 'BookLedger.camera',
       );
 
@@ -136,6 +186,14 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       }
 
       _controller = candidate;
+      _minimumZoomLevel = minZoom;
+      _maximumZoomLevel = maxZoom;
+      _zoomLevel = initialZoom;
+      _appliedZoomLevel = initialZoom;
+      _zoomAvailable = zoomAvailable;
+      _queuedZoomLevel = null;
+      _torchAvailable = torchAvailable;
+      _torchOn = false;
       candidate = null;
     } on CameraException catch (error, stackTrace) {
       developer.log(
@@ -187,6 +245,18 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
   }
 
   Future<void> _disposeCameraController(CameraController controller) async {
+    if (controller.value.isInitialized) {
+      try {
+        await controller.setFlashMode(FlashMode.off);
+      } on Object catch (error, stackTrace) {
+        developer.log(
+          'Photo camera torch could not be switched off before disposal.',
+          name: 'BookLedger.camera',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
     try {
       await controller.dispose();
     } catch (error, stackTrace) {
@@ -196,6 +266,87 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         error: error,
         stackTrace: stackTrace,
       );
+    }
+  }
+
+  Future<void> _toggleTorch() async {
+    final controller = _controller;
+    if (controller == null || !_torchAvailable || _takingPhoto) return;
+
+    final enable = !_torchOn;
+    try {
+      await controller.setFlashMode(enable ? FlashMode.torch : FlashMode.off);
+      if (!mounted || !identical(controller, _controller)) return;
+      setState(() => _torchOn = enable);
+    } on Object catch (error, stackTrace) {
+      developer.log(
+        'Photo camera torch change failed.',
+        name: 'BookLedger.camera',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted || !identical(controller, _controller)) return;
+      setState(() {
+        if (enable) {
+          _torchAvailable = false;
+          _torchOn = false;
+        }
+      });
+      if (!enable) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('The torch could not be switched off.')),
+        );
+      }
+    }
+  }
+
+  void _requestZoomLevel(double value) {
+    final controller = _controller;
+    if (controller == null || !_zoomAvailable || _takingPhoto) return;
+
+    final requested = value.clamp(_minimumZoomLevel, _maximumZoomLevel);
+    setState(() => _zoomLevel = requested.toDouble());
+    _queuedZoomLevel = requested.toDouble();
+    if (!_zoomUpdateInFlight) {
+      unawaited(_applyQueuedZoom(controller));
+    }
+  }
+
+  Future<void> _applyQueuedZoom(CameraController controller) async {
+    _zoomUpdateInFlight = true;
+    try {
+      while (_queuedZoomLevel != null) {
+        if (!mounted || !_appResumed || !identical(controller, _controller)) {
+          _queuedZoomLevel = null;
+          return;
+        }
+        final requested = _queuedZoomLevel!;
+        _queuedZoomLevel = null;
+        await controller.setZoomLevel(requested);
+        _appliedZoomLevel = requested;
+      }
+    } on Object catch (error, stackTrace) {
+      developer.log(
+        'Photo camera zoom change failed.',
+        name: 'BookLedger.camera',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (mounted && identical(controller, _controller)) {
+        setState(() {
+          _zoomAvailable = false;
+          _queuedZoomLevel = null;
+          _zoomLevel = _appliedZoomLevel;
+        });
+      }
+    } finally {
+      _zoomUpdateInFlight = false;
+      if (_queuedZoomLevel != null &&
+          mounted &&
+          _appResumed &&
+          identical(controller, _controller)) {
+        unawaited(_applyQueuedZoom(controller));
+      }
     }
   }
 
@@ -211,11 +362,22 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
 
     setState(() {
       _takingPhoto = true;
+      _torchOn = false;
       _errorMessage = null;
     });
     String? storedPath;
     var photoHandedToWorkflow = false;
     try {
+      try {
+        await controller.setFlashMode(FlashMode.off);
+      } on Object catch (error, stackTrace) {
+        developer.log(
+          'Photo camera torch could not be switched off before capture.',
+          name: 'BookLedger.camera',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       final captured = await controller.takePicture();
       final temporaryDirectory = await getTemporaryDirectory();
       // Preview scaling is display-only; retain the original camera JPEG bytes.
@@ -288,6 +450,109 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     super.dispose();
   }
 
+  Widget _controlButton({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) => Container(
+    decoration: BoxDecoration(
+      color: Colors.black.withAlpha(170),
+      shape: BoxShape.circle,
+      border: Border.all(color: Colors.white70),
+    ),
+    child: IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      color: Colors.white,
+      disabledColor: Colors.white38,
+      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+      padding: EdgeInsets.zero,
+      icon: Icon(icon),
+    ),
+  );
+
+  Widget _guideOverlay() => IgnorePointer(
+    child: CustomPaint(painter: FramingGuidesPainter(widget.guideMode)),
+  );
+
+  Widget _cameraControls() => Row(
+    children: [
+      _controlButton(
+        tooltip: _torchAvailable
+            ? (_torchOn ? 'Torch: on' : 'Torch: off')
+            : 'Torch unavailable',
+        icon: _torchOn ? Icons.flash_on : Icons.flash_off,
+        onPressed: _torchAvailable ? _toggleTorch : null,
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(170),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white70),
+          ),
+          child: Row(
+            children: [
+              Text(
+                '${_zoomLevel.toStringAsFixed(1)}×',
+                key: const ValueKey('camera-zoom-value'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              if (_zoomAvailable)
+                Expanded(
+                  child: SliderTheme(
+                    data: const SliderThemeData(
+                      trackHeight: 2,
+                      activeTrackColor: Color(0xFFFFEB3B),
+                      inactiveTrackColor: Colors.white70,
+                      thumbColor: Colors.white,
+                      overlayColor: Color(0x33FFFFFF),
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 7),
+                      overlayShape: RoundSliderOverlayShape(overlayRadius: 16),
+                    ),
+                    child: Semantics(
+                      label: 'Zoom',
+                      value: '${_zoomLevel.toStringAsFixed(1)}×',
+                      child: Slider(
+                        key: const ValueKey('camera-zoom-slider'),
+                        min: _minimumZoomLevel,
+                        max: _maximumZoomLevel,
+                        value: _zoomLevel,
+                        onChanged: _requestZoomLevel,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: Text(
+                    _maximumZoomLevel == _minimumZoomLevel
+                        ? 'Fixed'
+                        : 'Unavailable',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      _controlButton(
+        tooltip: 'Guide: ${widget.guideMode.label}',
+        icon: widget.guideMode.icon,
+        onPressed: () => widget.onGuideModeChanged(widget.guideMode.next),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
@@ -297,7 +562,14 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         if (controller != null && controller.value.isInitialized)
           ColoredBox(
             color: Theme.of(context).colorScheme.surface,
-            child: ClipRect(child: Center(child: CameraPreview(controller))),
+            child: ClipRect(
+              child: Center(
+                child: CameraPreview(
+                  controller,
+                  child: _takingPhoto ? null : _guideOverlay(),
+                ),
+              ),
+            ),
           )
         else
           ColoredBox(
@@ -342,6 +614,10 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
             icon: const Icon(Icons.close),
           ),
         ),
+        if (controller != null &&
+            controller.value.isInitialized &&
+            !_takingPhoto)
+          Positioned(left: 8, right: 8, bottom: 8, child: _cameraControls()),
       ],
     );
   }

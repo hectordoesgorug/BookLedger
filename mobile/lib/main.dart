@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'capture/bulk_capture_queue.dart';
 import 'capture/camera_permission.dart';
 import 'capture/captured_photo_preview.dart';
+import 'capture/framing_guides.dart';
 import 'capture/isbn_scanner_screen.dart';
 import 'capture/photo_camera_view.dart';
 import 'capture/queue_action_button.dart';
@@ -429,6 +430,7 @@ class _CaptureScreenState extends State<CaptureScreen>
   BulkCaptureQueue? _bulkQueue;
   late final bool _ownsBulkQueue;
   int _photoCaptureRequestId = 0;
+  FramingGuideMode _guideMode = FramingGuideMode.lFrame;
   bool _queueing = false;
   bool _transferring = false;
   String _singleBatchId = newCaptureUuid();
@@ -581,6 +583,7 @@ class _CaptureScreenState extends State<CaptureScreen>
     );
     if (confirmed == true) {
       await _workflow.clear();
+      if (mounted) setState(() => _guideMode = FramingGuideMode.lFrame);
     }
   }
 
@@ -616,6 +619,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
       if (mounted) {
         _workflow.resetAfterSuccessfulQueue();
+        setState(() => _guideMode = FramingGuideMode.lFrame);
       }
     } catch (_) {
       if (mounted) {
@@ -657,6 +661,7 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
       if (sent && mounted) {
         await _workflow.clear();
+        if (mounted) setState(() => _guideMode = FramingGuideMode.lFrame);
         _singleBatchId = newCaptureUuid();
         _showSuccessMessage(
           'Desktop received the capture. Cataloging will follow on desktop.',
@@ -876,6 +881,8 @@ class _CaptureScreenState extends State<CaptureScreen>
         children: [
           PhotoCameraView(
             captureRequestId: _photoCaptureRequestId,
+            guideMode: _guideMode,
+            onGuideModeChanged: (mode) => setState(() => _guideMode = mode),
             onCaptured: _handlePhotoCaptured,
             onCancel: _workflow.cancelPhotoCapture,
           ),

@@ -96,6 +96,23 @@ class AboutScreen extends StatelessWidget {
               'Complete each received book in the desktop form. The queue does not provide per-entry removal.',
             ]),
           ]),
+          _section(context, 'Camera Controls', [
+            _paragraph(
+              'Camera controls are available during the live cover preview and disappear after a photo is captured.',
+            ),
+            _paragraph(
+              'Torch: tap the torch icon to switch continuous camera lighting on or off. It is available only when the camera supports it.',
+            ),
+            _paragraph(
+              'Zoom: move the slider to zoom in or out when supported. The multiplier shows the current zoom level.',
+            ),
+            _paragraph(
+              'Guide: tap the icon to cycle through L-shaped corner guides, a 3×3 yellow grid with a red center dot, a 4×4 yellow grid with a red center dot, and no guides.',
+            ),
+            _paragraph(
+              'Guides are visual alignment references only; they do not crop, straighten, or otherwise change the saved photograph.',
+            ),
+          ]),
           _section(context, 'Pairing and Connectivity', [
             _paragraph(
               'The phone and desktop must be able to reach each other on the same trusted Wi-Fi network or a compatible hotspot. '

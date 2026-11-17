@@ -6,9 +6,13 @@ import 'package:camera/camera.dart';
 /// supported stream. max avoids forcing the 16:9 720p target used by high.
 const photoCameraResolutionPreset = ResolutionPreset.max;
 
-double widestSupportedZoomLevel({
+double initialPhotoZoomLevel({
   required double minimum,
   required double maximum,
 }) {
-  return minimum.clamp(1.0, maximum).toDouble();
+  if (!minimum.isFinite || !maximum.isFinite || minimum > maximum) return 1.0;
+  return 1.0.clamp(minimum, maximum).toDouble();
 }
+
+bool hasAdjustableZoom({required double minimum, required double maximum}) =>
+    minimum.isFinite && maximum.isFinite && minimum < maximum;
