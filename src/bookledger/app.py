@@ -100,7 +100,7 @@ ABOUT_GUIDE_PAGES = (
     )),
     ("Catalog", "Catalog and Inventory", (
         ("p", None, "Catalog presents one photo card for each active physical copy. Inventory presents the same copies in a sortable table."),
-        ("bullet", "Find copies", "Use the search box and Genre, Condition, Location, and Status filters. Catalog can sort by title, price, or Copy ID; Inventory sorts by its column headings."),
+        ("bullet", "Find copies", "Use the search box and Genre, Condition, Location, and Status filters. Catalog sorts by Title, Copy ID, or Price; use the adjacent arrow to switch between ascending and descending order. Inventory sorts by its column headings."),
         ("bullet", "Edit a copy", "Double-click a row in Inventory, or choose Edit Book from a copy's Catalog context menu. Changes apply to that physical copy."),
         ("bullet", "Separate copies", "Adding another copy of the same ISBN reuses its bibliographic record after confirmation. A different ISBN remains a separate record, even when title and author match."),
         ("note", "Copy status", "Available, Listed, Not for Sale, and Sold belong to individual copies. Sold copies remain in inventory and history."),
@@ -845,9 +845,19 @@ class BookLedgerApp(_WindowBase):
             sort_bar.pack(fill="x", pady=(0, 8))
             ttk.Label(sort_bar, text="Sort by").pack(side="left")
             self.catalog_sort = tk.StringVar(value=getattr(self, "_catalog_sort_value", "Title"))
-            sort_box = ttk.Combobox(sort_bar, textvariable=self.catalog_sort, values=("Title", "Price: Low to High", "Price: High to Low", "Copy ID: Newest"), state="readonly", width=22)
+            sort_box = ttk.Combobox(sort_bar, textvariable=self.catalog_sort, values=("Title", "Copy ID", "Price"), state="readonly", width=12)
             sort_box.pack(side="left", padx=(6, 0))
             sort_box.bind("<<ComboboxSelected>>", self._catalog_sort_changed)
+            descending = getattr(self, "_catalog_sort_descending", False)
+            direction_button = ttk.Button(
+                sort_bar,
+                text="↓" if descending else "↑",
+                width=3,
+                command=self._toggle_catalog_sort_direction,
+            )
+            direction_button.pack(side="left", padx=(4, 0))
+            self.catalog_sort_direction_button = direction_button
+            self._add_hover_tooltip(direction_button, "Up arrow means ascending; down arrow means descending. Click to toggle.")
             self._build_catalog_grid(frame)
         self._populate_catalog()
 
@@ -1063,17 +1073,34 @@ class BookLedgerApp(_WindowBase):
         return f"Copy {row['copy_number']}"
 
     def _sort_catalog_rows(self, rows):
-        choice = self.catalog_sort.get()
-        if choice == "Price: Low to High":
-            return self._sold_last_sort(rows, lambda row: row["display_price_minor"])
-        if choice == "Price: High to Low":
-            return self._sold_last_sort(rows, lambda row: row["display_price_minor"], True)
-        if choice == "Copy ID: Newest":
-            return self._sold_last_sort(rows, lambda row: row["copy_id"], True)
-        return self._sold_last_sort(rows, lambda row: (row["title"].casefold(), row["copy_number"]))
+        return self._catalog_sort_rows(
+            rows,
+            self.catalog_sort.get(),
+            getattr(self, "_catalog_sort_descending", False),
+        )
+
+    @staticmethod
+    def _catalog_sort_rows(rows, field="Title", descending=False):
+        key = {
+            "Title": lambda row: row["title"].casefold(),
+            "Copy ID": lambda row: int(row["copy_id"]),
+            "Price": lambda row: int(row["display_price_minor"]),
+        }.get(field, lambda row: row["title"].casefold())
+        return sorted(
+            rows,
+            key=lambda row: (key(row), int(row["copy_id"])),
+            reverse=descending,
+        )
 
     def _catalog_sort_changed(self, _event=None):
         self._catalog_sort_value = self.catalog_sort.get()
+        self._populate_catalog()
+
+    def _toggle_catalog_sort_direction(self):
+        self._catalog_sort_descending = not getattr(self, "_catalog_sort_descending", False)
+        self.catalog_sort_direction_button.configure(
+            text="↓" if self._catalog_sort_descending else "↑"
+        )
         self._populate_catalog()
 
     def _on_tree_double_click(self, event):

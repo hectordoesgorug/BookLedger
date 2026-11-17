@@ -370,6 +370,109 @@ def test_inventory_rows_include_physical_copy_number():
     assert all(entry[2] == ("inventory_status_available",) for entry in subject.tree.rows)
 
 
+def test_catalog_sort_rows_cover_fields_directions_and_deterministic_ties():
+    rows = [
+        {"copy_id": 10, "title": "beta", "display_price_minor": 1200},
+        {"copy_id": 2, "title": "Alpha", "display_price_minor": 500},
+        {"copy_id": 3, "title": "alpha", "display_price_minor": 500},
+        {"copy_id": 1, "title": "Gamma", "display_price_minor": 2500},
+    ]
+
+    assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Title")] == [2, 3, 10, 1]
+    assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Title", True)] == [1, 10, 3, 2]
+    assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Copy ID")] == [1, 2, 3, 10]
+    assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Copy ID", True)] == [10, 3, 2, 1]
+    assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Price")] == [2, 3, 10, 1]
+    assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Price", True)] == [1, 10, 3, 2]
+    assert BookLedgerApp._catalog_sort_rows([], "Title") == []
+    assert BookLedgerApp._catalog_sort_rows(rows[:1], "Price") == rows[:1]
+
+
+def test_catalog_sort_controls_toggle_and_keep_filters_on_refresh():
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+    class Button:
+        def configure(self, **options):
+            self.options = options
+
+    rows = [
+        {"copy_id": 8, "title": "Later", "display_price_minor": 200, "status": "Available"},
+        {"copy_id": 2, "title": "Earlier", "display_price_minor": 100, "status": "Available"},
+    ]
+    filter_calls = []
+    rendered = []
+
+    def list_copies(*filters):
+        filter_calls.append(filters)
+        return rows
+
+    subject = SimpleNamespace(
+        catalog_sort=Value("Price"),
+        catalog_sort_direction_button=Button(),
+        _catalog_sort_descending=False,
+        catalog=SimpleNamespace(list_copies=list_copies),
+        global_search=Value("query"), status_filter=Value("Available"),
+        genre_filter=Value("Science"), condition_filter=Value("Good"),
+        location_filter=Value("Shelf A"), _catalog_inventory=False,
+        _sort_catalog_rows=lambda values: BookLedgerApp._catalog_sort_rows(
+            values, subject.catalog_sort.get(), subject._catalog_sort_descending
+        ),
+        _render_catalog_cards=lambda values: rendered.append([row["copy_id"] for row in values]),
+        status_var=SimpleNamespace(set=lambda _text: None),
+        _populate_catalog=lambda: BookLedgerApp._populate_catalog(subject),
+    )
+
+    BookLedgerApp._catalog_sort_changed(subject)
+    assert subject._catalog_sort_value == "Price"
+    assert rendered[-1] == [2, 8]
+    BookLedgerApp._toggle_catalog_sort_direction(subject)
+    assert subject._catalog_sort_descending is True
+    assert subject.catalog_sort_direction_button.options == {"text": "↓"}
+    assert rendered[-1] == [8, 2]
+
+    rows.append({"copy_id": 11, "title": "New", "display_price_minor": 50, "status": "Available"})
+    rows[0]["display_price_minor"] = 25
+    BookLedgerApp._populate_catalog(subject)
+    assert rendered[-1] == [2, 11, 8]
+    rows[0]["title"] = "Aardvark"
+    subject.catalog_sort.value = "Title"
+    BookLedgerApp._catalog_sort_changed(subject)
+    assert rendered[-1] == [11, 2, 8]
+    assert filter_calls == [
+        ("query", "Available", "Science", "Good", "Shelf A"),
+        ("query", "Available", "Science", "Good", "Shelf A"),
+        ("query", "Available", "Science", "Good", "Shelf A"),
+        ("query", "Available", "Science", "Good", "Shelf A"),
+    ]
+
+
+def test_catalog_sort_preferences_survive_navigation():
+    seen = []
+    subject = SimpleNamespace(
+        current_page="Catalog",
+        _catalog_sort_value="Copy ID",
+        _catalog_sort_descending=True,
+        page_title=SimpleNamespace(configure=lambda **_options: None),
+        workspace=object(),
+        _update_active_navigation=lambda: None,
+        _clear_workspace=lambda: None,
+        _build_settings=lambda: None,
+        _build_catalog_page=lambda inventory=False: seen.append(
+            (inventory, subject._catalog_sort_value, subject._catalog_sort_descending)
+        ),
+    )
+
+    BookLedgerApp.show_page(subject, "Settings")
+    BookLedgerApp.show_page(subject, "Catalog")
+
+    assert seen == [(False, "Copy ID", True)]
+
+
 def test_mobile_indicator_maps_pairing_and_authenticated_connection_states():
     class Label:
         def configure(self, **options):

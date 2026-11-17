@@ -1,6 +1,6 @@
 # Test report history
 
-Record started: 2026-10-19; latest dated entry: 2026-11-16.
+Record started: 2026-10-19; latest dated entry: 2026-11-17.
 
 This is a record of specific test runs, investigations, and owner-reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; the separate owner-reported final-asset session on 2026-11-16 is recorded below.
 
@@ -136,3 +136,13 @@ The desktop DNS-SD service advertised on the tested Wi-Fi network. Changed-IP re
 - `git diff --check` — passed.
 
 Automated tests cover validated and idempotent staging, duplicate/nullable ISBNs, batch ordering and readiness, transfer callbacks, recovery after restart, and preserving the incoming UUID through durable catalog save. Physical Poco X6 end-to-end transfer/cataloging and native Tk UI interaction were not performed in this turn. No transfer retry behavior was tested against a live desktop/device pair.
+
+## Catalog sorting direction toggle (2026-11-17)
+
+- `.venv\Scripts\python.exe -m pytest -q tests/test_app_callbacks.py -k catalog_sort` — **3 passed**.
+- `.venv\Scripts\python.exe -m pytest -q tests/test_app_callbacks.py tests/test_catalog.py` — **130 passed, 1 skipped**.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **497 passed, 19 skipped, 1 failed**. The failure is `test_photo_preview_and_manual_metadata_values_are_preserved`, where the Tk photo preview did not resize after a window geometry change; the same assertion reproduced in isolation and was observed during Handover #46 validation. Skips require missing Tcl/Tk files, including `init.tcl`, `ttk/utils.tcl`, and `ttk/sizegrip.tcl`.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
+- `git diff --check` — passed; Git reports configured LF-to-CRLF notices only.
+
+Catalog sorting tests cover Title, Copy ID, and Price in both directions, case-insensitive title comparison, numeric keys, explicit Copy ID tie-breaking, empty and single-row inputs, active filter forwarding, re-sorting refreshed records, direction toggling, and sort preference retention across navigation. The incomplete Tcl/Tk runtime prevented visual verification of the arrow control and its tooltip in the running desktop UI.
