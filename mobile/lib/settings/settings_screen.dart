@@ -117,20 +117,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     body: SafeArea(
       child: ListView(
         key: const ValueKey('settings-list'),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         children: [
-          _sectionHeading(context, 'Pairing'),
-          PairingSettingsSection(controller: widget.controller),
-          const SizedBox(height: 24),
-          _sectionHeading(context, 'Clear Data'),
-          const Text(
-            'Delete pending captures and forget the desktop pairing on this phone.',
+          _sectionHeading(
+            context,
+            'Pairing',
+            key: const ValueKey('settings-pairing-heading'),
           ),
-          const SizedBox(height: 8),
+          PairingSettingsSection(controller: widget.controller, compact: true),
+          const SizedBox(height: 12),
+          DarkModeSwitch(
+            settings: widget.settings,
+            key: const ValueKey('dark-mode-section'),
+          ),
+          const SizedBox(height: 12),
+          _sectionHeading(
+            context,
+            'Clear Data',
+            key: const ValueKey('settings-clear-data-heading'),
+          ),
+          const Text(
+            'Delete pending captures and forget pairing on this phone.',
+          ),
+          const SizedBox(height: 4),
           FilledButton.icon(
             key: const ValueKey('clear-data-action'),
             onPressed: _clearing ? null : _clearData,
             style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               backgroundColor: Theme.of(context).colorScheme.error,
               foregroundColor: Theme.of(context).colorScheme.onError,
             ),
@@ -139,25 +154,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (_clearing)
             const Padding(
-              padding: EdgeInsets.all(12),
+              padding: EdgeInsets.all(8),
               child: Center(child: CircularProgressIndicator()),
             ),
-          const SizedBox(height: 24),
-          _sectionHeading(context, 'Dark Mode'),
-          ThemeSelectionSection(settings: widget.settings),
         ],
       ),
     ),
   );
 }
 
-Widget _sectionHeading(BuildContext context, String title) => Padding(
-  padding: const EdgeInsets.only(bottom: 8),
-  child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-);
+Widget _sectionHeading(BuildContext context, String title, {Key? key}) =>
+    Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        title,
+        key: key,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+    );
 
-class ThemeSelectionSection extends StatelessWidget {
-  const ThemeSelectionSection({required this.settings, super.key});
+class DarkModeSwitch extends StatelessWidget {
+  const DarkModeSwitch({required this.settings, super.key});
 
   final MobileAppSettings settings;
 
@@ -177,19 +194,13 @@ class ThemeSelectionSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: settings,
-    builder: (context, _) => RadioGroup<ThemeMode>(
-      groupValue: settings.themeMode,
-      onChanged: (mode) {
-        if (mode != null) unawaited(_select(context, mode));
-      },
-      child: const Column(
-        children: [
-          RadioListTile<ThemeMode>(
-            value: ThemeMode.light,
-            title: Text('Default'),
-          ),
-          RadioListTile<ThemeMode>(value: ThemeMode.dark, title: Text('Dark')),
-        ],
+    builder: (context, _) => SwitchListTile(
+      key: const ValueKey('dark-mode-switch'),
+      contentPadding: EdgeInsets.zero,
+      title: const Text('Dark Mode'),
+      value: settings.themeMode == ThemeMode.dark,
+      onChanged: (enabled) => unawaited(
+        _select(context, enabled ? ThemeMode.dark : ThemeMode.light),
       ),
     ),
   );

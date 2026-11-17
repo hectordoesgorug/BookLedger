@@ -293,14 +293,18 @@ void main() {
     expect(find.byType(ListView), findsOneWidget);
     await _scrollSettingsTo(
       tester,
+      find.byKey(const ValueKey('dark-mode-switch')),
+    );
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    await _scrollSettingsTo(
+      tester,
       find.byKey(const ValueKey('clear-data-action')),
     );
     expect(find.text('Clear Data'), findsWidgets);
-    await _scrollSettingsTo(tester, find.text('Dark Mode'));
-    expect(find.text('Dark Mode'), findsOneWidget);
-    await _scrollSettingsTo(tester, find.text('Default'));
-    expect(find.text('Default'), findsOneWidget);
-    expect(find.text('Dark'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-clear-data-heading')),
+      findsOneWidget,
+    );
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('Single Entry'), findsOneWidget);
@@ -619,27 +623,34 @@ void main() {
     );
     final appSettings = MobileAppSettings();
     addTearDown(appSettings.dispose);
+    final controller = _testConnectionController();
 
     await tester.pumpWidget(
-      MyApp(
-        connectionController: _testConnectionController(),
-        appSettings: appSettings,
-      ),
+      MyApp(connectionController: controller, appSettings: appSettings),
     );
     await tester.pumpAndSettle();
     expect(
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
       ThemeMode.light,
     );
-    await appSettings.setThemeMode(ThemeMode.dark);
+    await tester.tap(find.byTooltip('Menu'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('dark-mode-switch')),
+    );
+    await tester.tap(find.byKey(const ValueKey('dark-mode-switch')));
+    await tester.pumpAndSettle();
+    expect(theme, 'dark');
     expect(
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
       ThemeMode.dark,
     );
   });
 
-  testWidgets('Settings scrolls its sections on a small scaled screen', (
+  testWidgets('Settings scrolls on small screens with enlarged text', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(320, 480);
@@ -668,17 +679,60 @@ void main() {
 
     await _scrollSettingsTo(
       tester,
+      find.byKey(const ValueKey('dark-mode-switch')),
+      160,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Dark Mode'), findsOneWidget);
+    expect(find.byType(Switch), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await _scrollSettingsTo(
+      tester,
       find.byKey(const ValueKey('clear-data-action')),
+      160,
     );
     await tester.pumpAndSettle();
     expect(find.text('Clear Data'), findsWidgets);
     expect(tester.takeException(), isNull);
+  });
 
-    await _scrollSettingsTo(tester, find.text('Dark Mode'), 160);
+  testWidgets('Settings sections fit a typical portrait screen in order', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(406, 904);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = _testConnectionController();
+    addTearDown(controller.dispose);
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(controller: controller, settings: settings),
+      ),
+    );
     await tester.pumpAndSettle();
-    expect(find.text('Default'), findsOneWidget);
-    await _scrollSettingsTo(tester, find.text('Dark'), 160);
-    await tester.pumpAndSettle();
+
+    final pairingY = tester
+        .getTopLeft(find.byKey(const ValueKey('settings-pairing-heading')))
+        .dy;
+    final themeY = tester
+        .getTopLeft(find.byKey(const ValueKey('dark-mode-switch')))
+        .dy;
+    final clearDataY = tester
+        .getTopLeft(find.byKey(const ValueKey('settings-clear-data-heading')))
+        .dy;
+    final clearButtonBottom = tester
+        .getBottomRight(find.byKey(const ValueKey('clear-data-action')))
+        .dy;
+
+    expect(pairingY, lessThan(themeY));
+    expect(themeY, lessThan(clearDataY));
+    expect(clearDataY, lessThan(clearButtonBottom));
+    expect(clearButtonBottom, lessThanOrEqualTo(904));
     expect(tester.takeException(), isNull);
   });
 

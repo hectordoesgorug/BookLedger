@@ -35,10 +35,11 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: ThemeSelectionSection(settings: settings)),
+          home: Scaffold(body: DarkModeSwitch(settings: settings)),
         ),
       );
-      await tester.tap(find.text('Dark'));
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
       expect(settings.themeMode, ThemeMode.dark);
       expect(savedTheme, 'dark');
@@ -48,6 +49,12 @@ void main() {
       await restartedSettings.initialize();
       expect(restartedSettings.themeMode, ThemeMode.dark);
       expect(restartedSettings.version, '1.0.0');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: DarkModeSwitch(settings: restartedSettings)),
+        ),
+      );
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
     },
   );
 
@@ -72,10 +79,10 @@ void main() {
     await settings.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: ThemeSelectionSection(settings: settings)),
+        home: Scaffold(body: DarkModeSwitch(settings: settings)),
       ),
     );
-    await tester.tap(find.text('Dark'));
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
 
     expect(settings.themeMode, ThemeMode.light);

@@ -23,9 +23,14 @@ class MobileSetupScreen extends StatelessWidget {
 }
 
 class PairingSettingsSection extends StatefulWidget {
-  const PairingSettingsSection({required this.controller, super.key});
+  const PairingSettingsSection({
+    required this.controller,
+    this.compact = false,
+    super.key,
+  });
 
   final MobileConnectionController controller;
+  final bool compact;
 
   @override
   State<PairingSettingsSection> createState() => _PairingSettingsSectionState();
@@ -138,83 +143,126 @@ class _PairingSettingsSectionState extends State<PairingSettingsSection> {
       builder: (context, _) {
         final controller = widget.controller;
         final pairing = controller.pairing;
+        final compact = widget.compact;
+        final buttonStyle = compact
+            ? FilledButton.styleFrom(
+                minimumSize: const Size(0, 48),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              )
+            : null;
+        final fieldPadding = compact
+            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+            : null;
+        final fieldGap = compact ? 6.0 : 10.0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _ConnectionStatusCard(controller: controller),
+            _ConnectionStatusCard(controller: controller, compact: compact),
             if (pairing != null) ...[
-              const SizedBox(height: 12),
+              SizedBox(height: compact ? 8 : 12),
               Text('Paired with ${pairing.deviceName}'),
-              const SizedBox(height: 8),
+              SizedBox(height: fieldGap),
               Text(
                 'Saved desktop addresses: ${pairing.endpoints.map((endpoint) => '${endpoint.address}:${endpoint.port}').join(', ')}',
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: fieldGap),
               FilledButton.tonal(
                 onPressed: controller.isBusy
                     ? null
                     : controller.manualReconnect,
+                style: buttonStyle,
                 child: const Text('Reconnect now'),
               ),
               OutlinedButton(
                 onPressed: controller.isBusy ? null : _unpair,
+                style: compact
+                    ? OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      )
+                    : null,
                 child: const Text('Unpair this phone'),
               ),
               OutlinedButton(
                 onPressed: controller.canForgetPairing ? _forgetPairing : null,
+                style: compact
+                    ? OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 48),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      )
+                    : null,
                 child: const Text('Forget Pairing'),
               ),
             ] else ...[
-              const SizedBox(height: 12),
+              SizedBox(height: compact ? 8 : 12),
               FilledButton.icon(
                 onPressed: controller.isBusy ? null : _scanQr,
+                style: buttonStyle,
                 icon: const Icon(Icons.qr_code_scanner),
                 label: const Text('Pair with desktop QR code'),
               ),
-              const SizedBox(height: 20),
+              SizedBox(height: compact ? 10 : 20),
               Text(
                 'Pair manually',
-                style: Theme.of(context).textTheme.titleMedium,
+                style: compact
+                    ? Theme.of(context).textTheme.titleSmall
+                    : Theme.of(context).textTheme.titleMedium,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: compact ? 4 : 8),
               TextField(
                 controller: _addressController,
                 keyboardType: TextInputType.text,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Desktop IPv4 address',
                   hintText: 'For example, 192.168.1.25',
                   border: OutlineInputBorder(),
+                  isDense: compact,
+                  contentPadding: fieldPadding,
                 ),
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: fieldGap),
               TextField(
                 controller: _portController,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Port',
                   border: OutlineInputBorder(),
+                  isDense: compact,
+                  contentPadding: fieldPadding,
                 ),
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: fieldGap),
               TextField(
                 controller: _credentialController,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => _pairManually(),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Temporary pairing code',
                   helperText: 'Shown in Mobile App Setup on the desktop',
                   border: OutlineInputBorder(),
+                  isDense: compact,
+                  contentPadding: fieldPadding,
                 ),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: compact ? 8 : 12),
               FilledButton(
                 onPressed: controller.isBusy ? null : _pairManually,
+                style: buttonStyle,
                 child: const Text('Pair manually'),
               ),
             ],
-            const SizedBox(height: 20),
+            SizedBox(height: compact ? 10 : 20),
             const Text(
               'HTTP traffic is not encrypted. Pair only on a trusted local network.',
             ),
@@ -226,9 +274,10 @@ class _PairingSettingsSectionState extends State<PairingSettingsSection> {
 }
 
 class _ConnectionStatusCard extends StatelessWidget {
-  const _ConnectionStatusCard({required this.controller});
+  const _ConnectionStatusCard({required this.controller, this.compact = false});
 
   final MobileConnectionController controller;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -273,7 +322,7 @@ class _ConnectionStatusCard extends StatelessWidget {
     };
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(compact ? 12 : 16),
         child: Row(
           children: [
             Icon(Icons.circle, size: 12, color: color),
