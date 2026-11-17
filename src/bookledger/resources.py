@@ -94,7 +94,7 @@ def store_shop_logo(source_path: str | Path, assets_dir: str | Path) -> Path:
 
 
 def remove_obsolete_shop_logo(data_dir: str | Path, reference, *, active_references=()) -> bool:
-    """Remove only an unreferenced, content-addressed custom logo we manage."""
+    """Remove only an unreferenced, content-addressed custom logo managed by BookLedger."""
     path = resolve_managed_logo(data_dir, reference)
     if path is None or not _MANAGED_LOGO.fullmatch(path.name) or path.is_symlink():
         return False

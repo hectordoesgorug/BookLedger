@@ -13,8 +13,8 @@ This checklist records v1.0.0 preparation and publication. Historical preparatio
 - [x] Windows ZIP integrity and package contents verified; no user database, private configuration, keystore, or signing properties are included.
 - [x] APK signature and certificate verified; APK identity and version checked.
 - [x] Windows smoke test passed from a fresh temporary extraction on the build machine. Clean-machine compatibility is not established by this check.
-- [x] Initial owner-reported final physical smoke session (2026-11-16) used the exact verified v1.0.0 release assets: 13 PASS, 2 SKIPPED, 0 FAIL. Windows and Android core workflows, pairing, transfer, cataloging, and duplicate handling were reported successful. Device-specific details and whether Android was a fresh install or upgrade were not supplied.
-- [x] In a subsequent owner-reported round on 2026-11-16, both previously skipped scenarios—Windows backup/persistence after restart and Android/desktop automatic reconnection after restart—were reported PASS. The latest cumulative result is 15 PASS, 0 FAIL, 0 SKIPPED; the original session's 13 PASS / 2 SKIPPED record remains historical. The follow-up clarification does not specify whether these reruns used the exact final release assets. See `TEST_REPORT.md` for details and limits.
+- [x] Initial maintainer-reported final physical smoke session (2026-11-16) used the exact verified v1.0.0 release assets: 13 PASS, 2 SKIPPED, 0 FAIL. Windows and Android core workflows, pairing, transfer, cataloging, and duplicate handling were reported successful. Device-specific details and whether Android was a fresh install or upgrade were not supplied.
+- [x] In a subsequent maintainer-reported round on 2026-11-16, both previously skipped scenarios—Windows backup/persistence after restart and Android/desktop automatic reconnection after restart—were reported PASS. The latest cumulative result is 15 PASS, 0 FAIL, 0 SKIPPED; the original session's 13 PASS / 2 SKIPPED record remains historical. The follow-up clarification does not specify whether these reruns used the exact final release assets. See `TEST_REPORT.md` for details and limits.
 - [x] Privacy notice, third-party notices, and companion distribution materials are present.
 - [x] Focused release-version and packaging tests, plus the full Python suite, passed.
 - [x] No local or remote `v1.0.0` tag or GitHub Release existed during initial preparation; publication is recorded below.
@@ -31,11 +31,11 @@ The same hashes are recorded in `dist/SHA256SUMS.txt`.
 
 ## Publication completed
 
-- [x] Owner reviewed and approved the release and authorized publication.
+- [x] Maintainer reviewed and approved the release and authorized publication.
 - [x] The annotated `v1.0.0` tag points to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`.
 - [x] Public stable GitHub Release published on November 16, 2026: [BookLedger v1.0.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0). It is not a draft or prerelease.
-- [x] Owner downloaded all three release assets and confirmed their SHA-256 values against `SHA256SUMS.txt`.
-- [x] Latest owner-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Earlier 13 PASS / 2 SKIPPED session and follow-up are preserved in `TEST_REPORT.md`.
-- [x] Owner selected GitHub Issues as the public contact route and accepted the existing disclosures without asserting jurisdiction-specific legal compliance. Legal compliance has not been established.
-- [x] The public GitHub About description matches the approved owner-provided wording (checked 2026-11-16).
+- [x] Maintainer downloaded all three release assets and confirmed their SHA-256 values against `SHA256SUMS.txt`.
+- [x] Latest maintainer-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Earlier 13 PASS / 2 SKIPPED session and follow-up are preserved in `TEST_REPORT.md`.
+- [x] Maintainer selected GitHub Issues as the public contact route and accepted the existing disclosures without asserting jurisdiction-specific legal compliance. Legal compliance has not been established.
+- [x] The public GitHub About description matches the approved maintainer-provided wording (checked 2026-11-16).
 - [x] Handover #42D closed. Post-release maintenance and future enhancement planning are active.

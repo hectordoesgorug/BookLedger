@@ -1,6 +1,6 @@
 # BookLedger v1.1.0 release checklist
 
-**Status:** Published v1.1.0; independent public-download verification completed. Owner acceptance and exceptions are recorded in TEST_REPORT.md (Handover #58). Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader owner passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
+**Status:** Published v1.1.0; independent public-download verification completed. Maintainer acceptance and exceptions are recorded in TEST_REPORT.md (Handover #58). Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader maintainer passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
 
 ## Source and identity
 
@@ -9,7 +9,7 @@
 - [x] Canonical desktop version is `1.1.0`; setuptools metadata and desktop footer use that source.
 - [x] Android declaration is `1.1.0+2`; application ID remains `com.bookledger.mobile`; About reads `BuildConfig.VERSION_NAME`.
 - [x] Changelog and draft GitHub release notes prepared and labeled unpublished.
-- [ ] Final source changes reviewed and authorized for commit by owner.
+- [ ] Final source changes reviewed and authorized for commit by maintainer.
 
 ## Automated verification
 
@@ -27,7 +27,7 @@
 - [x] Release signature integrity verified by Android SDK tools (v2).
 - [x] Certificate SHA-256 matches historical production APK.
 - [x] APK ID, version name/code, permissions, SDK levels, and non-debuggable flag inspected.
-- [x] Exact release APK notices and resolved release dependency graph inspected; eight existing Maven POM license gaps are documented for owner review.
+- [x] Exact release APK notices and resolved release dependency graph inspected; eight existing Maven POM license gaps are documented for maintainer review.
 - [x] Standalone APK byte size and SHA-256 recorded.
 
 ## Windows packages and distribution integrity
@@ -45,11 +45,11 @@
 - [x] Versioned final candidates and SHA-256 manifest verified from final bytes.
 - [x] Existing v1.0.0 archives, APK, checksum manifest, tag, and historical release documents verified unchanged.
 
-## Owner physical acceptance — see final owner record
+## Maintainer physical acceptance — see final maintainer record
 
-Owner-reported PASS covers the scenarios in TEST_REPORT.md, including production in-place upgrade. Post-upgrade settings/pairing persistence and separate fallback-device testing remain unverified. The remaining geometry test failure is an accepted non-blocking exception. The following granular preparation checklist is retained without inventing additional evidence.
+Maintainer-reported PASS covers the scenarios in TEST_REPORT.md, including production in-place upgrade. Post-upgrade settings/pairing persistence and separate fallback-device testing remain unverified. The remaining geometry test failure is an accepted non-blocking exception. The following granular preparation checklist is retained without inventing additional evidence.
 
-Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/FAIL/SKIPPED for every scenario. Use only disposable library data for acceptance. The report identifies exact artifact paths. Prior debug checks and owner reports do not complete these boxes.
+Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/FAIL/SKIPPED for every scenario. Use only disposable library data for acceptance. The report identifies exact artifact paths. Prior debug checks and maintainer reports do not complete these boxes.
 
 ### Windows — test both Portable and Fallback ZIPs
 
@@ -84,20 +84,20 @@ Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/
 ### Android in-place upgrade
 
 - [ ] Begin with production-signed v1.0.0 (`com.bookledger.mobile`, code 1, production certificate); record existing settings/pairing.
-- [ ] Install the exact production-signed rc1 APK (code 2) in place with owner authorization; do not uninstall or clear data.
+- [ ] Install the exact production-signed rc1 APK (code 2) in place with maintainer authorization; do not uninstall or clear data.
 - [ ] Verify settings and pairing preserved, version/About, scanning, capture, reconnection, and transfers.
 
-The November 17 audit left a debug-signed app installed. A debug installation is not a production upgrade baseline and may reject the production certificate. Do not resolve this by automatically uninstalling or clearing data; the owner must arrange an appropriate production baseline/device.
+The November 17 audit left a debug-signed app installed. A debug installation is not a production upgrade baseline and may reject the production certificate. Do not resolve this by automatically uninstalling or clearing data; the maintainer must arrange an appropriate production baseline/device.
 
-## Owner decision and publication — intentionally PENDING
+## Maintainer decision and publication — intentionally PENDING
 
 - [ ] Codigo review completed; unresolved automated failure and warnings dispositioned.
-- [ ] Owner physical acceptance completed on exact candidate artifacts.
-- [ ] Owner accepts session-only captures and known limitations; startup/upgrade/integration concerns resolved.
-- [ ] Owner reviews license/privacy material and intended distribution requirements; technical checks are not legal clearance.
-- [ ] Owner approves release and separately authorizes commit/push.
-- [ ] Owner separately approves Git tag creation/push from reviewed source.
-- [ ] Owner separately authorizes GitHub Release publication and public asset upload.
+- [ ] Maintainer physical acceptance completed on exact candidate artifacts.
+- [ ] Maintainer accepts session-only captures and known limitations; startup/upgrade/integration concerns resolved.
+- [ ] Maintainer reviews license/privacy material and intended distribution requirements; technical checks are not legal clearance.
+- [ ] Maintainer approves release and separately authorizes commit/push.
+- [ ] Maintainer separately approves Git tag creation/push from reviewed source.
+- [ ] Maintainer separately authorizes GitHub Release publication and public asset upload.
 - [ ] Post-publication assets downloaded and SHA-256 verified against approved final manifest.
 
 No commit, push, tag, publication, candidate installation, cleanup, or historical-asset replacement is authorized by completing this preparation checklist.
@@ -108,8 +108,8 @@ No commit, push, tag, publication, candidate installation, cleanup, or historica
 - [x] Both ZIP CRC checks and embedded APK identity verified.
 - [x] Production signature, application ID and version verified again.
 - [x] Final `SHA256SUMS.txt` generated: 317 bytes, SHA-256 `d3e0723ea133f36c9661e1109071e31d806731844b524d30e859ef551dfbd005`.
-- [x] Owner acceptance recorded with provenance and explicit persistence limits.
-- [x] Remaining automated geometry failure accepted by owner as non-blocking.
+- [x] Maintainer acceptance recorded with provenance and explicit persistence limits.
+- [x] Remaining automated geometry failure accepted by maintainer as non-blocking.
 - [x] Explicit commit/push authorization received.
 - [x] Annotated tag creation/push authorized and verified.
 - [x] Publication/upload authorized and completed.

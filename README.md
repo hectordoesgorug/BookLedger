@@ -6,7 +6,7 @@ BookLedger is an offline-first book inventory manager for Windows. Track bibliog
 
 **Platform:** Windows 11 x64 desktop; current source targets desktop 1.1.0 and Android companion 1.1.0+2.
 
-**Unpublished candidate:** v1.1.0-rc1 is being prepared for owner acceptance. See the [changelog](CHANGELOG.md), [draft release notes](docs/RELEASE_NOTES_v1.1.0.md), and [candidate checklist](docs/RELEASE_CHECKLIST_v1.1.0.md). The public stable release below remains v1.0.0.
+**Unpublished candidate:** v1.1.0-rc1 is being prepared for maintainer acceptance. See the [changelog](CHANGELOG.md), [draft release notes](docs/RELEASE_NOTES_v1.1.0.md), and [candidate checklist](docs/RELEASE_CHECKLIST_v1.1.0.md). The public stable release below remains v1.0.0.
 
 **Release:** [BookLedger v1.0.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0) was published on November 16, 2026. The Windows ZIP, Android APK, and `SHA256SUMS.txt` are available on the release page.
 
