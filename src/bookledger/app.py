@@ -47,7 +47,7 @@ from bookledger.services.posters import PosterService
 from bookledger.ui.poster_designer import PosterDesigner, create_poster_for_copy
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
 from bookledger.ui.mobile_app_setup import MobileAppSetupPanel
-from bookledger.ui.catalog_text import truncate_to_two_lines
+from bookledger.ui.catalog_text import catalog_display_title, combined_title, truncate_to_two_lines
 from bookledger.services.mobile_connection import MobileConnectionService
 from bookledger.services.mobile_incoming import MobileIncomingStore
 from bookledger.services.mobile_activity import MobileActivityStore
@@ -901,7 +901,7 @@ class BookLedgerApp(_WindowBase):
             self._visible_rows = rows
             self.tree.delete(*self.tree.get_children())
             for row in rows:
-                values = (row["copy_code"], row["copy_number"], row["title"], row["author"], row["genre"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
+                values = (row["copy_code"], row["copy_number"], combined_title(row["title"], row.get("subtitle")), row["author"], row["genre"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
                 status_tags = getattr(self, "_inventory_status_tags", {})
                 self.tree.insert("", "end", iid=str(row["copy_id"]), values=values, tags=(status_tags.get(row["status"], ""),))
         else:
@@ -1016,7 +1016,9 @@ class BookLedgerApp(_WindowBase):
             elif decoration == "lock":
                 self._add_not_for_sale_lock(art)
             title = truncate_to_two_lines(
-                row["title"], CATALOG_CARD_WIDTH - 40, self._catalog_title_font.measure
+                catalog_display_title(row["title"], row.get("subtitle")),
+                CATALOG_CARD_WIDTH - 40,
+                self._catalog_title_font.measure,
             )
             self._catalog_text_block(
                 card,
@@ -1116,7 +1118,7 @@ class BookLedgerApp(_WindowBase):
         value_key = {"code": "copy_code", "copy_number": "copy_number", "title": "title", "author": "author", "genre": "genre", "format": "format", "condition": "condition", "location": "location", "price": "display_price_minor", "status": "status"}[column]
         self._visible_rows = self._sold_last_sort(self._visible_rows, lambda row: row[value_key] or "", self._inventory_sort_reverse)
         for index, row in enumerate(self._visible_rows):
-            values = (row["copy_code"], row["copy_number"], row["title"], row["author"], row["genre"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
+            values = (row["copy_code"], row["copy_number"], combined_title(row["title"], row.get("subtitle")), row["author"], row["genre"], row["format"], row["condition"], row["location"], self.money(row["display_price_minor"]), row["status"])
             self.tree.item(str(row["copy_id"]), values=values)
             self.tree.move(str(row["copy_id"]), "", index)
 
@@ -2754,8 +2756,13 @@ class BookLedgerApp(_WindowBase):
         frame = ttk.Frame(dialog, padding=20)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="View Details", font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 12))
-        fields = (
-            ("Title", row.get("title")), ("Author", row.get("author")), ("ISBN", row.get("isbn")),
+        fields = [
+            ("Title", row.get("title")),
+        ]
+        if row.get("subtitle"):
+            fields.append(("Subtitle", row["subtitle"]))
+        fields.extend((
+            ("Author", row.get("author")), ("ISBN", row.get("isbn")),
             ("Genre", row.get("genre")), ("Publisher", row.get("publisher")),
             ("Publication Year", row.get("publication_year")), ("Edition", row.get("edition")),
             ("Page Count", row.get("page_count")), ("Book Details", row.get("book_details")),
@@ -2766,7 +2773,7 @@ class BookLedgerApp(_WindowBase):
             ("Status", row.get("status")),
             ("Price", self.money(row["display_price_minor"])),
             ("Metadata", row.get("metadata_source")),
-        )
+        ))
         text_frame = ttk.Frame(frame)
         text_frame.pack(fill="both", expand=True)
         text = tk.Text(text_frame, wrap="word", height=24, relief="flat", background=dialog.cget("background"))

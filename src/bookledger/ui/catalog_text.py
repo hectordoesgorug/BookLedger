@@ -3,6 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable
 
 
+def combined_title(title: str, subtitle: str | None = None) -> str:
+    title = str(title or "").strip()
+    subtitle = str(subtitle or "").strip()
+    return f"{title}: {subtitle}" if subtitle else title
+
+
+def catalog_display_title(title: str, subtitle: str | None = None) -> str:
+    main_title = str(title or "").strip()
+    combined = combined_title(main_title, subtitle)
+    return combined if combined != main_title and len(combined) < 60 else main_title
+
+
 def truncate_to_two_lines(text: str, width: int, measure: Callable[[str], int]) -> str:
     """Wrap display text to two measured lines and mark any omitted text."""
     if width <= 0 or not text.strip():

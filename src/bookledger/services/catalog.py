@@ -505,9 +505,9 @@ class CatalogService:
             if book_id is None:
                 try:
                     cur = conn.execute(
-                        """INSERT INTO book_records(title,author,isbn,genre,book_details,publisher,publication_year,edition,page_count,srp_minor,metadata_source,metadata_status)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (payload["title"].strip(), payload["author"].strip(), isbn, payload["genre"],
+                        """INSERT INTO book_records(title,subtitle,author,isbn,genre,book_details,publisher,publication_year,edition,page_count,srp_minor,metadata_source,metadata_status)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (payload["title"].strip(), (payload.get("subtitle") or "").strip() or None, payload["author"].strip(), isbn, payload["genre"],
                          (payload.get("book_details") or "").strip() or None,
                          (payload.get("publisher") or "").strip() or None,
                          int(payload["publication_year"]) if str(payload.get("publication_year") or "").isdigit() else None,
@@ -553,7 +553,7 @@ class CatalogService:
     ) -> list[dict]:
         sql = """SELECT c.id AS copy_id,c.copy_uuid,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,
                         c.price_minor AS display_price_minor,c.status,
-                        b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
+                        b.id AS book_id,b.title,b.subtitle,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
                         s.sale_date,b.metadata_source,b.metadata_status
                  FROM copies c JOIN book_records b ON b.id=c.book_id
                  LEFT JOIN sales s ON s.id=(SELECT MAX(s2.id) FROM sales s2 WHERE s2.copy_id=c.id)
@@ -562,8 +562,8 @@ class CatalogService:
         args: list = []
         if search.strip():
             q = f"%{search.strip()}%"
-            sql += " AND (b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR c.copy_code LIKE ? OR c.format LIKE ? OR c.location LIKE ?)"
-            args.extend([q, q, q, q, q, q])
+            sql += " AND (b.title LIKE ? OR b.subtitle LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR c.copy_code LIKE ? OR c.format LIKE ? OR c.location LIKE ?)"
+            args.extend([q, q, q, q, q, q, q])
         if status != "All":
             sql += " AND c.status=?"
             args.append(status)
@@ -601,7 +601,7 @@ class CatalogService:
             row = conn.execute(
                 """SELECT c.id AS copy_id,c.copy_uuid,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,
                           c.price_minor,c.price_minor AS display_price_minor,c.status,
-                          b.id AS book_id,b.title,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,
+                          b.id AS book_id,b.title,b.subtitle,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,
                           b.page_count,b.book_details,b.srp_minor,b.metadata_source,b.metadata_status,
                           (SELECT s.sale_date FROM sales s WHERE s.copy_id=c.id ORDER BY s.id DESC LIMIT 1) AS sale_date
                    FROM copies c JOIN book_records b ON b.id=c.book_id WHERE c.id=?""",
@@ -639,8 +639,8 @@ class CatalogService:
             book_id = row["book_id"]
             try:
                 conn.execute(
-                    """UPDATE book_records SET title=?,author=?,isbn=?,genre=?,book_details=?,publisher=?,publication_year=?,edition=?,page_count=?,srp_minor=?,metadata_source=?,metadata_status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                    (payload["title"].strip(),payload["author"].strip(),isbn,payload["genre"],(payload.get("book_details") or "").strip() or None,
+                    """UPDATE book_records SET title=?,subtitle=?,author=?,isbn=?,genre=?,book_details=?,publisher=?,publication_year=?,edition=?,page_count=?,srp_minor=?,metadata_source=?,metadata_status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                    (payload["title"].strip(),(payload.get("subtitle") or "").strip() or None,payload["author"].strip(),isbn,payload["genre"],(payload.get("book_details") or "").strip() or None,
                      (payload.get("publisher") or "").strip() or None,int(payload["publication_year"]) if str(payload.get("publication_year") or "").isdigit() else None,
                      (payload.get("edition") or "").strip() or None,int(payload["page_count"]) if str(payload.get("page_count") or "").isdigit() else None,
                      srp_minor,payload.get("metadata_source"),payload.get("metadata_status","Manual entry"),book_id),

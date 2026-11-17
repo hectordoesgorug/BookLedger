@@ -48,6 +48,14 @@ def test_poster_title_requires_short_copy_above_50_without_changing_input():
     assert len(original) > 50
 
 
+def test_poster_title_uses_main_title_even_when_subtitle_is_present():
+    assert PosterService._field_value(
+        {"title": "Main title", "subtitle": "Separate subtitle", "price_minor": 10000},
+        "Title",
+        None,
+    ) == "Main title"
+
+
 def test_poster_price_uses_peso_suffix_once_and_rejects_missing_price():
     assert poster_price(12345) == "₱123.45"
     assert poster_price(12345).count("₱") == 1
@@ -61,6 +69,7 @@ def test_schema_v7_migrates_to_poster_templates_without_touching_copy_records(tm
     db = Database(paths.database)
     with db.connect() as conn:
         conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(9,'Keep','Author','Science')")
+        conn.execute("ALTER TABLE book_records DROP COLUMN subtitle")
         conn.execute("PRAGMA user_version=7")
         conn.execute("DROP TABLE poster_templates")
         conn.execute("DROP TABLE mobile_incoming_captures")
@@ -68,7 +77,7 @@ def test_schema_v7_migrates_to_poster_templates_without_touching_copy_records(tm
 
     migrated = Database(paths.database)
     with migrated.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
         assert conn.execute("SELECT title FROM book_records WHERE id=9").fetchone()[0] == "Keep"
         assert conn.execute("SELECT COUNT(*) FROM poster_templates").fetchone()[0] == 0
 

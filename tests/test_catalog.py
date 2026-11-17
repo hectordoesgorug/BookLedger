@@ -86,6 +86,29 @@ def test_create_copy_assigns_copy_id_and_default_location(setup):
     assert row["display_price_minor"] == 50000
 
 
+def test_subtitle_is_optional_searchable_editable_and_clearable(setup):
+    _, _, _, service, payload, _ = setup
+    without_subtitle = service.create_copy({**payload, "isbn": None})
+    with_subtitle = service.create_copy({
+        **payload,
+        "title": "Experimental Psychology",
+        "subtitle": "Methodology, Psychophysics, and Learning",
+        "isbn": "9780140449136",
+    })
+
+    assert service.get_copy(without_subtitle)["subtitle"] is None
+    row = service.list_copies(search="Psychophysics")
+    assert [item["copy_id"] for item in row] == [with_subtitle]
+    assert row[0]["title"] == "Experimental Psychology"
+    assert row[0]["subtitle"] == "Methodology, Psychophysics, and Learning"
+    assert service.get_copy_details(with_subtitle)["subtitle"] == row[0]["subtitle"]
+
+    service.update_copy(with_subtitle, {**payload, "title": "Experimental Psychology", "subtitle": "  Updated subtitle  "})
+    assert service.get_copy(with_subtitle)["subtitle"] == "Updated subtitle"
+    service.update_copy(with_subtitle, {**payload, "title": "Experimental Psychology", "subtitle": " "})
+    assert service.get_copy(with_subtitle)["subtitle"] is None
+
+
 def test_missing_optional_metadata_is_stored_as_null(setup):
     _, _, db, service, payload, _ = setup
     copy_id = service.create_copy({**payload, "book_details": "", "publisher": "", "publication_year": "", "edition": "", "page_count": "", "srp": ""})
@@ -486,7 +509,7 @@ def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(
     assert CatalogService(db).list_genres() == genres
     assert CatalogService(db).list_formats() == formats
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
 
 
 def test_genre_and_format_rename_migrate_assignments_atomically_and_allow_unassigned_delete(setup):
@@ -562,7 +585,7 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 12
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
         assert migrated.execute("SELECT voided_at FROM sales WHERE id=1").fetchone()[0]
     service.change_status(1, "Sold")
@@ -580,12 +603,13 @@ def test_v10_migration_normalizes_legacy_conditions_without_changing_copy_ids(tm
         conn.execute("INSERT INTO copies(id,copy_uuid,copy_code,book_id,copy_number,format,condition,photo_path,price_minor) VALUES(1,'legacy-1','BL-000001',1,1,'Paperback','Like New','photos/1.jpg',1000)")
         conn.execute("INSERT INTO copies(id,copy_uuid,copy_code,book_id,copy_number,format,condition,photo_path,price_minor) VALUES(2,'legacy-2','BL-000002',2,1,'Paperback','Acceptable','photos/2.jpg',1000)")
         conn.execute("INSERT INTO trash_entries(copy_id,original_status) VALUES(2,'Available')")
+        conn.execute("ALTER TABLE book_records DROP COLUMN subtitle")
         conn.execute("PRAGMA user_version=10")
 
     Database(path)
 
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
         assert [tuple(row) for row in conn.execute("SELECT id,condition FROM copies ORDER BY id")] == [
             (1, "Good as New"), (2, "Fair")
         ]
@@ -593,15 +617,36 @@ def test_v10_migration_normalizes_legacy_conditions_without_changing_copy_ids(tm
         assert conn.execute("SELECT COUNT(*) FROM mobile_activity_events").fetchone()[0] == 0
 
 
+def test_v11_migration_adds_empty_subtitle_without_changing_existing_records(setup):
+    _, _, db, service, payload, _ = setup
+    copy_id = service.create_copy({**payload, "title": "Legacy: Existing subtitle-like text", "isbn": None})
+    service.change_status(copy_id, "Sold")
+    before = service.get_copy_details(copy_id)
+
+    with db.connect() as conn:
+        conn.execute("ALTER TABLE book_records DROP COLUMN subtitle")
+        conn.execute("PRAGMA user_version=11")
+
+    migrated = Database(db.path)
+    after = CatalogService(migrated).get_copy_details(copy_id)
+
+    assert after["title"] == before["title"]
+    assert after["subtitle"] is None
+    for field in ("copy_id", "copy_uuid", "copy_code", "photo_path", "price_minor", "status", "sale_history"):
+        assert after[field] == before[field]
+    with migrated.connect() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+
+
 def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_path):
     path = tmp_path / "v4.sqlite3"
-    legacy_schema = SCHEMA.replace("    voided_at TEXT,\n", "").replace(
+    legacy_schema = SCHEMA.replace("    subtitle TEXT,\n", "").replace("    voided_at TEXT,\n", "").replace(
         "    void_reason TEXT CHECK(void_reason IS NULL OR void_reason IN (\n        'Marked Sold by Mistake','Cancelled Order','Returned Order','Test'\n    )),\n", ""
     ).replace(
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy\n    ON sales(copy_id) WHERE voided_at IS NULL;\n", ""
     ).replace("    copy_uuid TEXT NOT NULL UNIQUE,\n", "").replace(
         "CREATE TRIGGER IF NOT EXISTS copies_copy_uuid_immutable\n    BEFORE UPDATE OF copy_uuid ON copies\n    WHEN OLD.copy_uuid IS NOT NULL AND NEW.copy_uuid IS NOT OLD.copy_uuid\n    BEGIN SELECT RAISE(ABORT, 'copy UUID is immutable'); END;\n", ""
-    ).replace("PRAGMA user_version = 11;", "PRAGMA user_version = 4;")
+    ).replace("PRAGMA user_version = 12;", "PRAGMA user_version = 4;")
     conn = sqlite3.connect(path)
     conn.executescript(legacy_schema)
     conn.execute("DROP TABLE mobile_incoming_captures")
@@ -619,7 +664,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
     db = Database(path)
     with db.connect() as migrated:
         rows = migrated.execute("SELECT id,copy_id,price_minor,sale_date,voided_at FROM sales ORDER BY id").fetchall()
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 12
         assert [(row["id"], row["price_minor"], row["sale_date"]) for row in rows] == [
             (10, 15000, "2026-01-01"), (11, 20000, "2026-02-02"), (12, 25000, "2026-03-03")
         ]

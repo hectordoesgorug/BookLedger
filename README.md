@@ -10,7 +10,7 @@ BookLedger is an offline-first book inventory manager for Windows. Track bibliog
 
 ## Desktop features
 
-- Catalog books and separately track each copy, including photo, condition, location, price, and status.
+- Catalog books with optional subtitles and separately track each copy, including photo, condition, location, price, and status.
 - Search, filter, and sort the catalog and inventory.
 - Look up ISBN metadata from configurable online providers; manual entry remains available.
 - Track sales and reversals, review Sale History, and view inventory and sales reports.

@@ -351,7 +351,7 @@ def test_inventory_rows_include_physical_copy_number():
             self.rows.append((iid, values, tags))
 
     records = [
-        {"copy_id": 41, "copy_code": "BL-000041", "copy_number": 1, "title": "Shared Title", "author": "Author", "genre": "Science", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
+        {"copy_id": 41, "copy_code": "BL-000041", "copy_number": 1, "title": "Shared Title", "subtitle": "Inventory subtitle", "author": "Author", "genre": "Science", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
         {"copy_id": 42, "copy_code": "BL-000042", "copy_number": 2, "title": "Shared Title", "author": "Author", "genre": "History", "format": "Paperback", "condition": "Good", "location": "Shelf", "display_price_minor": 10000, "status": "Available"},
     ]
     subject = SimpleNamespace(
@@ -368,16 +368,89 @@ def test_inventory_rows_include_physical_copy_number():
     BookLedgerApp._populate_catalog(subject)
 
     assert [entry[1][1] for entry in subject.tree.rows] == [1, 2]
+    assert [entry[1][2] for entry in subject.tree.rows] == [
+        "Shared Title: Inventory subtitle", "Shared Title"
+    ]
     assert [entry[1][4] for entry in subject.tree.rows] == ["Science", "History"]
     assert all(entry[2] == ("inventory_status_available",) for entry in subject.tree.rows)
 
 
+@pytest.mark.parametrize("subtitle", ["A separate subtitle", None])
+def test_copy_details_show_title_and_populated_subtitle_as_separate_fields(monkeypatch, subtitle):
+    text_widgets = []
+
+    class Widget:
+        def __init__(self, *_args, **_kwargs):
+            self.contents = ""
+
+        def pack(self, **_kwargs):
+            return self
+
+        def title(self, _value):
+            pass
+
+        def transient(self, _parent):
+            pass
+
+        def geometry(self, _value):
+            pass
+
+        def cget(self, _key):
+            return "white"
+
+        def configure(self, **_options):
+            pass
+
+        def insert(self, _where, value):
+            self.contents += value
+
+        def yview(self, *_args):
+            pass
+
+        def set(self, *_args):
+            pass
+
+        def destroy(self):
+            pass
+
+    class TextWidget(Widget):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            text_widgets.append(self)
+
+    monkeypatch.setattr(app_module.tk, "Toplevel", Widget)
+    monkeypatch.setattr(app_module.tk, "Text", TextWidget)
+    monkeypatch.setattr(app_module.ttk, "Frame", Widget)
+    monkeypatch.setattr(app_module.ttk, "Label", Widget)
+    monkeypatch.setattr(app_module.ttk, "Scrollbar", Widget)
+    monkeypatch.setattr(app_module.ttk, "Button", Widget)
+    row = {
+        "copy_code": "BL-000007", "title": "Main title", "subtitle": subtitle,
+        "copy_id": 7, "copy_number": 1, "display_price_minor": 100,
+    }
+    subject = SimpleNamespace(
+        catalog=SimpleNamespace(get_copy_details=lambda _copy_id: row),
+        money=lambda value: str(value),
+        _physical_copy_label=lambda _row: "Copy 1",
+        _sale_history_text=lambda _history: "",
+    )
+
+    BookLedgerApp.open_copy_details(subject, 7)
+
+    rendered = text_widgets[0].contents
+    assert "Title: Main title\n\n" in rendered
+    if subtitle:
+        assert f"Subtitle: {subtitle}\n\n" in rendered
+    else:
+        assert "Subtitle:" not in rendered
+
+
 def test_catalog_sort_rows_cover_fields_directions_and_deterministic_ties():
     rows = [
-        {"copy_id": 10, "title": "beta", "display_price_minor": 1200},
-        {"copy_id": 2, "title": "Alpha", "display_price_minor": 500},
-        {"copy_id": 3, "title": "alpha", "display_price_minor": 500},
-        {"copy_id": 1, "title": "Gamma", "display_price_minor": 2500},
+        {"copy_id": 10, "title": "beta", "subtitle": "A subtitle", "display_price_minor": 1200},
+        {"copy_id": 2, "title": "Alpha", "subtitle": "Z subtitle", "display_price_minor": 500},
+        {"copy_id": 3, "title": "alpha", "subtitle": "Y subtitle", "display_price_minor": 500},
+        {"copy_id": 1, "title": "Gamma", "subtitle": "A subtitle", "display_price_minor": 2500},
     ]
 
     assert [row["copy_id"] for row in BookLedgerApp._catalog_sort_rows(rows, "Title")] == [2, 3, 10, 1]

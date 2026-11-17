@@ -233,6 +233,7 @@ def test_catalog_save_is_recognized_after_restart_without_duplicate_copy(incomin
     restarted.recover()
 
     assert catalog.get_copy(copy_id)["copy_uuid"] == capture_id
+    assert catalog.get_copy(copy_id)["subtitle"] is None
     assert restarted.pending_captures(batch_id) == []
     assert restarted.finish_batch_if_empty(batch_id) is True
     assert restarted.ready_batches() == []

@@ -49,6 +49,43 @@ def form(tmp_path, tk_root):
         pass
 
 
+def test_metadata_keeps_provider_full_title_and_never_splits_or_overwrites_subtitle():
+    class Value:
+        def __init__(self, value=""):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    values = {key: "" for key in (
+        "title", "subtitle", "author", "genre", "book_details", "publisher",
+        "publication_year", "edition", "page_count", "format", "srp",
+    )}
+    subject = SimpleNamespace(
+        metadata_source=None,
+        metadata_status=Value(),
+        _widgets={key: object() for key in values},
+        _get=lambda key: values.get(key, ""),
+        _set=lambda key, value: values.__setitem__(key, value or ""),
+    )
+
+    BookForm._apply_metadata(subject, MetadataResult(
+        "Retrieved", {"title": "Provider Full Title: Provider Subtitle"}, "Open Library"
+    ))
+    assert values["title"] == "Provider Full Title: Provider Subtitle"
+    assert values["subtitle"] == ""
+
+    values.update(title="Manual title", subtitle="Manual subtitle")
+    BookForm._apply_metadata(subject, MetadataResult(
+        "Retrieved", {"title": "Replacement provider title"}, "Open Library"
+    ))
+    assert values["title"] == "Manual title"
+    assert values["subtitle"] == "Manual subtitle"
+
+
 def test_add_form_layout_defaults_and_title_case_labels(form):
     widget, _root, _photo = form
 
@@ -85,6 +122,8 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert not hasattr(widget, "_simulate_scan")
     assert not hasattr(widget, "mobile_panel")
     title_row = int(widget._widgets["title"].grid_info()["row"])
+    assert int(widget._widgets["subtitle"].grid_info()["row"]) == title_row + 2
+    assert widget._get("subtitle") == ""
     assert int(widget._field_labels["title"].grid_info()["row"]) == title_row
     title_error = widget._errors["title"].grid_info()
     assert int(title_error["row"]) == title_row + 1
@@ -160,6 +199,7 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     root.geometry("400x300+0+0")
     widget.geometry("960x700")
     root.update()
+    widget.update()
     canvas = widget.body.master
     canvas.update_idletasks()
     body_height = widget.body.winfo_reqheight()

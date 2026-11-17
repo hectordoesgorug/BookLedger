@@ -146,6 +146,7 @@ class BookForm(tk.Toplevel):
         ttk.Label(body, text="Bibliographic Details", font=("Segoe UI", 12, "bold")).grid(row=row, column=0, columnspan=4, sticky="w", pady=(0, 8))
         row += 1
         row = self._field(body, "Title", "title", row, required=True, full_width=True)
+        row = self._field(body, "Subtitle (Optional)", "subtitle", row, full_width=True)
         row = self._field(body, "Author", "author", row, required=True, full_width=True)
         row = self._field(body, "ISBN (Optional)", "isbn", row, full_width=True)
         self.isbn_controls = ttk.Frame(body)
@@ -382,7 +383,7 @@ class BookForm(tk.Toplevel):
             self._set(key, None)
 
     def _populate(self, row):
-        for key in ("title", "author", "isbn", "genre", "publisher", "publication_year", "edition", "page_count", "book_details", "format", "condition", "location"):
+        for key in ("title", "subtitle", "author", "isbn", "genre", "publisher", "publication_year", "edition", "page_count", "book_details", "format", "condition", "location"):
             if key in self._widgets:
                 self._set(key, row.get(key))
         price_minor = row.get("price_minor")

@@ -4,6 +4,20 @@ Record started: 2026-10-19; latest dated entry: 2026-11-17.
 
 This is a record of specific test runs, investigations, and owner-reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; the separate owner-reported final-asset session on 2026-11-16 is recorded below.
 
+## Optional bibliographic Subtitle support (2026-11-17)
+
+Schema v12 adds nullable `book_records.subtitle`; the sequential v11 migration does not rewrite existing titles or copy/sales rows. Add/Edit accepts and clears Subtitle independently. Catalog search includes Subtitle, Catalog displays `Title: Subtitle` only below 60 characters and otherwise displays main Title, Inventory always combines them, and Book Details separates them. ISBN providers retain their existing full-title/empty-field behavior, posters continue to use main Title, and Android code is unchanged. No-ISBN duplicate detection remains exact main Title plus Author, so legacy rows with subtitle text embedded in Title may not automatically match a newly separated pair.
+
+Migration, persistence, title formatting/threshold, search, Inventory and Details display, provider handling, poster binding, mobile-originated intake, and backup/restore tests were added or updated. Disposable databases and backup archives were used; no actual library records were modified.
+
+- `.venv\Scripts\python.exe -m pytest tests\test_catalog.py tests\test_catalog_card_text.py tests\test_app_callbacks.py tests\test_intake_ui.py tests\test_posters.py tests\test_uuid_backup_restore.py tests\test_mobile_incoming.py -q -rs --basetemp=.pytest-tmp-issue15-focused-recheck` — **208 passed, 2 skipped**. Skips were Tcl/Tk-dependent geometry tests.
+- `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-issue15-final-suite` — **516 passed, 18 skipped, 1 failed**. The single failure was `test_connection_confirmation_expires_recovers_and_is_cleared_by_unpair`, which observed `connected == False` after its authenticated request; the same test passed when rerun alone (**1 passed**). A second full-suite run reproduced that one timing-sensitive failure. The Issue #15 focused tests passed.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed. `git diff --check` — passed; Git emitted only configured LF-to-CRLF notices.
+
+Tk tests that skipped could not load local Tcl/Tk files. The failed mobile-connection test does not exercise changed Issue #15 modules; it remains an unresolved full-suite warning rather than being represented as a pass.
+
+The first combined focused run also exposed two form-window size assertions that depended on Tk applying a resize before measurement. They passed when rerun alone; the form test now processes the requested geometry update before asserting, and the final focused run passed.
+
 ## Catalog performance investigation (2026-11-17)
 
 Synthetic libraries were created in disposable temporary directories at 20, 100, 500, and 1,000 copies. They used varied titles, authors, genres, statuses, prices, locations, and optional metadata, plus a representative 1,200 × 1,800 JPEG cover. Database query timings are medians of five calls; sort timings are medians of seven calls through 500 rows and one call at 1,000 rows; image timings include opening, RGB conversion, thumbnail resizing, and Sold tinting. The same generated JPEG was reused per row to make the repeated image-processing cost comparable. The image benchmark used three-run medians through 500 rows and one run at 1,000 rows because of runtime. The OS file cache was warm during the repeated image runs; cold disk startup was not isolated, and the application has no thumbnail cache.

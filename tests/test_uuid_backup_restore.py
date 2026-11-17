@@ -90,7 +90,7 @@ def test_restore_replaces_snapshot_state_and_preserves_recovery_point(setup):
     root, data, db, catalog, payload, _ = setup
     config = root / "config.json"
     config.write_text('{"preferences":{"locations":["Snapshot Shelf"]}}', encoding="utf-8")
-    copy_id = catalog.create_copy(payload)
+    copy_id = catalog.create_copy({**payload, "subtitle": "Snapshot subtitle"})
     catalog.change_status(copy_id, "Sold")
     catalog.change_status(copy_id, "Available", void_reason="Returned Order")
     backups = BackupService(db, data, root / "backups", config)
@@ -103,6 +103,7 @@ def test_restore_replaces_snapshot_state_and_preserves_recovery_point(setup):
 
     rows = catalog.list_copies()
     assert [row["title"] for row in rows] == ["Test Book"]
+    assert rows[0]["subtitle"] == "Snapshot subtitle"
     assert rows[0]["copy_uuid"] == original_uuid
     history = catalog.get_copy_details(copy_id)["sale_history"]
     assert len(history) == 1
@@ -111,6 +112,54 @@ def test_restore_replaces_snapshot_state_and_preserves_recovery_point(setup):
     assert json.loads(config.read_text(encoding="utf-8"))["preferences"]["locations"] == ["Snapshot Shelf"]
     assert recovery.is_file()
     assert backups.verify_archive(recovery)[0]
+
+
+def test_restore_migrates_v11_backup_and_preserves_legacy_titles(setup):
+    root, data, db, catalog, payload, _ = setup
+    copy_id = catalog.create_copy({
+        **payload, "title": "Legacy: subtitle-like title", "subtitle": "New subtitle"
+    })
+    catalog.change_status(copy_id, "Sold")
+    before = catalog.get_copy_details(copy_id)
+    backups = BackupService(db, data, root / "backups")
+    current_archive = backups.create_backup()
+
+    with zipfile.ZipFile(current_archive) as source:
+        members = {
+            name: source.read(name)
+            for name in source.namelist()
+            if name != BackupService.MANIFEST
+        }
+        manifest = json.loads(source.read(BackupService.MANIFEST))
+    legacy_db = root / "v11.sqlite3"
+    legacy_db.write_bytes(members[BackupService.DB_MEMBER])
+    conn = sqlite3.connect(legacy_db)
+    try:
+        conn.execute("ALTER TABLE book_records DROP COLUMN subtitle")
+        conn.execute("PRAGMA user_version=11")
+        conn.commit()
+    finally:
+        conn.close()
+    database_bytes = legacy_db.read_bytes()
+    members[BackupService.DB_MEMBER] = database_bytes
+    manifest["files"][BackupService.DB_MEMBER] = {
+        "size": len(database_bytes),
+        "sha256": hashlib.sha256(database_bytes).hexdigest(),
+    }
+    legacy_archive = root / "v11-backup.zip"
+    with zipfile.ZipFile(legacy_archive, "w", compression=zipfile.ZIP_DEFLATED) as target:
+        for name, content in members.items():
+            target.writestr(name, content)
+        target.writestr(BackupService.MANIFEST, json.dumps(manifest).encode("utf-8"))
+
+    valid, reason = backups.verify_archive(legacy_archive)
+    assert valid, reason
+    backups.restore_backup(legacy_archive)
+    restored = catalog.get_copy_details(copy_id)
+    assert restored["title"] == before["title"]
+    assert restored["subtitle"] is None
+    for field in ("copy_id", "copy_uuid", "copy_code", "photo_path", "price_minor", "status", "sale_history"):
+        assert restored[field] == before[field]
 
 
 def test_corrupt_and_unsafe_archives_are_rejected_before_restore(setup):
@@ -222,6 +271,7 @@ def test_restore_migrates_legacy_condition_values_from_an_older_backup(setup):
     staged_db = root / "legacy.sqlite3"
     staged_db.write_bytes(members[BackupService.DB_MEMBER])
     connection = sqlite3.connect(staged_db)
+    connection.execute("ALTER TABLE book_records DROP COLUMN subtitle")
     connection.execute("UPDATE copies SET condition='Like New' WHERE id=?", (first,))
     connection.execute("UPDATE copies SET condition='Acceptable' WHERE id=?", (second,))
     connection.execute("PRAGMA user_version=10")
