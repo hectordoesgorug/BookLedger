@@ -10,6 +10,8 @@ Mobile App Setup pairs to the desktop over the local network using QR or manual 
 
 The combined Windows portable ZIP includes the production-signed app at `mobile/BookLedger-Android.apk`. The separately published v1.0.0 APK is named `BookLedger-v1.0.0-Android.apk`. Copy either APK to an Android device and open it from Files or another package installer. Android may ask you to allow installs from that source; follow its prompt. On Android 8.0 and later, this permission is controlled per source. See [Android's sideloading guidance](https://developer.android.com/distribute/marketing-tools/alternative-distribution). The app ID is `com.bookledger.mobile`; the current version is `1.0.0` (version code `1`). This is a companion app that uses BookLedger Desktop to manage the transferred inventory, not a standalone inventory manager. It is distributed by sideloading and is not available through Google Play.
 
+BookLedger Mobile stays in portrait and keeps the display awake while it is in the foreground. The device's power button can still lock the screen manually. Android's normal display timeout applies while the app is in the background; returning to BookLedger restores the foreground behavior.
+
 ## Permissions and privacy
 
 The app requests Camera access at runtime for ISBN scanning and cover photography. Internet and network-state access support local desktop pairing and reconnection. AndroidX also declares a package-scoped, signature-protected dynamic-receiver permission. The app does not request microphone or broad shared-storage permissions. CameraX writes captured photos to app-private temporary storage; Android's share sheet handles any user-initiated photo sharing.

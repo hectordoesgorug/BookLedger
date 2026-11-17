@@ -247,36 +247,40 @@ class HomeScreen extends StatelessWidget {
                       icon: const Icon(Icons.devices),
                       label: const Text('Pair / Connect'),
                     ),
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: () => unawaited(_openGithub(context)),
-                      icon: Image.asset(
-                        'assets/github-mark.png',
-                        width: 22,
-                        height: 22,
-                        semanticLabel: 'GitHub logo',
-                      ),
-                      label: const Text('Visit GitHub'),
-                    ),
-                    if (appSettings != null) ...[
-                      const SizedBox(height: 8),
-                      AnimatedBuilder(
-                        animation: appSettings!,
-                        builder: (context, _) => Text(
-                          mobileVersionLabel(appSettings!.version),
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
+            ),
+            Column(
+              key: const ValueKey('home-footer-links'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton.icon(
+                  onPressed: () => unawaited(_openGithub(context)),
+                  icon: Image.asset(
+                    'assets/github-mark.png',
+                    width: 22,
+                    height: 22,
+                    semanticLabel: 'GitHub logo',
+                  ),
+                  label: const Text('Visit GitHub'),
+                ),
+                if (appSettings != null) ...[
+                  const SizedBox(height: 4),
+                  AnimatedBuilder(
+                    animation: appSettings!,
+                    builder: (context, _) => Text(
+                      mobileVersionLabel(appSettings!.version),
+                      key: const ValueKey('home-version'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ],
             ),
             ConnectionStatus(controller: connectionController),
           ],

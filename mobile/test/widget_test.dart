@@ -541,7 +541,61 @@ void main() {
       expect(find.text('Single Entry'), findsOneWidget);
       expect(find.text('Visit GitHub'), findsOneWidget);
       expect(find.text('Not paired'), findsOneWidget);
+      final links = tester.getRect(
+        find.byKey(const ValueKey('home-footer-links')),
+      );
+      final status = tester.getRect(find.byType(ConnectionStatus));
+      expect(links.bottom, lessThanOrEqualTo(status.top));
+      expect(status.bottom, lessThanOrEqualTo(size.height));
     }
+  });
+
+  testWidgets('Home footer keeps GitHub and version above connection status', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(406, 904);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const channel = MethodChannel('com.bookledger.mobile/app_settings');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getAppSettings') {
+            return {'version': '1.2.3', 'theme': 'default'};
+          }
+          return true;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+    await settings.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(appSettings: settings)),
+    );
+    await tester.pumpAndSettle();
+
+    final connectionTop = tester.getTopLeft(find.byType(ConnectionStatus)).dy;
+    final github = tester.getRect(
+      find.widgetWithText(TextButton, 'Visit GitHub'),
+    );
+    final version = tester.getRect(find.byKey(const ValueKey('home-version')));
+    final pairConnect = tester.getRect(
+      find.widgetWithText(OutlinedButton, 'Pair / Connect'),
+    );
+
+    expect(find.text('BookLedger Mobile • v1.2.3'), findsOneWidget);
+    expect(pairConnect.bottom, lessThan(github.top));
+    expect(github.bottom, lessThan(version.top));
+    expect(version.bottom, lessThan(connectionTop));
+    expect(
+      tester.getBottomRight(find.byType(ConnectionStatus)).dy,
+      lessThanOrEqualTo(904),
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
