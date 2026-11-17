@@ -78,7 +78,9 @@ class _NoFileCleanupWorkflow extends SingleEntryWorkflow {
 class _FakeConnectionTransport implements ConnectionTransport {
   Completer<DesktopEndpoint?>? validation;
   DesktopEndpoint? validationResult;
+  final validationResults = <DesktopEndpoint?>[];
   int unpairCalls = 0;
+  int beginBatchCalls = 0;
 
   @override
   Future<DesktopPairing> pair(
@@ -91,7 +93,14 @@ class _FakeConnectionTransport implements ConnectionTransport {
   Future<DesktopEndpoint?> validate(
     List<DesktopEndpoint> endpoints,
     String deviceToken,
-  ) => validation?.future ?? Future<DesktopEndpoint?>.value(validationResult);
+  ) {
+    if (validation != null) return validation!.future;
+    return Future<DesktopEndpoint?>.value(
+      validationResults.isEmpty
+          ? validationResult
+          : validationResults.removeAt(0),
+    );
+  }
 
   @override
   Future<bool> unpair(
@@ -108,7 +117,10 @@ class _FakeConnectionTransport implements ConnectionTransport {
     String token,
     String batchId,
     int expectedCount,
-  ) async => true;
+  ) async {
+    beginBatchCalls++;
+    return true;
+  }
 
   @override
   Future<bool> sendCapture(
@@ -454,6 +466,132 @@ void main() {
         .hideCurrentSnackBar();
     await tester.pump(const Duration(milliseconds: 300));
   });
+
+  testWidgets('Single Entry Send follows authenticated reconnection', (
+    WidgetTester tester,
+  ) async {
+    final transport = _FakeConnectionTransport()
+      ..validationResults.addAll([
+        _savedPairing().endpoints.first,
+        null,
+        _savedPairing().endpoints.first,
+      ]);
+    final controller = MobileConnectionController(
+      store: _MemoryPairingStore()..pairing = _savedPairing(),
+      transport: transport,
+      discovery: _NoDesktopDiscovery(),
+    );
+    var controllerDisposed = false;
+    void disposeController() {
+      if (controllerDisposed) return;
+      controllerDisposed = true;
+      controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+      controller.dispose();
+    }
+
+    addTearDown(disposeController);
+    await controller.initialize();
+    await tester.pump();
+    await tester.pump();
+    expect(controller.isConnected, isTrue);
+
+    final workflow = await _pairedWorkflow('reconnect-single.jpg');
+    addTearDown(workflow.dispose);
+    final captureId = workflow.captureId;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CaptureScreen(
+          mode: CaptureMode.single,
+          workflow: workflow,
+          connectionController: controller,
+        ),
+      ),
+    );
+
+    ElevatedButton sendButton() => tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Send'),
+    );
+
+    expect(sendButton().onPressed, isNotNull);
+    expect(await controller.manualReconnect(), isFalse);
+    await tester.pump();
+    expect(controller.status, MobileConnectionStatus.disconnected);
+    expect(sendButton().onPressed, isNull);
+    expect(workflow.isCaptureReady, isTrue);
+
+    expect(await controller.manualReconnect(), isTrue);
+    await tester.pump();
+    expect(sendButton().onPressed, isNotNull);
+    expect(workflow.captureId, captureId);
+    expect(workflow.displayedIsbn, '9780306406157');
+    expect(workflow.photoPath, 'reconnect-single.jpg');
+    expect(transport.beginBatchCalls, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    disposeController();
+  });
+
+  testWidgets(
+    'Bulk Entry Send follows reconnection without changing its batch',
+    (WidgetTester tester) async {
+      final endpoint = _savedPairing().endpoints.first;
+      final transport = _FakeConnectionTransport()
+        ..validationResults.addAll([endpoint, null, endpoint]);
+      final controller = MobileConnectionController(
+        store: _MemoryPairingStore()..pairing = _savedPairing(),
+        transport: transport,
+        discovery: _NoDesktopDiscovery(),
+      );
+      var controllerDisposed = false;
+      void disposeController() {
+        if (controllerDisposed) return;
+        controllerDisposed = true;
+        controller.didChangeAppLifecycleState(AppLifecycleState.paused);
+        controller.dispose();
+      }
+
+      addTearDown(disposeController);
+      await controller.initialize();
+      await tester.pump();
+      await tester.pump();
+      expect(controller.isConnected, isTrue);
+
+      final queue = _testQueue(5);
+      await _addTestEntries(queue, 5);
+      addTearDown(queue.dispose);
+      final batchId = queue.batchId;
+      final captureIds = queue.entries.map((entry) => entry.captureId).toList();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CaptureScreen(
+            mode: CaptureMode.bulk,
+            queueTarget: 5,
+            bulkQueue: queue,
+            connectionController: controller,
+          ),
+        ),
+      );
+
+      QueueActionButton sendButton() =>
+          tester.widget<QueueActionButton>(find.byType(QueueActionButton));
+
+      expect(sendButton().label, 'Send');
+      expect(sendButton().canTap, isTrue);
+      expect(await controller.manualReconnect(), isFalse);
+      await tester.pump();
+      expect(sendButton().canTap, isFalse);
+      expect(queue.isBatchReady, isTrue);
+
+      expect(await controller.manualReconnect(), isTrue);
+      await tester.pump();
+      expect(sendButton().canTap, isTrue);
+      expect(queue.batchId, batchId);
+      expect(queue.entries.map((entry) => entry.captureId), captureIds);
+      expect(queue.count, 5);
+      expect(transport.beginBatchCalls, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+      disposeController();
+    },
+  );
 
   testWidgets(
     'Visit GitHub opens the repository externally and handles failure',
