@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 from types import SimpleNamespace
-from PIL import Image
+from PIL import Image, ImageDraw
 import pytest
 
 from bookledger import app as app_module
@@ -804,6 +804,30 @@ def test_catalog_cards_keep_equal_text_and_overall_heights_for_long_values():
         pytest.skip(f"Tk catalog-card geometry test requires complete Tcl/Tk: {exc}")
     finally:
         root.destroy()
+
+
+@pytest.mark.parametrize(("mode", "extension"), (("RGB", ".jpg"), ("RGBA", ".png")))
+def test_catalog_thumbnail_preserves_existing_resize_and_status_output(tmp_path, mode, extension):
+    path = tmp_path / f"cover{extension}"
+    cover = Image.new(mode, (640, 900), "#49627f")
+    draw = ImageDraw.Draw(cover)
+    for y in range(0, 900, 12):
+        draw.line((0, y, 639, y), fill="#243b68" if y % 24 else "#e28f3a", width=3)
+    cover.save(path)
+
+    for status in ("Available", "Sold"):
+        with Image.open(path) as source:
+            expected = source.convert("RGB")
+            expected.thumbnail(
+                (CATALOG_CARD_WIDTH - 52, 170), Image.Resampling.LANCZOS
+            )
+            expected = BookLedgerApp._sold_thumbnail(expected, status)
+
+        actual = BookLedgerApp._load_catalog_thumbnail(path, status)
+
+        assert actual.size == expected.size
+        assert actual.mode == "RGB"
+        assert actual.tobytes() == expected.tobytes()
 
 
 def test_hover_tooltip_is_screen_clamped_and_stays_outside_parent_layout(monkeypatch):

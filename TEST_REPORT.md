@@ -4,6 +4,25 @@ Record started: 2026-10-19; latest dated entry: 2026-11-17.
 
 This is a record of specific test runs, investigations, and owner-reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; the separate owner-reported final-asset session on 2026-11-16 is recorded below.
 
+## Catalog performance investigation (2026-11-17)
+
+Synthetic libraries were created in disposable temporary directories at 20, 100, 500, and 1,000 copies. They used varied titles, authors, genres, statuses, prices, locations, and optional metadata, plus a representative 1,200 × 1,800 JPEG cover. Database query timings are medians of five calls; sort timings are medians of seven calls through 500 rows and one call at 1,000 rows; image timings include opening, RGB conversion, thumbnail resizing, and Sold tinting. The same generated JPEG was reused per row to make the repeated image-processing cost comparable. The image benchmark used three-run medians through 500 rows and one run at 1,000 rows because of runtime. The OS file cache was warm during the repeated image runs; cold disk startup was not isolated, and the application has no thumbnail cache.
+
+| Copies | Full query median | Filtered query median | Sort | Image baseline | Image optimized |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 0.93 ms | 0.86 ms | 0.01 ms | 283.22 ms | 219.31 ms |
+| 100 | 1.71 ms | 1.55 ms | 0.03 ms | 1,392.77 ms | 1,110.66 ms |
+| 500 | 6.36 ms | 4.59 ms | 0.13 ms | 6,965.84 ms | 5,468.12 ms |
+| 1,000 | 11.58 ms | Not measured | 0.42 ms | 13,376.46 ms | 11,182.95 ms |
+
+The dominant measured separable stage was repeated image processing. The app retrieves records once per population and sorts them in memory; no N+1 query path was found. Reusing a loaded RGB image for the resize avoids an extra full-resolution RGB copy while preserving full-resolution sampling. Exact pixel comparisons against the prior processing sequence passed for synthetic RGB JPEG and RGBA PNG covers, including Sold tinting. A faster JPEG draft-resize alternative was rejected after visual inspection showed fine-detail artifacts.
+
+No thumbnail cache, background worker, pagination, or virtualization was added: these add invalidation, memory, or interaction complexity, and the measured full-resolution resize change improves the image stage by about 16–23%. Actual widget construction, complete refresh/navigation timing, scrolling responsiveness, and process memory were not measured. The local Tcl/Tk installation lacks required ttk theme files, so full visual card validation remains unverified.
+
+- `.venv\Scripts\python.exe -m pytest tests\test_catalog.py tests\test_catalog_card_text.py tests\test_app_callbacks.py -q -rs --basetemp=.pytest-tmp-issue11-catalog-final` — **138 passed, 1 skipped**. The skipped Tk geometry test could not load Tcl/Tk files.
+- `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-issue11-full` — **507 passed, 18 skipped**. Tk UI tests skipped because the installed Tcl/Tk distribution is missing required files, including ttk theme assets.
+- The two added thumbnail pixel-preservation cases are included in the focused and full-suite totals.
+
 ## Initial final-asset physical smoke session (owner reported, 2026-11-16)
 
 The owner reported performing this physical session with the exact final Windows ZIP and Android APK after verifying the assets. Codex did not perform or independently observe these physical tests. The owner reported no errors. The Windows device was described as a Windows 11 laptop; device model, Windows build, Android model/OS, and whether Android installation was fresh or an upgrade were not supplied.

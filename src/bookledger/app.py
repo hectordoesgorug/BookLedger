@@ -1004,11 +1004,7 @@ class BookLedgerApp(_WindowBase):
             if not photo_path.is_absolute():
                 photo_path = self.paths.data / photo_path
             try:
-                with Image.open(photo_path) as source:
-                    image = source.convert("RGB")
-                    image.thumbnail((CATALOG_CARD_WIDTH - 52, 170), Image.Resampling.LANCZOS)
-                    image = self._sold_thumbnail(image, row["status"])
-                    photo = ImageTk.PhotoImage(image)
+                photo = ImageTk.PhotoImage(self._load_catalog_thumbnail(photo_path, row["status"]))
                 self._catalog_images.append(photo)
                 image_label = tk.Label(art, image=photo, background="#edf1f5")
                 image_label.place(relx=0.5, rely=0.5, anchor="center")
@@ -1136,6 +1132,15 @@ class BookLedgerApp(_WindowBase):
             return image
         gray_overlay = Image.new("RGB", image.size, "#9ca3af")
         return Image.blend(image, gray_overlay, 0.48)
+
+    @staticmethod
+    def _load_catalog_thumbnail(photo_path, status):
+        with Image.open(photo_path) as source:
+            image = source if source.mode == "RGB" else source.convert("RGB")
+            image.load()
+            image.thumbnail((CATALOG_CARD_WIDTH - 52, 170), Image.Resampling.LANCZOS)
+            image = image.copy()
+        return BookLedgerApp._sold_thumbnail(image, status)
 
     @staticmethod
     def _physical_copy_label(row):
