@@ -28,6 +28,21 @@ Future<SingleEntryWorkflow> _pairedWorkflow(String photoPath) async {
 BulkCaptureQueue _testQueue(int capacity) =>
     BulkCaptureQueue(capacity: capacity, photoExists: (_) async => true);
 
+Future<void> _scrollSettingsTo(
+  WidgetTester tester,
+  Finder target, [
+  double delta = 200,
+]) => tester.scrollUntilVisible(
+  target,
+  delta,
+  scrollable: find
+      .descendant(
+        of: find.byKey(const ValueKey('settings-list')),
+        matching: find.byType(Scrollable),
+      )
+      .first,
+);
+
 class _MemoryPairingStore implements PairingStore {
   DesktopPairing? pairing;
   bool failClear = false;
@@ -272,24 +287,23 @@ void main() {
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Pairing'), findsOneWidget);
-    expect(find.text('Clear Data'), findsOneWidget);
-    expect(find.text('Theme'), findsOneWidget);
-    await tester.tap(find.text('Pairing'));
-    await tester.pumpAndSettle();
-    expect(find.text('Pairing with desktop QR code'), findsNothing);
     expect(find.text('Pair with desktop QR code'), findsOneWidget);
+    expect(find.text('Desktop IPv4 address'), findsOneWidget);
     expect(find.text('Test secure storage'), findsNothing);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    expect(find.text('Clear Data'), findsOneWidget);
-    await tester.tap(find.text('Theme'));
-    await tester.pumpAndSettle();
+    expect(find.byType(ListView), findsOneWidget);
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    expect(find.text('Clear Data'), findsWidgets);
+    await _scrollSettingsTo(tester, find.text('Dark Mode'));
+    expect(find.text('Dark Mode'), findsOneWidget);
+    await _scrollSettingsTo(tester, find.text('Default'));
     expect(find.text('Default'), findsOneWidget);
     expect(find.text('Dark'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.pageBack();
-    await tester.pumpAndSettle();
+    expect(find.text('Single Entry'), findsOneWidget);
 
     await tester.tap(find.text('Single Entry'));
     await tester.pumpAndSettle();
@@ -625,6 +639,49 @@ void main() {
     );
   });
 
+  testWidgets('Settings scrolls its sections on a small scaled screen', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = _testConnectionController();
+    addTearDown(controller.dispose);
+    final settings = MobileAppSettings();
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
+          child: SettingsScreen(controller: controller, settings: settings),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ListView), findsOneWidget);
+    expect(find.text('Pairing'), findsOneWidget);
+    expect(find.text('Pair with desktop QR code'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Clear Data'), findsWidgets);
+    expect(tester.takeException(), isNull);
+
+    await _scrollSettingsTo(tester, find.text('Dark Mode'), 160);
+    await tester.pumpAndSettle();
+    expect(find.text('Default'), findsOneWidget);
+    await _scrollSettingsTo(tester, find.text('Dark'), 160);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('About guide scrolls with large text on a small viewport', (
     WidgetTester tester,
   ) async {
@@ -672,11 +729,14 @@ void main() {
           clearPendingPhotos: () async {
             clearCalled = true;
           },
-          onVisitGitHub: () async {},
         ),
       ),
     );
-    await tester.tap(find.text('Clear Data'));
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    await tester.tap(find.byKey(const ValueKey('clear-data-action')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Clear Mobile Data?'), findsOneWidget);
@@ -735,17 +795,20 @@ void main() {
           clearPendingPhotos: () async {
             photosCleared = true;
           },
-          onVisitGitHub: () async {},
         ),
       ),
     );
-    await tester.tap(find.text('Clear Data'));
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    await tester.tap(find.byKey(const ValueKey('clear-data-action')));
     await tester.pumpAndSettle();
     expect(
       find.textContaining('desktop BookLedger library will not be deleted.'),
       findsOneWidget,
     );
-    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.tap(find.byKey(const ValueKey('clear-data-confirm')));
     await tester.pumpAndSettle();
 
     expect(photosCleared, isTrue);
@@ -790,13 +853,16 @@ void main() {
           clearPendingPhotos: () async {
             throw const FileSystemException('Temporary storage unavailable.');
           },
-          onVisitGitHub: () async {},
         ),
       ),
     );
-    await tester.tap(find.text('Clear Data'));
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    await tester.tap(find.byKey(const ValueKey('clear-data-action')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.tap(find.byKey(const ValueKey('clear-data-confirm')));
     await tester.pumpAndSettle();
 
     expect(
@@ -842,20 +908,23 @@ void main() {
           clearPendingPhotos: () async {
             photosCleared = true;
           },
-          onVisitGitHub: () async {},
         ),
       ),
     );
-    await tester.tap(find.text('Clear Data'));
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    await tester.tap(find.byKey(const ValueKey('clear-data-action')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.tap(find.byKey(const ValueKey('clear-data-confirm')));
     await tester.pumpAndSettle();
 
     expect(photosCleared, isFalse);
     expect(store.pairing, isNotNull);
     expect(
       find.text('Saved pairing could not be removed from secure storage.'),
-      findsOneWidget,
+      findsWidgets,
     );
   });
 
@@ -890,13 +959,16 @@ void main() {
           clearPendingPhotos: () async {
             photosCleared = true;
           },
-          onVisitGitHub: () async {},
         ),
       ),
     );
-    await tester.tap(find.text('Clear Data'));
+    await _scrollSettingsTo(
+      tester,
+      find.byKey(const ValueKey('clear-data-action')),
+    );
+    await tester.tap(find.byKey(const ValueKey('clear-data-action')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Clear Data'));
+    await tester.tap(find.byKey(const ValueKey('clear-data-confirm')));
     await tester.pumpAndSettle();
 
     expect(photosCleared, isFalse);

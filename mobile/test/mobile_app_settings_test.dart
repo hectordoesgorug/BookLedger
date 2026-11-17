@@ -34,7 +34,9 @@ void main() {
       expect(settings.version, '1.0.0');
 
       await tester.pumpWidget(
-        MaterialApp(home: ThemeSelectionScreen(settings: settings)),
+        MaterialApp(
+          home: Scaffold(body: ThemeSelectionSection(settings: settings)),
+        ),
       );
       await tester.tap(find.text('Dark'));
       await tester.pumpAndSettle();
@@ -69,7 +71,9 @@ void main() {
     addTearDown(settings.dispose);
     await settings.initialize();
     await tester.pumpWidget(
-      MaterialApp(home: ThemeSelectionScreen(settings: settings)),
+      MaterialApp(
+        home: Scaffold(body: ThemeSelectionSection(settings: settings)),
+      ),
     );
     await tester.tap(find.text('Dark'));
     await tester.pumpAndSettle();

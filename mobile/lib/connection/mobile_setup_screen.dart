@@ -5,16 +5,33 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'mobile_connection_controller.dart';
 
-class MobileSetupScreen extends StatefulWidget {
+class MobileSetupScreen extends StatelessWidget {
   const MobileSetupScreen({required this.controller, super.key});
 
   final MobileConnectionController controller;
 
   @override
-  State<MobileSetupScreen> createState() => _MobileSetupScreenState();
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Pairing')),
+    body: SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [PairingSettingsSection(controller: controller)],
+      ),
+    ),
+  );
 }
 
-class _MobileSetupScreenState extends State<MobileSetupScreen> {
+class PairingSettingsSection extends StatefulWidget {
+  const PairingSettingsSection({required this.controller, super.key});
+
+  final MobileConnectionController controller;
+
+  @override
+  State<PairingSettingsSection> createState() => _PairingSettingsSectionState();
+}
+
+class _PairingSettingsSectionState extends State<PairingSettingsSection> {
   final _addressController = TextEditingController();
   final _portController = TextEditingController(text: '43821');
   final _credentialController = TextEditingController();
@@ -116,101 +133,94 @@ class _MobileSetupScreenState extends State<MobileSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Pairing')),
-      body: AnimatedBuilder(
-        animation: widget.controller,
-        builder: (context, _) {
-          final controller = widget.controller;
-          final pairing = controller.pairing;
-          return SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                _ConnectionStatusCard(controller: controller),
-                if (pairing != null) ...[
-                  const SizedBox(height: 12),
-                  Text('Paired with ${pairing.deviceName}'),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Saved desktop addresses: ${pairing.endpoints.map((endpoint) => '${endpoint.address}:${endpoint.port}').join(', ')}',
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: controller.isBusy
-                        ? null
-                        : controller.manualReconnect,
-                    child: const Text('Reconnect now'),
-                  ),
-                  OutlinedButton(
-                    onPressed: controller.isBusy ? null : _unpair,
-                    child: const Text('Unpair this phone'),
-                  ),
-                  OutlinedButton(
-                    onPressed: controller.canForgetPairing
-                        ? _forgetPairing
-                        : null,
-                    child: const Text('Forget Pairing'),
-                  ),
-                ] else ...[
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: controller.isBusy ? null : _scanQr,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Pair with desktop QR code'),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Pair manually',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _addressController,
-                    keyboardType: TextInputType.text,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Desktop IPv4 address',
-                      hintText: 'For example, 192.168.1.25',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _portController,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _credentialController,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _pairManually(),
-                    decoration: const InputDecoration(
-                      labelText: 'Temporary pairing code',
-                      helperText: 'Shown in Mobile App Setup on the desktop',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: controller.isBusy ? null : _pairManually,
-                    child: const Text('Pair manually'),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                const Text(
-                  'HTTP traffic is not encrypted. Pair only on a trusted local network.',
+    return AnimatedBuilder(
+      animation: widget.controller,
+      builder: (context, _) {
+        final controller = widget.controller;
+        final pairing = controller.pairing;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ConnectionStatusCard(controller: controller),
+            if (pairing != null) ...[
+              const SizedBox(height: 12),
+              Text('Paired with ${pairing.deviceName}'),
+              const SizedBox(height: 8),
+              Text(
+                'Saved desktop addresses: ${pairing.endpoints.map((endpoint) => '${endpoint.address}:${endpoint.port}').join(', ')}',
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonal(
+                onPressed: controller.isBusy
+                    ? null
+                    : controller.manualReconnect,
+                child: const Text('Reconnect now'),
+              ),
+              OutlinedButton(
+                onPressed: controller.isBusy ? null : _unpair,
+                child: const Text('Unpair this phone'),
+              ),
+              OutlinedButton(
+                onPressed: controller.canForgetPairing ? _forgetPairing : null,
+                child: const Text('Forget Pairing'),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: controller.isBusy ? null : _scanQr,
+                icon: const Icon(Icons.qr_code_scanner),
+                label: const Text('Pair with desktop QR code'),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Pair manually',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _addressController,
+                keyboardType: TextInputType.text,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Desktop IPv4 address',
+                  hintText: 'For example, 192.168.1.25',
+                  border: OutlineInputBorder(),
                 ),
-              ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _portController,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Port',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _credentialController,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _pairManually(),
+                decoration: const InputDecoration(
+                  labelText: 'Temporary pairing code',
+                  helperText: 'Shown in Mobile App Setup on the desktop',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: controller.isBusy ? null : _pairManually,
+                child: const Text('Pair manually'),
+              ),
+            ],
+            const SizedBox(height: 20),
+            const Text(
+              'HTTP traffic is not encrypted. Pair only on a trusted local network.',
             ),
-          );
-        },
-      ),
+          ],
+        );
+      },
     );
   }
 }

@@ -13,14 +13,12 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.controller,
     required this.settings,
-    required this.onVisitGitHub,
     this.clearPendingPhotos,
     super.key,
   });
 
   final MobileConnectionController controller;
   final MobileAppSettings settings;
-  final Future<void> Function() onVisitGitHub;
   final Future<void> Function()? clearPendingPhotos;
 
   @override
@@ -29,22 +27,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _clearing = false;
-
-  void _openPairing() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => MobileSetupScreen(controller: widget.controller),
-      ),
-    );
-  }
-
-  void _openTheme() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ThemeSelectionScreen(settings: widget.settings),
-      ),
-    );
-  }
 
   Future<void> _clearData() async {
     if (_clearing) return;
@@ -64,6 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            key: const ValueKey('clear-data-confirm'),
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(dialogContext).colorScheme.error,
               foregroundColor: Theme.of(dialogContext).colorScheme.onError,
@@ -133,76 +116,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     appBar: AppBar(title: const Text('Settings')),
     body: SafeArea(
       child: ListView(
+        key: const ValueKey('settings-list'),
         padding: const EdgeInsets.all(16),
         children: [
-          _SettingsRow(
-            icon: Icons.devices_outlined,
-            title: 'Pairing',
-            subtitle: 'Manage the desktop connection.',
-            onTap: _openPairing,
+          _sectionHeading(context, 'Pairing'),
+          PairingSettingsSection(controller: widget.controller),
+          const SizedBox(height: 24),
+          _sectionHeading(context, 'Clear Data'),
+          const Text(
+            'Delete pending captures and forget the desktop pairing on this phone.',
           ),
-          _SettingsRow(
-            icon: Icons.delete_outline,
-            title: 'Clear Data',
-            subtitle: 'Delete pending captures and forget pairing.',
-            destructive: true,
-            enabled: !_clearing,
-            onTap: _clearData,
-          ),
-          _SettingsRow(
-            icon: Icons.palette_outlined,
-            title: 'Theme',
-            subtitle: 'Choose Default or Dark appearance.',
-            onTap: _openTheme,
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            key: const ValueKey('clear-data-action'),
+            onPressed: _clearing ? null : _clearData,
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Clear Data'),
           ),
           if (_clearing)
             const Padding(
-              padding: EdgeInsets.all(20),
+              padding: EdgeInsets.all(12),
               child: Center(child: CircularProgressIndicator()),
             ),
+          const SizedBox(height: 24),
+          _sectionHeading(context, 'Dark Mode'),
+          ThemeSelectionSection(settings: widget.settings),
         ],
       ),
     ),
   );
 }
 
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.destructive = false,
-    this.enabled = true,
-  });
+Widget _sectionHeading(BuildContext context, String title) => Padding(
+  padding: const EdgeInsets.only(bottom: 8),
+  child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+);
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-  final bool destructive;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = destructive ? Theme.of(context).colorScheme.error : null;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        minVerticalPadding: 14,
-        leading: Icon(icon, color: color),
-        title: Text(title, style: TextStyle(color: color)),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: enabled ? onTap : null,
-      ),
-    );
-  }
-}
-
-class ThemeSelectionScreen extends StatelessWidget {
-  const ThemeSelectionScreen({required this.settings, super.key});
+class ThemeSelectionSection extends StatelessWidget {
+  const ThemeSelectionSection({required this.settings, super.key});
 
   final MobileAppSettings settings;
 
@@ -220,33 +175,21 @@ class ThemeSelectionScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Theme')),
-    body: AnimatedBuilder(
-      animation: settings,
-      builder: (context, _) => SafeArea(
-        child: ListView(
-          children: [
-            RadioGroup<ThemeMode>(
-              groupValue: settings.themeMode,
-              onChanged: (mode) {
-                if (mode != null) unawaited(_select(context, mode));
-              },
-              child: const Column(
-                children: [
-                  RadioListTile<ThemeMode>(
-                    value: ThemeMode.light,
-                    title: Text('Default'),
-                  ),
-                  RadioListTile<ThemeMode>(
-                    value: ThemeMode.dark,
-                    title: Text('Dark'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: settings,
+    builder: (context, _) => RadioGroup<ThemeMode>(
+      groupValue: settings.themeMode,
+      onChanged: (mode) {
+        if (mode != null) unawaited(_select(context, mode));
+      },
+      child: const Column(
+        children: [
+          RadioListTile<ThemeMode>(
+            value: ThemeMode.light,
+            title: Text('Default'),
+          ),
+          RadioListTile<ThemeMode>(value: ThemeMode.dark, title: Text('Dark')),
+        ],
       ),
     ),
   );

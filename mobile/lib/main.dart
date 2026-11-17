@@ -137,7 +137,6 @@ class HomeScreen extends StatelessWidget {
               builder: (_) => SettingsScreen(
                 controller: connectionController!,
                 settings: appSettings!,
-                onVisitGitHub: () => _openGithub(context),
               ),
             ),
           );
