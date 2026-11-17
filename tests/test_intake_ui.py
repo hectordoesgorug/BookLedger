@@ -472,8 +472,11 @@ def test_photo_preview_and_manual_metadata_values_are_preserved(form, tmp_path):
 
     widget.geometry("1120x850")
     widget.update()
-    resized_portrait_height = widget._photo_image.height()
-    assert resized_portrait_height > portrait_size[1]
+    resized_portrait_size = (widget._photo_image.width(), widget._photo_image.height())
+    resized_preview_size = (widget.photo_preview.winfo_width() - 4, widget.photo_preview.winfo_height() - 4)
+    assert resized_portrait_size[0] <= resized_preview_size[0]
+    assert resized_portrait_size[1] <= resized_preview_size[1]
+    assert resized_portrait_size[0] / resized_portrait_size[1] == pytest.approx(2 / 3, abs=0.01)
 
     landscape = tmp_path / "landscape.png"
     Image.new("RGB", (1800, 1200), "orange").save(landscape)
@@ -487,7 +490,11 @@ def test_photo_preview_and_manual_metadata_values_are_preserved(form, tmp_path):
 
     widget.geometry("1400x900")
     widget.update()
-    assert widget._photo_image.width() > landscape_size[0]
+    resized_landscape_size = (widget._photo_image.width(), widget._photo_image.height())
+    resized_preview_size = (widget.photo_preview.winfo_width() - 4, widget.photo_preview.winfo_height() - 4)
+    assert resized_landscape_size[0] <= resized_preview_size[0]
+    assert resized_landscape_size[1] <= resized_preview_size[1]
+    assert resized_landscape_size[0] / resized_landscape_size[1] == pytest.approx(3 / 2, abs=0.01)
 
 
 def test_booktopia_title_and_author_populate_empty_add_form_fields(form):

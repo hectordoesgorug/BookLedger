@@ -1,6 +1,6 @@
 # v1.1.0-rc1 candidate preparation report
 
-**Assessment: BLOCKED for release approval.** Candidate artifacts are prepared for Codigo review and owner acceptance. An unresolved desktop test failure and pending physical transfer, durability, and upgrade checks prevent release readiness.
+**Assessment: BLOCKED for release approval.** Candidate artifacts are prepared for Codigo review and owner acceptance. Pending physical transfer, durability, and upgrade checks prevent release readiness.
 
 ## Baseline and changes
 
@@ -11,7 +11,7 @@ Desktop is `1.1.0`; Android is `1.1.0+2`, application ID unchanged. Release mate
 ## Automated verification
 
 - Focused version and packaging tests: **6 passed**.
-- Desktop full suite: **516 passed, 18 skipped, 1 failed**. `test_photo_preview_and_manual_metadata_values_are_preserved` expected the photo preview to grow after resize; it remained 555 px. An isolated rerun failed at the same assertion (565 px remained unchanged). No code or assertions were changed. The 18 skips require Tcl/Tk components missing from this host. Migration and backup/restore focused suite: **83 passed** with disposable test data.
+- Handover #57A fixed an incorrect preview-test assumption: height growth at fixed width need not enlarge a portrait image already constrained by width. Target test passed five consecutive runs; related intake/callback tests passed 92 with 1 Tcl/Tk skip. The final desktop full suite passed 517, skipped 17, and failed 1 separate minimum-size geometry assertion (body and viewport both measured 769 px); see the dated TEST_REPORT entry. Migration and backup/restore focused suite: **83 passed** with disposable test data.
 - Flutter tests: **126 passed, 0 failed, 0 skipped**. `flutter analyze`: no issues. Dart formatting: 35 files checked, 0 changed.
 - `git diff --check`: passed; configured LF-to-CRLF notices only.
 - Windows build requirements matched CPython 3.14.6 and pinned packages. The established one-file build and existing one-folder fallback spec succeeded. Both executables carry FileVersion/ProductVersion `1.1.0`.

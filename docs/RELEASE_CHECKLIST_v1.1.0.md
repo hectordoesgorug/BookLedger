@@ -14,7 +14,7 @@
 ## Automated verification
 
 - [x] Focused version/packaging suite: 6 passed.
-- [ ] Desktop full suite has no unresolved failures. Initial candidate run: 516 passed, 18 skipped, 1 failed; preview resize regression also failed alone. See report.
+- [ ] Desktop full suite has no unresolved failures. After Handover #57A, the target preview test passes; latest full suite was 517 passed, 17 skipped, 1 failed in a separate display-geometry-sensitive minimum-size test. See TEST_REPORT.md.
 - [x] Flutter tests: 126 passed, 0 failed, 0 skipped.
 - [x] Flutter analysis: no issues.
 - [x] Dart formatting: 35 files, 0 changed.

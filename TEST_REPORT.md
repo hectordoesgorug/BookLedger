@@ -235,4 +235,16 @@ Exact artifacts and evidence are recorded in `docs/RELEASE_CANDIDATE_v1.1.0-rc1.
 - Production-signed APK built and verified against the historical production certificate. Release notices and resolved Android license graph were inspected; see `THIRD_PARTY_NOTICES.md` and the candidate evidence inventory.
 - One-file and fallback ZIPs passed integrity and composition checks. Their embedded APK hashes match the standalone APK. Both were launched from disposable extractions for 12 seconds and closed; no physical acceptance device was used.
 
-Candidate assessment remains **BLOCKED for release approval** because of the desktop preview test failure, pending physical transfer and upgrade checks, and known session-only Android capture state. No candidate APK was installed.
+Candidate assessment remains **BLOCKED for release approval** because of pending physical transfer and upgrade checks, and known session-only Android capture state. No candidate APK was installed.
+
+## Handover #57A — photo-preview resize test diagnosis (2026-11-18)
+
+`test_photo_preview_and_manual_metadata_values_are_preserved` had asserted that a portrait thumbnail's pixel height must grow when the form height increases at fixed width. This expectation was incorrect: `Image.thumbnail` preserves aspect ratio and fits within both preview bounds, so the unchanged preview width can remain the limiting dimension. The Tk `<Configure>` binding and `_fit_photo_preview` behavior are unchanged. The test now checks the resulting image remains within the actual preview bounds and retains its source aspect ratio, including after requested form resizes. No timer or arbitrary wait was added.
+
+- Focused preview test, five consecutive runs: **5 passed**.
+- Related `test_intake_ui.py` and `test_app_callbacks.py`: **92 passed, 1 skipped** on one run. A later run had **92 passed, 1 failed** in the separate minimum-size GUI test (`body_height == viewport_height == 769`); the preview test passed.
+- `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-57a-full`: **516 passed, 18 skipped, 1 failed** in `test_pairing_consumes_expiring_credential_and_authenticates_device`. That mobile-connection test passed in three consecutive isolated reruns.
+- `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-57a-full-rerun`: **514 passed, 19 skipped, 2 failed** in the separate minimum-size geometry assertion and the preview test's assumption that the window-manager resize request necessarily increases the mapped preview. The preview geometry request may be constrained in the integrated test display.
+- Final full suite after the assertion correction: **517 passed, 17 skipped, 1 failed**. The sole failure was again the separate minimum-size geometry test, with body and viewport both measured at 769 px. The target preview test passed.
+
+Classification: the original pixel-height assertion was a **test defect**; the additional whole-suite resize variability is **window/display geometry sensitivity**. Automated runs do not establish physical Windows visual acceptance. No production code changed; candidate artifacts were not rebuilt or altered.
