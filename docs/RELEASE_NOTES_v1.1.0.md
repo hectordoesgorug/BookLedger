@@ -1,6 +1,6 @@
-# BookLedger v1.1.0 — Release notes (prepared; publication pending)
+# BookLedger v1.1.0 — Release notes
 
-Internal review candidate: **v1.1.0-rc1**. These notes are prepared for a future GitHub Release; no tag, release, or public asset has been created by this preparation.
+BookLedger v1.1.0 promotes the owner-accepted v1.1.0-rc1 binaries unchanged.
 
 ## Changes
 
@@ -25,8 +25,8 @@ Android upgrades require the same production certificate and higher version code
 
 ## Known limits and acceptance
 
-Mobile captures are session-only and may be lost on process termination; durable capture recovery is outside this release scope. Keep the app open until acknowledgment. Transfers use authenticated, unencrypted local HTTP; use a trusted network. Barcode processing is on-device, with possible ML Kit SDK communications described in the [privacy notice](PRIVACY_NOTICE.md).
+Mobile captures are session-only and may be lost on process termination; durable capture recovery is outside this release scope. Keep the app open until acknowledgment. Transfers use authenticated, unencrypted local HTTP; use a trusted network. Barcode processing is on-device, with possible ML Kit SDK communications described in the [privacy notice](https://github.com/hectordoesgorug/BookLedger/blob/v1.1.0/docs/PRIVACY_NOTICE.md).
 
-An earlier Android startup ANR was not reproduced in the November 17 debug audit; its cause remains unknown. The owner reports PASS for Windows execution/layout, backup/restore, Sales/reports/status changes, poster creation, pairing/reconnection, Android camera controls and Single/Bulk workflows including edge cases and partial/full queues. These checks were owner-reported. The desktop suite remains 517 passed, 17 skipped, 1 failed; its display-sensitive minimum-size assertion is accepted as a non-blocking exception based on successful owner layout testing. Automated verification and exact artifacts are recorded in the [candidate checklist](RELEASE_CHECKLIST_v1.1.0.md) and [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md).
+An earlier Android startup ANR was not reproduced in the November 17 debug audit; its cause remains unknown. The owner reports PASS for Windows execution/layout, backup/restore, Sales/reports/status changes, poster creation, pairing/reconnection, Android camera controls and Single/Bulk workflows including edge cases and partial/full queues. These checks were owner-reported. The desktop suite remains 517 passed, 17 skipped, 1 failed; its display-sensitive minimum-size assertion is accepted as a non-blocking exception based on successful owner layout testing. Automated verification and exact artifacts are recorded in the [candidate checklist](https://github.com/hectordoesgorug/BookLedger/blob/v1.1.0/docs/RELEASE_CHECKLIST_v1.1.0.md) and [candidate report](https://github.com/hectordoesgorug/BookLedger/blob/v1.1.0/docs/RELEASE_CANDIDATE_v1.1.0-rc1.md).
 
-This preparation does not assert legal clearance or universal device compatibility. Publication requires separate owner review and authorization.
+Owner acceptance and publication were authorized. This release does not assert legal clearance or universal device compatibility.

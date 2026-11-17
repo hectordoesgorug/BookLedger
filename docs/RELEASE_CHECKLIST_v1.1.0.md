@@ -1,6 +1,6 @@
 # BookLedger v1.1.0 release checklist
 
-**Status:** Accepted v1.1.0-rc1 finalized locally; unpublished. Owner acceptance and exceptions are recorded in TEST_REPORT.md (Handover #58). Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader owner passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
+**Status:** Published v1.1.0; independent public-download verification completed. Owner acceptance and exceptions are recorded in TEST_REPORT.md (Handover #58). Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader owner passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
 
 ## Source and identity
 
@@ -110,7 +110,9 @@ No commit, push, tag, publication, candidate installation, cleanup, or historica
 - [x] Final `SHA256SUMS.txt` generated: 317 bytes, SHA-256 `d3e0723ea133f36c9661e1109071e31d806731844b524d30e859ef551dfbd005`.
 - [x] Owner acceptance recorded with provenance and explicit persistence limits.
 - [x] Remaining automated geometry failure accepted by owner as non-blocking.
-- [ ] Explicit commit/push authorization received.
-- [ ] Annotated tag creation/push authorized and verified.
-- [ ] Publication/upload authorized and completed.
-- [ ] Published downloads independently hashed.
+- [x] Explicit commit/push authorization received.
+- [x] Annotated tag creation/push authorized and verified.
+- [x] Publication/upload authorized and completed.
+- [x] Published downloads independently hashed.
+
+Publication: https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.1.0; approved commit `01dc3990e9fa321e5cf2f815ce509d5a3736e9ac`. The four downloaded assets match final hashes; historical v1.0.0 metadata is unchanged. Earlier granular acceptance boxes retain their original scope.

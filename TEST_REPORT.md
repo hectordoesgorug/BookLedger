@@ -256,3 +256,11 @@ The owner reports PASS using accepted v1.1.0-rc1 for Windows portable execution;
 Production upgrade PASS: the owner first installed the historical production-signed v1.0.0 APK, then installed the exact rc1 APK over it. Android presented an update confirmation and installation succeeded. Post-upgrade settings and pairing persistence were not separately reported as verified.
 
 The owner accepts the remaining display-sensitive minimum-size geometry assertion as a non-blocking release exception, supported by successful physical layout testing. The automated suite remains 517 passed, 17 skipped, 1 failed; it is not fully passing. The original preview failure was a corrected test defect; production preview code was unchanged. The transient mobile-connection failure passed three isolated reruns. Session-only pending captures and the prior unreproduced startup ANR remain disclosed limitations.
+
+## Publication and independent verification — Handover #58
+
+BookLedger v1.1.0 is published at https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.1.0 as a stable release (not draft/prerelease). Annotated tag object `794954ae76d052bfbeae196a9396a26e60afeca3` peels to approved commit `01dc3990e9fa321e5cf2f815ce509d5a3736e9ac`. Commit/push were performed by the owner; tagging/push and publication/upload were separately authorized and performed by Codex.
+
+All four public assets were downloaded independently and SHA-256 verified against final staging and the published manifest. Sizes: Portable 60,133,742 bytes; Fallback 60,982,251 bytes; APK 71,633,402 bytes; SHA256SUMS.txt 317 bytes. Candidate binaries were not rebuilt or modified. Historical v1.0.0 release metadata and its asset records exactly match the pre-publication snapshot. Evidence and downloaded bytes are retained under ignored `build/release58-verification/`.
+
+The accepted automated exception remains 517 passed, 17 skipped, 1 failed (display-sensitive minimum-size assertion); owner physical acceptance remains attributed to the owner. Session-only pending captures, the prior unreproduced ANR, and unverified post-upgrade settings/pairing persistence remain disclosed. No fresh automated or physical test run is implied by publication verification.

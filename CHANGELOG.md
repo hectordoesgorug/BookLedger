@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.1.0 — Unreleased
+## 1.1.0 — 2026-11-18
 
-Accepted candidate: **v1.1.0-rc1**. Final release assets are byte-identical copies; publication awaits the explicit Git and publication checkpoints in Handover #58.
+Accepted candidate: **v1.1.0-rc1**. Final release assets are byte-identical copies; published as the stable v1.1.0 GitHub Release after separate Git/tag/publication authorizations. All four public downloads were independently verified.
 
 ### Desktop
 
