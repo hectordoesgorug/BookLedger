@@ -20,6 +20,7 @@ PROTOCOL_ID = "bookledger-mobile"
 DEFAULT_PORT = 43821
 MAX_REQUEST_BYTES = 8 * 1024
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024 + 64 * 1024
+CONNECTION_CONFIRMATION_TIMEOUT_SECONDS = 45
 
 
 def encode_pairing_qr(
@@ -105,6 +106,7 @@ class MobileConnectionService:
         self._pairing_expires_at = 0.0
         self._paired_device: dict | None = None
         self._token = ""
+        self._last_connection_confirmation: float | None = None
         self._saved_pairing_invalid = False
         self._candidates: list[IPv4Candidate] = []
         self._load_existing_pairing()
@@ -145,6 +147,34 @@ class MobileConnectionService:
     def paired(self) -> bool:
         with self._lock:
             return self._paired_device is not None
+
+    @property
+    def connected(self) -> bool:
+        with self._lock:
+            return self._connection_is_fresh_locked()
+
+    def _connection_is_fresh_locked(self) -> bool:
+        return bool(
+            self._paired_device is not None
+            and self._status in ("ready", "paired")
+            and self._last_connection_confirmation is not None
+            and 0 <= self._clock() - self._last_connection_confirmation
+            < CONNECTION_CONFIRMATION_TIMEOUT_SECONDS
+        )
+
+    def _record_connection_confirmation(self, token: str) -> None:
+        with self._lock:
+            if (
+                not self._token
+                or not _constant_time_equal(token, self._token)
+                or self._paired_device is None
+            ):
+                return
+            was_connected = self._connection_is_fresh_locked()
+            self._last_connection_confirmation = self._clock()
+            became_connected = not was_connected
+        if became_connected:
+            self._notify_state_change()
 
     @property
     def needs_pairing_reset(self) -> bool:
@@ -384,6 +414,9 @@ class MobileConnectionService:
                         "server_time": datetime.now(timezone.utc).isoformat(),
                     },
                 )
+                service._record_connection_confirmation(
+                    self.headers.get("Authorization", "").partition(" ")[2]
+                )
 
             def do_POST(self):
                 if not self._peer_is_local():
@@ -541,6 +574,7 @@ class MobileConnectionService:
                 return {"error": "pairing_storage_failed"}, 500
             self._token = token
             self._paired_device = {"name": device_name}
+            self._last_connection_confirmation = None
             self._pairing_credential = ""
             self._pairing_expires_at = 0.0
             self._status = "paired"
@@ -560,6 +594,7 @@ class MobileConnectionService:
             self.config_store.remove(("mobile_pairing",))
             self._token = ""
             self._paired_device = None
+            self._last_connection_confirmation = None
             self._saved_pairing_invalid = False
             self._error = ""
             self._pairing_credential = ""

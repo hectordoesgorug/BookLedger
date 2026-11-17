@@ -1,3 +1,4 @@
+import threading
 import tkinter as tk
 from tkinter import ttk
 from types import SimpleNamespace
@@ -94,7 +95,7 @@ def test_about_guide_has_ten_practical_pages_and_verified_workflows():
         "Sale History", "Not Specified", "shop logo", "Open Library", "Google Books",
         "Archive.org", "Booktopia", "Bigbook", "Hardcover", "ISBN Lookup Test", "API Management",
         "Back Up Now", "Restore Backup", "does not merge", "USB drive", "not encrypted",
-        "Not paired", "Paired", "Receiving", "Service error", "colors vary",
+        "Not Paired", "Paired - Connected", "Paired - Not Connected", "Receiving", "colors vary",
         "Partially retrieved", "No matching ISBN record", "could not be confirmed",
         "Metadata unavailable", "Provider and field details", "3 seconds or less",
         "Scan its QR code", "local IPv4 address", "Single Entry", "Bulk Entry",
@@ -369,7 +370,7 @@ def test_inventory_rows_include_physical_copy_number():
     assert all(entry[2] == ("inventory_status_available",) for entry in subject.tree.rows)
 
 
-def test_mobile_indicator_maps_only_supported_service_states():
+def test_mobile_indicator_maps_pairing_and_authenticated_connection_states():
     class Label:
         def configure(self, **options):
             self.options = options
@@ -380,18 +381,23 @@ def test_mobile_indicator_maps_only_supported_service_states():
 
     subject = SimpleNamespace(
         mobile_connection_status_label=Label(), mobile_connection_status_var=Variable(),
-        mobile_connection_service=SimpleNamespace(status="ready", paired=False),
+        mobile_connection_service=SimpleNamespace(status="ready", paired=False, connected=False),
         _incoming_reception_active=False,
         logged=[],
         _log_event=lambda event: subject.logged.append(event),
     )
     BookLedgerApp._update_mobile_connection_indicator(subject)
-    assert subject.mobile_connection_status_var.value.endswith("Not paired")
+    assert subject.mobile_connection_status_var.value.endswith("Not Paired")
 
     subject.mobile_connection_service.paired = True
     subject.mobile_connection_service.status = "paired"
+    subject.mobile_connection_service.connected = False
     BookLedgerApp._update_mobile_connection_indicator(subject)
-    assert subject.mobile_connection_status_var.value.endswith("Paired")
+    assert subject.mobile_connection_status_var.value.endswith("Paired - Not Connected")
+
+    subject.mobile_connection_service.connected = True
+    BookLedgerApp._update_mobile_connection_indicator(subject)
+    assert subject.mobile_connection_status_var.value.endswith("Paired - Connected")
 
     subject._incoming_reception_active = True
     BookLedgerApp._update_mobile_connection_indicator(subject)
@@ -399,8 +405,9 @@ def test_mobile_indicator_maps_only_supported_service_states():
 
     subject._incoming_reception_active = False
     subject.mobile_connection_service.status = "error"
+    subject.mobile_connection_service.connected = False
     BookLedgerApp._update_mobile_connection_indicator(subject)
-    assert subject.mobile_connection_status_var.value.endswith("Service error")
+    assert subject.mobile_connection_status_var.value.endswith("Paired - Not Connected")
     BookLedgerApp._update_mobile_connection_indicator(subject)
     assert subject.logged == ["mobile_service_failed"]
     subject.mobile_connection_service.status = "ready"
@@ -408,6 +415,18 @@ def test_mobile_indicator_maps_only_supported_service_states():
     subject.mobile_connection_service.status = "error"
     BookLedgerApp._update_mobile_connection_indicator(subject)
     assert subject.logged == ["mobile_service_failed", "mobile_service_failed"]
+
+
+def test_mobile_indicator_server_callback_only_signals_main_thread_poll():
+    pending = threading.Event()
+    subject = SimpleNamespace(
+        _mobile_indicator_refresh_pending=pending,
+        after=lambda *_args: (_ for _ in ()).throw(AssertionError("Tk must not be called from the service thread")),
+    )
+
+    BookLedgerApp._queue_mobile_indicator(subject)
+
+    assert pending.is_set()
 
 
 def test_explicit_copy_id_does_not_read_tree_selection(monkeypatch):

@@ -150,9 +150,9 @@ ABOUT_GUIDE_PAGES = (
     ("About", "Statuses and messages", (
         ("bullet", "Inventory", "Available can be sold; Listed is listed for sale; Not for Sale is withheld from sale; Sold records a sale for that copy."),
         ("bullet", "Metadata", "The form can show Metadata retrieved, Partially retrieved, No matching ISBN record, Results returned but ISBN could not be confirmed, Record found but no usable supported metadata, or Metadata unavailable. Provider and field details explain which values were found."),
-        ("bullet", "Mobile companion", "Not paired means no device is registered. Paired means a device token is registered; it does not prove that the phone is currently reachable. Receiving appears during an active transfer, and Service error means the desktop service reported an error."),
+        ("bullet", "Mobile companion", "Not Paired means no device is registered. Paired - Connected means the paired phone confirmed its connection recently. Paired - Not Connected means no current confirmation is available. Receiving appears during an active transfer."),
         ("bullet", "Validation", "Required book fields are Title, Author, Genre, Format, Condition, Price, and Copy Photo. Red inline messages identify missing details, invalid configured values, or an invalid price. ISBN check-digit warnings can be overridden for manual entry; photo messages ask for a readable image."),
-        ("note", "Colors vary by area", "Inventory uses green for Available, red for Sold, and neutral gray for Listed or Not for Sale. The mobile indicator uses green for Paired, amber for Receiving, red for Service error, and gray for Starting or Not paired. In ISBN Lookup Test, green OK means a field was returned; gray means No Data, N/A, or not checked. Its response time is green at 3 seconds or less and red when slower. Other status messages use green for success and red for errors; amber is used for a warning such as Receiving."),
+        ("note", "Colors vary by area", "Inventory uses green for Available, red for Sold, and neutral gray for Listed or Not for Sale. The mobile indicator uses green for Paired - Connected, amber for Paired - Not Connected and Receiving, red for a desktop service error, and gray for Not Paired. In ISBN Lookup Test, green OK means a field was returned; gray means No Data, N/A, or not checked. Its response time is green at 3 seconds or less and red when slower. Other status messages use green for success and red for errors; amber is used for a warning such as Receiving."),
     )),
     ("About", "Mobile companion", (
         ("p", None, "The Android companion captures ISBNs and cover photographs, then transfers those captures over your local network to BookLedger Desktop. It does not edit the library or replace desktop cataloging. Pair only on a trusted network because connection traffic uses unencrypted HTTP."),
@@ -164,7 +164,7 @@ ABOUT_GUIDE_PAGES = (
         )),
         ("bullet", "Desktop cataloging", "After receipt, BookLedger opens one Add Book form at a time in the batch sequence. Review the ISBN and staged photo, complete required catalog and copy details, and save each book before the next capture opens. You can discard the current capture or cancel its form; other captures remain queued."),
         ("bullet", "Transfer recovery", "An incomplete transfer retains unacknowledged captures on the phone for retry. The desktop stages received batches and resumes cataloging after a restart. If desktop photo recovery is reported, use Settings, Storage and Backup, Retry Recovery, then restart BookLedger."),
-        ("bullet", "Connection states", "Android shows Not paired, Pairing, Connecting, Connected, Disconnected, Desktop unavailable, Pairing rejected, Pairing no longer valid, or Connection error. The desktop shows Starting local service, Ready for pairing, Paired with a device, Service error, Stopping, or Service inactive. Paired means a device token is registered, not that the phone is currently reachable. Receiving marks an active incoming transfer."),
+        ("bullet", "Connection states", "Android shows Not paired, Pairing, Connecting, Connected, Disconnected, Desktop unavailable, Pairing rejected, Pairing no longer valid, or Connection error. The desktop indicator shows Not Paired, Paired - Connected, or Paired - Not Connected. Connected requires an authenticated confirmation within the last 45 seconds; Receiving marks an active incoming transfer. Mobile App Setup separately shows Starting local service, Ready for pairing, Service error, Stopping, or Service inactive."),
         ("warning", "If pairing or sending fails", "Confirm BookLedger Desktop is open and Mobile App Setup says Ready for pairing or Paired, both devices can reach each other on the same trusted local network, and the temporary pairing code has not expired. Try QR pairing or enter the desktop's private IPv4 address and port manually. Check that the local firewall permits BookLedger on the trusted network. If already paired, choose Reconnect now; if pairing was revoked, pair again. Keep Android open until receipt is confirmed; bulk captures are held in a session queue."),
         ("note", "Capture limits", "Single and bulk captures contain an optional ISBN and a front-cover photo. The Android companion is a capture and transfer tool; book details, copy condition, location, price, and final saving are handled in the desktop form."),
     )),
@@ -263,6 +263,10 @@ class BookLedgerApp(_WindowBase):
         self.mobile_incoming_store.recover()
         self._incoming_catalog_batch = None
         self._incoming_reception_active = False
+        self._mobile_indicator_refresh_pending = threading.Event()
+        self._mobile_indicator_refresh_pending.set()
+        self._mobile_indicator_polling = True
+        self._mobile_indicator_last_connected = None
         self._catalog_action_buttons = []
         self._catalog_action_states = {}
         self.mobile_connection_service = MobileConnectionService(
@@ -348,7 +352,7 @@ class BookLedgerApp(_WindowBase):
         self._build_shell()
         self.show_page("Dashboard")
         self.mobile_connection_service.start()
-        self.after(0, self._update_mobile_connection_indicator)
+        self._poll_mobile_indicator()
         self.after(0, self._resume_mobile_incoming)
         self.protocol("WM_DELETE_WINDOW", self._close_application)
         self.report_callback_exception = self._report_callback_exception
@@ -2414,10 +2418,23 @@ class BookLedgerApp(_WindowBase):
             pass
 
     def _queue_mobile_indicator(self):
+        self._mobile_indicator_refresh_pending.set()
+
+    def _poll_mobile_indicator(self):
+        if not self._mobile_indicator_polling:
+            return
+        service = self.mobile_connection_service
+        connected = service.connected
+        if (
+            self._mobile_indicator_refresh_pending.is_set()
+            or connected != self._mobile_indicator_last_connected
+        ):
+            self._mobile_indicator_refresh_pending.clear()
+            self._update_mobile_connection_indicator()
         try:
-            self.after(0, self._update_mobile_connection_indicator)
+            self.after(1000, self._poll_mobile_indicator)
         except (tk.TclError, RuntimeError):
-            pass
+            self._mobile_indicator_polling = False
 
     def _update_mobile_connection_indicator(self):
         label = getattr(self, "mobile_connection_status_label", None)
@@ -2427,23 +2444,24 @@ class BookLedgerApp(_WindowBase):
             return
         if getattr(self, "_incoming_reception_active", False):
             text, color = "● Receiving", WARNING_COLOR
-        elif service.status == "error":
-            text, color = "● Service error", ERROR_COLOR
+        elif service.paired and service.connected:
+            text, color = "● Paired - Connected", SUCCESS_COLOR
+        elif service.paired:
+            text = "● Paired - Not Connected"
+            color = ERROR_COLOR if service.status == "error" else WARNING_COLOR
+        else:
+            text, color = "● Not Paired", NEUTRAL_COLOR
+        if service.status == "error":
             if not getattr(self, "_mobile_service_error_logged", False):
                 log_event = getattr(self, "_log_event", None)
                 if log_event:
                     log_event("mobile_service_failed")
                 self._mobile_service_error_logged = True
-        elif service.paired and service.status in ("ready", "paired"):
-            text, color = "● Paired", SUCCESS_COLOR
-        elif service.paired and service.status == "starting":
-            text, color = "● Starting", NEUTRAL_COLOR
-        else:
-            text, color = "● Not paired", NEUTRAL_COLOR
         if service.status != "error":
             self._mobile_service_error_logged = False
         variable.set(text)
         label.configure(foreground=color)
+        self._mobile_indicator_last_connected = service.connected
 
     def _record_mobile_activity(self, event):
         try:
@@ -2812,6 +2830,7 @@ class BookLedgerApp(_WindowBase):
                 pass
 
     def _close_application(self):
+        self._mobile_indicator_polling = False
         try:
             self.mobile_connection_service.stop()
         except Exception as exc:

@@ -183,14 +183,77 @@ def test_pairing_consumes_expiring_credential_and_authenticates_device(service):
     assert paired["paired"] is True
     token = paired["device_token"]
     assert instance.paired
+    assert not instance.connected
     assert instance.paired_device_name == "Poco X6"
     assert config.values[("mobile_pairing",)]["token"] == "protected:" + token
     assert request(
         instance, "GET", f"{API_PREFIX}/connection", token=token
     )[0] == 200
+    assert instance.connected
     assert request(
         instance, "GET", f"{API_PREFIX}/connection", token="invalid"
     ) == (401, {"error": "unauthorized"})
+
+
+def test_connection_confirmation_expires_recovers_and_is_cleared_by_unpair():
+    now = [100.0]
+    config = MemoryConfig()
+    instance = MobileConnectionService(
+        config,
+        port=0,
+        candidate_provider=lambda: [],
+        clock=lambda: now[0],
+        token_protector=lambda value: "protected:" + value,
+        token_unprotector=lambda value: value.removeprefix("protected:"),
+    )
+    instance.start()
+    try:
+        deadline = time.monotonic() + 3
+        while instance.status == "starting" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert instance.status == "ready"
+        assert request(
+            instance,
+            "POST",
+            f"{API_PREFIX}/pair",
+            {
+                "pairing_credential": instance.pairing_credential,
+                "device_name": "Poco X6",
+            },
+        )[0] == 201
+        token = instance._token
+        assert not instance.connected
+
+        assert request(
+            instance, "GET", f"{API_PREFIX}/connection", token="invalid"
+        )[0] == 401
+        assert not instance.connected
+        assert request(
+            instance, "GET", f"{API_PREFIX}/connection", token=token
+        )[0] == 200
+        assert instance.connected
+
+        now[0] += 45
+        assert not instance.connected
+        assert request(
+            instance, "GET", f"{API_PREFIX}/connection", token=token
+        )[0] == 200
+        assert instance.connected
+
+        restarted = MobileConnectionService(
+            config,
+            clock=lambda: now[0],
+            token_protector=lambda value: "protected:" + value,
+            token_unprotector=lambda value: value.removeprefix("protected:"),
+        )
+        assert restarted.paired
+        assert not restarted.connected
+
+        instance.unpair()
+        assert not instance.paired
+        assert not instance.connected
+    finally:
+        instance.stop()
 
 
 def test_second_device_is_rejected_until_explicit_unpair(service):
