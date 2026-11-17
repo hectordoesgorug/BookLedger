@@ -1,5 +1,6 @@
 import threading
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 from types import SimpleNamespace
 from PIL import Image
@@ -8,6 +9,7 @@ import pytest
 from bookledger import app as app_module
 from bookledger.app import ABOUT_GUIDE_PAGES, CATALOG_CARD_WIDTH, NAVIGATION_ITEMS, NAVIGATION_TOOLTIPS, BookLedgerApp
 from bookledger.config_store import AppConfigStore
+from bookledger.ui.catalog_text import truncate_to_two_lines
 
 
 class FakeTree:
@@ -733,6 +735,73 @@ def test_catalog_grid_renders_fixed_width_cards_left_aligned_at_responsive_sizes
         assert cards.winfo_width() == canvas.winfo_width()
         assert all(abs(card.winfo_width() - CATALOG_CARD_WIDTH) <= 1 for card in widgets)
         assert widgets[0].winfo_x() < 20
+    finally:
+        root.destroy()
+
+
+def test_catalog_cards_keep_equal_text_and_overall_heights_for_long_values():
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk catalog-card geometry test requires Tcl/Tk: {exc}")
+    try:
+        title_font = tkfont.Font(root=root, family="Segoe UI", size=10, weight="bold")
+        author_font = tkfont.Font(
+            root=root, font=ttk.Style(root).lookup("TLabel", "font") or "TkDefaultFont"
+        )
+        parent = ttk.Frame(root)
+        parent.pack()
+        title_height = BookLedgerApp._catalog_two_line_height(
+            parent, title_font, CATALOG_CARD_WIDTH - 40
+        )
+        author_height = BookLedgerApp._catalog_two_line_height(
+            parent, author_font, CATALOG_CARD_WIDTH - 40
+        )
+
+        def make_card(title, author):
+            card = ttk.LabelFrame(parent, text="BL-000001", padding=8, width=CATALOG_CARD_WIDTH)
+            art = tk.Frame(card, width=CATALOG_CARD_WIDTH - 40, height=180)
+            art.pack(fill="x", pady=(0, 7))
+            art.pack_propagate(False)
+            title_label = BookLedgerApp._catalog_text_block(
+                card,
+                truncate_to_two_lines(title, CATALOG_CARD_WIDTH - 40, title_font.measure),
+                title_font,
+                CATALOG_CARD_WIDTH - 40,
+                title_height,
+            )
+            ttk.Label(card, text="Copy 1", foreground="#596579").pack(anchor="w", pady=(2, 0))
+            author_label = BookLedgerApp._catalog_text_block(
+                card,
+                truncate_to_two_lines(author, CATALOG_CARD_WIDTH - 40, author_font.measure),
+                author_font,
+                CATALOG_CARD_WIDTH - 40,
+                author_height,
+                foreground="#64748b",
+                pady=(2, 5),
+            )
+            ttk.Label(card, text="PHP 100.00").pack(anchor="w")
+            card.pack(anchor="w")
+            BookLedgerApp._fix_catalog_card_geometry(card)
+            return card, title_label, author_label
+
+        short = make_card("Short title", "Short author")
+        long = make_card(
+            "Title descenders gypqj " * 10,
+            "Author descenders gypqj " * 10,
+        )
+        root.update_idletasks()
+
+        assert "…" in long[1].cget("text")
+        assert "…" in long[2].cget("text")
+        assert short[1].master.winfo_reqheight() == long[1].master.winfo_reqheight()
+        assert short[2].master.winfo_reqheight() == long[2].master.winfo_reqheight()
+        for label in (*short[1:], *long[1:]):
+            assert label.master.winfo_reqheight() >= label.winfo_reqheight()
+            assert label.master.winfo_height() >= label.winfo_reqheight()
+        assert short[0].cget("height") == long[0].cget("height")
+    except tk.TclError as exc:
+        pytest.skip(f"Tk catalog-card geometry test requires complete Tcl/Tk: {exc}")
     finally:
         root.destroy()
 

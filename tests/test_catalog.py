@@ -280,6 +280,19 @@ def test_copy_details_returns_every_sale_and_void_in_chronological_order(setup):
     assert history[1]["price_minor"] == 72500
 
 
+def test_catalog_and_details_retain_full_long_title_and_author(setup):
+    _, _, _, service, payload, _ = setup
+    title = ("A very long catalog title " * 8) + "Complete"
+    author = ("An author name with many parts " * 8) + "Complete"
+
+    copy_id = service.create_copy({**payload, "title": title, "author": author})
+
+    catalog_row = service.get_copy(copy_id)
+    details_row = service.get_copy_details(copy_id)
+    assert catalog_row["title"] == details_row["title"] == title
+    assert catalog_row["author"] == details_row["author"] == author
+
+
 def test_active_sale_unique_index_prevents_second_active_event(setup):
     _, _, db, service, payload, _ = setup
     copy_id = service.create_copy(payload)

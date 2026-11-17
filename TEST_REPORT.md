@@ -146,3 +146,21 @@ Automated tests cover validated and idempotent staging, duplicate/nullable ISBNs
 - `git diff --check` — passed; Git reports configured LF-to-CRLF notices only.
 
 Catalog sorting tests cover Title, Copy ID, and Price in both directions, case-insensitive title comparison, numeric keys, explicit Copy ID tie-breaking, empty and single-row inputs, active filter forwarding, re-sorting refreshed records, direction toggling, and sort preference retention across navigation. The incomplete Tcl/Tk runtime prevented visual verification of the arrow control and its tooltip in the running desktop UI.
+
+## Catalog card second-line clipping (Issue #12 follow-up, 2026-11-17)
+
+- `.venv\Scripts\python.exe -m pytest -q -rs tests/test_catalog_card_text.py tests/test_app_callbacks.py tests/test_catalog.py` — **136 passed, 1 skipped**; the skipped pre-existing display test could not load Tcl/Tk `init.tcl`.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **504 passed, 19 skipped**. Two Tk UI tests could not load Tcl/Tk files; 17 provider diagnostic UI tests require `ttk/sizegrip.tcl`.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
+- `git diff --check` — passed; Git reports configured LF-to-CRLF notices only.
+
+The new widget geometry test passed in the focused run. It checks the measured two-line `ttk.Label` request—including descenders—fits the text area and that short and truncated values keep equal text-area and card heights. Full-suite execution later skipped that Tk test because `tk.tcl` was unavailable. In the available Tk runtime, a 17 px line spacing yielded a 34 px two-line frame while the actual two-line label requested 38 px; the card area now uses the active font/theme label's measured request instead of line spacing alone. Full desktop visual inspection remains pending.
+
+## Catalog card text layout (Issue #12, 2026-11-17)
+
+- `.venv\Scripts\python.exe -m pytest -q -rs tests/test_catalog_card_text.py tests/test_app_callbacks.py tests/test_catalog.py` — **136 passed, 1 skipped**. The skipped display test could not load Tcl/Tk `ttk/sizegrip.tcl`.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **505 passed, 18 skipped**. One UI test could not load `init.tcl`; 17 provider diagnostic UI tests require the missing `ttk/sizegrip.tcl`.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
+- `git diff --check` — passed; Git reports configured LF-to-CRLF notices only.
+
+Pure text tests cover one-line, two-line, overflowing, long unbroken, and empty values. A Tk geometry test passed for mixed short and long text, confirming two-line areas and equal overall card heights; database tests confirm complete title and author values remain in Catalog and More Details. A full app visual review was not performed.

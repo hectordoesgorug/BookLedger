@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 import os
 import subprocess
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, font as tkfont
 from pathlib import Path
 import shutil
 import sqlite3
@@ -47,6 +47,7 @@ from bookledger.services.posters import PosterService
 from bookledger.ui.poster_designer import PosterDesigner, create_poster_for_copy
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
 from bookledger.ui.mobile_app_setup import MobileAppSetupPanel
+from bookledger.ui.catalog_text import truncate_to_two_lines
 from bookledger.services.mobile_connection import MobileConnectionService
 from bookledger.services.mobile_incoming import MobileIncomingStore
 from bookledger.services.mobile_activity import MobileActivityStore
@@ -979,6 +980,20 @@ class BookLedgerApp(_WindowBase):
         self._catalog_images = []
         self._catalog_card_widgets = []
         self._catalog_grid_columns = 0
+        if not hasattr(self, "_catalog_title_font"):
+            self._catalog_title_font = tkfont.Font(
+                root=self, family="Segoe UI", size=10, weight="bold"
+            )
+        author_font_spec = ttk.Style(self).lookup("TLabel", "font") or "TkDefaultFont"
+        if getattr(self, "_catalog_author_font_spec", None) != author_font_spec:
+            self._catalog_author_font_spec = author_font_spec
+            self._catalog_author_font = tkfont.Font(root=self, font=author_font_spec)
+        title_area_height = self._catalog_two_line_height(
+            self.catalog_cards, self._catalog_title_font, CATALOG_CARD_WIDTH - 40
+        )
+        author_area_height = self._catalog_two_line_height(
+            self.catalog_cards, self._catalog_author_font, CATALOG_CARD_WIDTH - 40
+        )
         for index, row in enumerate(rows):
             card = ttk.LabelFrame(self.catalog_cards, text=row["copy_code"], padding=8, width=CATALOG_CARD_WIDTH)
             self._catalog_card_widgets.append(card)
@@ -1004,9 +1019,29 @@ class BookLedgerApp(_WindowBase):
                 tk.Label(art, text="SOLD", bg="#b42318", fg="white", font=("Segoe UI", 12, "bold"), padx=10, pady=4).place(relx=0.5, rely=0.5, anchor="center")
             elif decoration == "lock":
                 self._add_not_for_sale_lock(art)
-            ttk.Label(card, text=row["title"], font=("Segoe UI", 10, "bold"), wraplength=CATALOG_CARD_WIDTH - 40).pack(anchor="w")
+            title = truncate_to_two_lines(
+                row["title"], CATALOG_CARD_WIDTH - 40, self._catalog_title_font.measure
+            )
+            self._catalog_text_block(
+                card,
+                title,
+                self._catalog_title_font,
+                CATALOG_CARD_WIDTH - 40,
+                title_area_height,
+            )
             ttk.Label(card, text=self._physical_copy_label(row), foreground="#596579").pack(anchor="w", pady=(2, 0))
-            ttk.Label(card, text=row["author"], foreground="#64748b", wraplength=CATALOG_CARD_WIDTH - 40).pack(anchor="w", pady=(2, 5))
+            author = truncate_to_two_lines(
+                row["author"], CATALOG_CARD_WIDTH - 40, self._catalog_author_font.measure
+            )
+            self._catalog_text_block(
+                card,
+                author,
+                self._catalog_author_font,
+                CATALOG_CARD_WIDTH - 40,
+                author_area_height,
+                foreground="#64748b",
+                pady=(2, 5),
+            )
             ttk.Label(card, text=self.money(row["display_price_minor"]), font=("Segoe UI", 11, "bold")).pack(anchor="w")
             def bind_card(widget, copy_id=row["copy_id"]):
                 widget.bind("<Double-Button-1>", lambda _event: self.open_copy_details(copy_id))
@@ -1017,6 +1052,40 @@ class BookLedgerApp(_WindowBase):
         for card in self._catalog_card_widgets:
             self._fix_catalog_card_geometry(card)
         self._queue_catalog_layout(self.catalog_canvas)
+
+    @staticmethod
+    def _catalog_two_line_height(parent, font, wraplength):
+        probe = ttk.Label(
+            parent,
+            text="gypqj\ngypqj",
+            font=font,
+            wraplength=wraplength,
+            anchor="nw",
+            justify="left",
+        )
+        try:
+            return max(font.metrics("linespace") * 2, probe.winfo_reqheight())
+        finally:
+            probe.destroy()
+
+    @staticmethod
+    def _catalog_text_block(
+        parent, text, font, wraplength, height, *, foreground=None, pady=0
+    ):
+        area = ttk.Frame(parent, height=height)
+        area.pack(fill="x", anchor="w", pady=pady)
+        area.pack_propagate(False)
+        label = ttk.Label(
+            area,
+            text=text,
+            font=font,
+            wraplength=wraplength,
+            anchor="nw",
+            justify="left",
+            **({"foreground": foreground} if foreground else {}),
+        )
+        label.pack(fill="both", expand=True)
+        return label
 
     @staticmethod
     def _fix_catalog_card_geometry(card):
