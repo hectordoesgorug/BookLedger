@@ -1,5 +1,9 @@
 # Development and release status
 
+## v1.1.0 finalization — November 18, 2026
+
+Accepted rc1 binaries are staged unchanged at `dist/v1.1.0/` with official filenames and SHA-256 manifest. Owner physical acceptance and the non-blocking automated geometry exception are recorded in TEST_REPORT.md. Commit/push, annotated tag and GitHub publication await their separate Handover #58 authorizations. No new application development or binary rebuild was performed.
+
 BookLedger v1.0.0 was published on November 16, 2026 as a stable GitHub Release. Annotated tag `v1.0.0` points to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`. The [Windows portable ZIP](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Windows-x64-Portable.zip), [Android APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk), and checksum manifest are published at the [release page](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0); the owner confirmed downloading and verifying all three assets. Latest owner-reported physical validation: 15 PASS, 0 FAIL, 0 SKIPPED. Handover #42D is closed. Post-release maintenance and future enhancement planning are active; see the [release checklist](docs/RELEASE_CHECKLIST_v1.0.0.md) and [test report](TEST_REPORT.md).
 
 ## Android Issue #16 (November 17, 2026; implemented)

@@ -1,4 +1,4 @@
-# BookLedger v1.1.0 — Draft release notes (unpublished)
+# BookLedger v1.1.0 — Release notes (prepared; publication pending)
 
 Internal review candidate: **v1.1.0-rc1**. These notes are prepared for a future GitHub Release; no tag, release, or public asset has been created by this preparation.
 
@@ -8,25 +8,25 @@ Desktop now protects each portable library against concurrent access, offers cat
 
 Android consolidates Settings and removes the obsolete diagnostic button. Cover photography gains torch, hardware-limited zoom, and remembered framing guides. Single/Bulk Entry now makes photos ready without Save, preserves them during identifier correction and canceled Retake, and automatically starts the next scan after Queue. Partial batches can be finished by closing the next scanner and holding Queue. Reconnection regression coverage was expanded. Completed Android scope is #6, #5, #8, #19, and #16; deferred backlog features are not included.
 
-## Internal review artifacts
+## Downloads
 
-- `BookLedger-v1.1.0-rc1-Windows-x64-Portable.zip` — preferred one-file Windows 11 x64 package.
-- `BookLedger-v1.1.0-rc1-Windows-x64-Fallback.zip` — one-folder fallback; retain its `_internal/` folder.
-- `BookLedger-v1.1.0-rc1-Android.apk` — production-signed `com.bookledger.mobile`, version `1.1.0`, code `2`.
-- `SHA256SUMS-rc1.txt` — hashes of the three candidate binaries.
+- `BookLedger-v1.1.0-Windows-x64-Portable.zip` — preferred one-file Windows 11 x64 package.
+- `BookLedger-v1.1.0-Windows-x64-Fallback.zip` — one-folder fallback; retain its `_internal/` folder.
+- `BookLedger-v1.1.0-Android.apk` — production-signed `com.bookledger.mobile`, version `1.1.0`, code `2`.
+- `SHA256SUMS.txt` — hashes of the three candidate binaries.
 
-These are candidate filenames, not public release assets. Extract the entire Windows ZIP and run `BookLedger/BookLedger.exe`. Both Windows packages include the exact standalone APK at `BookLedger/mobile/BookLedger-Android.apk`. For direct APK distribution, retain the accompanying mobile README, project license, third-party notices, privacy notice, and Android license files.
+Final assets are byte-identical copies of accepted rc1. Extract the entire ZIP. Run `BookLedger/BookLedger.exe` for Portable, or `Fallback/BookLedger.exe` for Fallback; retain all sibling folders including fallback `_internal/`. Each package includes the exact standalone APK under its root at `mobile/BookLedger-Android.apk`. For direct APK distribution, retain the accompanying mobile README, project license, third-party notices, privacy notice, and Android license files.
 
 ## Upgrade and data
 
 Close the desktop and create a verified backup before upgrading. Preserve `data/`, `config.json`, and `backups/`; never replace a populated data directory with the package's empty directory. Schema v11 migrates to v12 with a nullable subtitle column; existing titles and identities are retained. Restore replaces the active library and does not merge it. Do not open a migrated library in v1.0.0; rollback requires the pre-upgrade backup and old application.
 
-Android upgrades require the same production certificate and higher version code. Owner acceptance must begin with production-signed v1.0.0 and install this exact candidate in place, preserving data. A debug-signed installation cannot prove that upgrade path. Do not uninstall or clear data to bypass a signature conflict.
+Android upgrades require the same production certificate and higher version code. The owner reports installing historical production v1.0.0 first, then the exact rc1 APK over it; Android showed an update confirmation and installation succeeded. Post-upgrade settings and pairing persistence were not separately verified. A debug-signed installation cannot prove that upgrade path. Do not uninstall or clear data to bypass a signature conflict.
 
 ## Known limits and acceptance
 
 Mobile captures are session-only and may be lost on process termination; durable capture recovery is outside this release scope. Keep the app open until acknowledgment. Transfers use authenticated, unencrypted local HTTP; use a trusted network. Barcode processing is on-device, with possible ML Kit SDK communications described in the [privacy notice](PRIVACY_NOTICE.md).
 
-An earlier Android startup ANR was not reproduced in the November 17 debug audit; its cause remains unknown. Signed-candidate device startup, real scanning, connected Single/Bulk transfer and interrupted retries, in-place upgrade, and Windows physical acceptance remain pending. Historical owner-reported passes and debug audit results are not candidate-specific acceptance. Automated verification and exact artifacts are recorded in the [candidate checklist](RELEASE_CHECKLIST_v1.1.0.md) and [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md).
+An earlier Android startup ANR was not reproduced in the November 17 debug audit; its cause remains unknown. The owner reports PASS for Windows execution/layout, backup/restore, Sales/reports/status changes, poster creation, pairing/reconnection, Android camera controls and Single/Bulk workflows including edge cases and partial/full queues. These checks were owner-reported. The desktop suite remains 517 passed, 17 skipped, 1 failed; its display-sensitive minimum-size assertion is accepted as a non-blocking exception based on successful owner layout testing. Automated verification and exact artifacts are recorded in the [candidate checklist](RELEASE_CHECKLIST_v1.1.0.md) and [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md).
 
 This preparation does not assert legal clearance or universal device compatibility. Publication requires separate owner review and authorization.

@@ -2,7 +2,7 @@
 
 ## 1.1.0 — Unreleased
 
-Internal candidate: **v1.1.0-rc1**, prepared from `8b4b904d83627c4b11ae749dd83d32bc8b46d8bc` plus the uncommitted Handover #57 preparation changes. This is not a published release.
+Accepted candidate: **v1.1.0-rc1**. Final release assets are byte-identical copies; publication awaits the explicit Git and publication checkpoints in Handover #58.
 
 ### Desktop
 
@@ -23,10 +23,10 @@ Internal candidate: **v1.1.0-rc1**, prepared from `8b4b904d83627c4b11ae749dd83d3
 ### Compatibility and limitations
 
 - Desktop schema advances from v11 to v12 by adding nullable `book_records.subtitle`. Existing titles and copy/sales identities remain unchanged. Existing v1.0.0 backups are supported by the restore/migration path. Back up before upgrade; preserve `data/`, `config.json`, and `backups/`. Downgrading a migrated library is not supported; use a pre-upgrade backup with the old application.
-- Android remains `com.bookledger.mobile`, now `1.1.0+2`, with the existing production signing identity. In-place upgrade and settings/pairing preservation require owner verification on this exact candidate.
+- Android remains `com.bookledger.mobile`, now `1.1.0+2`, with the existing production signing identity. The owner reports successful in-place upgrade from historical production v1.0.0 to the exact rc1 APK. Settings/pairing persistence after upgrade was not separately verified.
 - Pending mobile captures remain session-only: process termination can lose the queue even when temporary photos remain. Keep the app open through acknowledgment; durable mobile recovery is deferred by decision.
 - Local transfer remains token-authenticated, unencrypted HTTP on a trusted network. No transport change was made.
-- An earlier Android startup ANR remains unexplained; it was not reproduced in the November 17 debug audit. Signed-candidate startup and live transfer acceptance remain pending.
+- An earlier Android startup ANR remains unexplained; it was not reproduced in the November 17 debug audit. Owner-reported Single/Bulk acceptance and reconnection passed; the earlier ANR cause remains unknown.
 - Automated Tk/display skips and physical-device limits remain explicit in the candidate report. Mocked transfer tests do not establish hardware integration.
 - Other backlog work, including library merging, background removal, bulk desktop metadata download, and general desktop resizing, is not included.
 

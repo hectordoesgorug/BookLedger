@@ -1,6 +1,6 @@
 # BookLedger v1.1.0 release checklist
 
-**Status:** Internal v1.1.0-rc1 preparation; unpublished. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
+**Status:** Accepted v1.1.0-rc1 finalized locally; unpublished. Owner acceptance and exceptions are recorded in TEST_REPORT.md (Handover #58). Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader owner passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
 
 ## Source and identity
 
@@ -45,7 +45,9 @@
 - [x] Versioned final candidates and SHA-256 manifest verified from final bytes.
 - [x] Existing v1.0.0 archives, APK, checksum manifest, tag, and historical release documents verified unchanged.
 
-## Owner physical acceptance — all PENDING for this exact candidate
+## Owner physical acceptance — see final owner record
+
+Owner-reported PASS covers the scenarios in TEST_REPORT.md, including production in-place upgrade. Post-upgrade settings/pairing persistence and separate fallback-device testing remain unverified. The remaining geometry test failure is an accepted non-blocking exception. The following granular preparation checklist is retained without inventing additional evidence.
 
 Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/FAIL/SKIPPED for every scenario. Use only disposable library data for acceptance. The report identifies exact artifact paths. Prior debug checks and owner reports do not complete these boxes.
 
@@ -99,3 +101,16 @@ The November 17 audit left a debug-signed app installed. A debug installation is
 - [ ] Post-publication assets downloaded and SHA-256 verified against approved final manifest.
 
 No commit, push, tag, publication, candidate installation, cleanup, or historical-asset replacement is authorized by completing this preparation checklist.
+
+## Finalization verification — November 18, 2026
+
+- [x] Accepted rc1 hashes recalculated; final copies are byte-identical in `dist/v1.1.0/`.
+- [x] Both ZIP CRC checks and embedded APK identity verified.
+- [x] Production signature, application ID and version verified again.
+- [x] Final `SHA256SUMS.txt` generated: 317 bytes, SHA-256 `d3e0723ea133f36c9661e1109071e31d806731844b524d30e859ef551dfbd005`.
+- [x] Owner acceptance recorded with provenance and explicit persistence limits.
+- [x] Remaining automated geometry failure accepted by owner as non-blocking.
+- [ ] Explicit commit/push authorization received.
+- [ ] Annotated tag creation/push authorized and verified.
+- [ ] Publication/upload authorized and completed.
+- [ ] Published downloads independently hashed.

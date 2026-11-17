@@ -248,3 +248,11 @@ Candidate assessment remains **BLOCKED for release approval** because of pending
 - Final full suite after the assertion correction: **517 passed, 17 skipped, 1 failed**. The sole failure was again the separate minimum-size geometry test, with body and viewport both measured at 769 px. The target preview test passed.
 
 Classification: the original pixel-height assertion was a **test defect**; the additional whole-suite resize variability is **window/display geometry sensitivity**. Automated runs do not establish physical Windows visual acceptance. No production code changed; candidate artifacts were not rebuilt or altered.
+
+## Handover #58 — final owner acceptance (recorded November 18, 2026)
+
+The owner reports PASS using accepted v1.1.0-rc1 for Windows portable execution; APK export; Pairing, Forget Pairing, Unpair and reconnection; multiple-instance blocking; Purge with default Clam preserved; all backup/restore features; Android camera controls; Sales, voids, reports and status transitions; updated desktop layout; poster creation; Single Entry including edge cases; and Bulk Entry including partial and full queues. These are owner-reported results, not Codex-observed tests. Device/build details and separate fallback physical testing were not supplied.
+
+Production upgrade PASS: the owner first installed the historical production-signed v1.0.0 APK, then installed the exact rc1 APK over it. Android presented an update confirmation and installation succeeded. Post-upgrade settings and pairing persistence were not separately reported as verified.
+
+The owner accepts the remaining display-sensitive minimum-size geometry assertion as a non-blocking release exception, supported by successful physical layout testing. The automated suite remains 517 passed, 17 skipped, 1 failed; it is not fully passing. The original preview failure was a corrected test defect; production preview code was unchanged. The transient mobile-connection failure passed three isolated reruns. Session-only pending captures and the prior unreproduced startup ANR remain disclosed limitations.
