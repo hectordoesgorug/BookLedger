@@ -4,7 +4,9 @@
 
 BookLedger is an offline-first book inventory manager for Windows. Track bibliographic records and individual physical copies in a local SQLite database, with an Android companion for capturing ISBNs and cover photos.
 
-**Platform:** Windows 11 x64 desktop; Android companion 1.0.0+1.
+**Platform:** Windows 11 x64 desktop; current source targets desktop 1.1.0 and Android companion 1.1.0+2.
+
+**Unpublished candidate:** v1.1.0-rc1 is being prepared for owner acceptance. See the [changelog](CHANGELOG.md), [draft release notes](docs/RELEASE_NOTES_v1.1.0.md), and [candidate checklist](docs/RELEASE_CHECKLIST_v1.1.0.md). The public stable release below remains v1.0.0.
 
 **Release:** [BookLedger v1.0.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.0.0) was published on November 16, 2026. The Windows ZIP, Android APK, and `SHA256SUMS.txt` are available on the release page.
 
@@ -33,7 +35,7 @@ On first launch, BookLedger creates its local configuration and data folders. Do
 
 ## Install and pair the Android companion
 
-The [Android companion APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk) is `BookLedger-v1.0.0-Android.apk` (application ID `com.bookledger.mobile`, version `1.0.0+1`). It is distributed by sideloading, not through Google Play. You can also export the bundled APK from BookLedger Desktop when using a package that contains it. Android may ask you to allow installs from that source.
+The published [Android companion APK](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.0.0/BookLedger-v1.0.0-Android.apk) is `BookLedger-v1.0.0-Android.apk` (application ID `com.bookledger.mobile`, version `1.0.0+1`). The unpublished v1.1.0-rc1 companion uses `1.1.0+2` and requires separate acceptance. It is distributed by sideloading, not through Google Play. You can also export the bundled APK from BookLedger Desktop when using a package that contains it. Android may ask you to allow installs from that source.
 
 Open **Settings → Mobile App Setup** on the desktop, then pair the phone by scanning the QR code or entering the desktop's local IPv4 address. The devices need to reach each other on the same local network. See the [mobile guide](mobile/README.md) for pairing, transfer, and recovery instructions.
 

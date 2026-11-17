@@ -1,0 +1,46 @@
+# v1.1.0-rc1 candidate preparation report
+
+**Assessment: BLOCKED for release approval.** Candidate artifacts are prepared for Codigo review and owner acceptance. An unresolved desktop test failure and pending physical transfer, durability, and upgrade checks prevent release readiness.
+
+## Baseline and changes
+
+Prepared from clean `main` at `8b4b904d83627c4b11ae749dd83d32bc8b46d8bc`; local and fetched `origin/main` match. Historical `v1.0.0` peels to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`.
+
+Desktop is `1.1.0`; Android is `1.1.0+2`, application ID unchanged. Release materials include [changelog](../CHANGELOG.md), [draft release notes](RELEASE_NOTES_v1.1.0.md), and [acceptance checklist](RELEASE_CHECKLIST_v1.1.0.md). Source/documentation changes are in `src/bookledger/__init__.py`, `mobile/pubspec.yaml`, `tests/test_release_version.py`, `README.md`, `mobile/README.md`, `docs/PRIVACY_NOTICE.md`, and `THIRD_PARTY_NOTICES.md`. Existing implementation scope and compatibility notes are summarized in the changelog.
+
+## Automated verification
+
+- Focused version and packaging tests: **6 passed**.
+- Desktop full suite: **516 passed, 18 skipped, 1 failed**. `test_photo_preview_and_manual_metadata_values_are_preserved` expected the photo preview to grow after resize; it remained 555 px. An isolated rerun failed at the same assertion (565 px remained unchanged). No code or assertions were changed. The 18 skips require Tcl/Tk components missing from this host. Migration and backup/restore focused suite: **83 passed** with disposable test data.
+- Flutter tests: **126 passed, 0 failed, 0 skipped**. `flutter analyze`: no issues. Dart formatting: 35 files checked, 0 changed.
+- `git diff --check`: passed; configured LF-to-CRLF notices only.
+- Windows build requirements matched CPython 3.14.6 and pinned packages. The established one-file build and existing one-folder fallback spec succeeded. Both executables carry FileVersion/ProductVersion `1.1.0`.
+- Each final Windows ZIP passed CRC and structure checks, includes required license/privacy materials, embeds the byte-identical standalone APK, and contains no user config/database or signing material. Disposable extractions of both ZIPs launched for 12 seconds, then were closed. This is a build-host startup check, not physical Windows 11 or clean-machine acceptance.
+
+## Android identity and dependency review
+
+The production release APK built using the existing external signing properties. Android SDK `apksigner` verified APK Signature Scheme v2. Its certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d` matches the historical v1.0.0 production APK. Identity is `com.bookledger.mobile`, version `1.1.0`, code `2`; min SDK 24, target/compile SDK 36; `debuggable=false`, `testOnly=false`. Permissions are Camera, Internet, network state, and AndroidX's package-scoped receiver permission. The candidate was not installed.
+
+The exact release APK's compressed Flutter `NOTICES.Z` was decompressed and inspected (1,335,817 bytes), including camera, camera_platform_interface, mobile_scanner, Flutter engine, and other resolved notices. The release runtime graph contains 101 external Maven coordinates. Eight have no license declaration in their Maven POM; they match the components and upstream/artifact evidence already documented in `THIRD_PARTY_NOTICES.md`. CameraX and ML Kit versions remain consistent with the prior audit. All 92 Dart/SDK package entries have local package or SDK license material. No dependency was upgraded; the only lockfile difference from v1.0.0 remains the direct development classification of already resolved camera_platform_interface 2.15.0. These technical findings are not legal clearance.
+
+## Candidate artifacts
+
+All paths are under `dist/v1.1.0-rc1/`. `SHA256SUMS-rc1.txt` contains hashes of the three binary files.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `BookLedger-v1.1.0-rc1-Windows-x64-Portable.zip` | 60,133,742 | `6ae46145f019c6b3bc7638e5cc97c78a9caeee6138e88124af6b5be5ba1bf276` |
+| `BookLedger-v1.1.0-rc1-Windows-x64-Fallback.zip` | 60,982,251 | `8a5f64753c30951da91ac5662c20d08b3f875f6583452f5afd8cd17b6e3fd9d1` |
+| `BookLedger-v1.1.0-rc1-Android.apk` | 71,633,402 | `26e09dd5eba9cba6f4b9863c0118063c403f285a92a31c700b0a86dce4c0f854` |
+
+The previous v1.0.0 Windows ZIP, Android APK, and checksum manifest retain their recorded SHA-256 values. Their historical tag and release were not changed.
+
+## Pending acceptance and limits
+
+Physical Windows and Android checks remain pending on these exact artifacts. This includes real barcode and camera testing, authenticated Single/Bulk transfer and acknowledgment, interrupted transfer/retry, and an in-place upgrade from production-signed v1.0.0 with data preservation. The audit left a debug-signed APK installed; it is not a valid production upgrade baseline. No APK was installed as part of this work.
+
+The Android capture queue remains session-only; process termination can lose pending identifiers/queue state. An earlier startup ANR remains unexplained, though it was not reproduced in the earlier debug audit. Eight Maven POM license declaration gaps and privacy/legal suitability require owner/legal review. See the checklist for owner acceptance steps.
+
+## Git status
+
+Working tree contains only version and release documentation updates; generated candidate binaries/evidence are under ignored `dist/` and `build/`. Branch remains `main` at the starting HEAD and aligned with `origin/main`. No commit, push, tag, or publication occurred.

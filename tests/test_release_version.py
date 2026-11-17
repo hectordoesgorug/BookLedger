@@ -6,7 +6,7 @@ from scripts.windows_version_info import build_version_info
 
 
 def test_desktop_release_version_has_one_source():
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.1.0"
     assert APP_VERSION == __version__
     assert version("bookledger") == __version__
 
@@ -14,10 +14,10 @@ def test_desktop_release_version_has_one_source():
 def test_windows_file_version_uses_desktop_release_version():
     info = build_version_info(__version__)
 
-    assert info.ffi.fileVersionMS == 1 << 16
+    assert info.ffi.fileVersionMS == (1 << 16) | 1
     assert info.ffi.fileVersionLS == 0
     assert "FileVersion" in str(info)
-    assert "1.0.0" in str(info)
+    assert "1.1.0" in str(info)
 
 
 def test_windows_file_version_rejects_non_three_part_versions():

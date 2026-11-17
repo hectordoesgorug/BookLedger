@@ -220,3 +220,19 @@ The new widget geometry test passed in the focused run. It checks the measured t
 - `git diff --check` — passed; Git reports configured LF-to-CRLF notices only.
 
 Pure text tests cover one-line, two-line, overflowing, long unbroken, and empty values. A Tk geometry test passed for mixed short and long text, confirming two-line areas and equal overall card heights; database tests confirm complete title and author values remain in Catalog and More Details. A full app visual review was not performed.
+
+## v1.1.0-rc1 candidate preparation (2026-11-17)
+
+Exact artifacts and evidence are recorded in `docs/RELEASE_CANDIDATE_v1.1.0-rc1.md` and `dist/v1.1.0-rc1/evidence/`.
+
+- `.venv\Scripts\python.exe -m pytest tests\test_release_version.py tests\test_portable_packaging.py -q` — **6 passed**.
+- `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-rc1-full` — **516 passed, 18 skipped, 1 failed**. `test_photo_preview_and_manual_metadata_values_are_preserved` failed because the preview height did not grow after geometry resize. An isolated rerun also failed at that assertion. No source or assertion was changed. Skips require missing Tcl/Tk display files.
+- `.venv\Scripts\python.exe -m pytest tests\test_uuid_backup_restore.py tests\test_catalog.py -q -rs --basetemp=.pytest-tmp-rc1-migration-backup` — **83 passed** on disposable test data.
+- `flutter test --reporter expanded` — **126 passed, 0 failed, 0 skipped**.
+- `flutter analyze` — **no issues**.
+- `dart format --output=none --set-exit-if-changed lib test` — **35 files, 0 changed**.
+- `git diff --check` — passed; configured LF-to-CRLF notices only.
+- Production-signed APK built and verified against the historical production certificate. Release notices and resolved Android license graph were inspected; see `THIRD_PARTY_NOTICES.md` and the candidate evidence inventory.
+- One-file and fallback ZIPs passed integrity and composition checks. Their embedded APK hashes match the standalone APK. Both were launched from disposable extractions for 12 seconds and closed; no physical acceptance device was used.
+
+Candidate assessment remains **BLOCKED for release approval** because of the desktop preview test failure, pending physical transfer and upgrade checks, and known session-only Android capture state. No candidate APK was installed.

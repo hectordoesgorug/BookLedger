@@ -4,7 +4,7 @@
 
 **Project:** [BookLedger on GitHub](https://github.com/hectordoesgorug/BookLedger)
 
-BookLedger stores your book inventory, settings, database, and photos on your Windows computer. In the portable version these files are kept beside the application; configuration may use your Windows profile if that folder is not writable. The Android app keeps captured photos in temporary app storage while a transfer is pending. The desktop stages received captures in its local data folder and database until you catalog or discard them. Temporary-file cleanup can depend on app and operating-system behavior.
+BookLedger stores your book inventory, settings, database, and photos on your Windows computer. In the portable version these files are kept beside the application; configuration may use your Windows profile if that folder is not writable. The Android app keeps captured photos in temporary app storage while a transfer is pending. Pending capture and queue metadata are session-only: process termination can lose the queue even if temporary photographs remain. Keep the app open until the desktop acknowledges receipt. The desktop stages received captures in its local data folder and database until you catalog or discard them. Temporary-file cleanup can depend on app and operating-system behavior.
 
 BookLedger does not send your inventory to a BookLedger-operated cloud service. Some user-triggered actions do use networks:
 
