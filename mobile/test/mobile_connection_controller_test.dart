@@ -12,7 +12,6 @@ class _MemoryPairingStore implements PairingStore {
   int writes = 0;
   int clears = 0;
   bool failWrites = false;
-  bool failVerify = false;
 
   @override
   Future<DesktopPairing?> read() async => pairing;
@@ -30,13 +29,6 @@ class _MemoryPairingStore implements PairingStore {
   Future<void> clear() async {
     clears++;
     pairing = null;
-  }
-
-  @override
-  Future<void> verify() async {
-    if (failVerify) {
-      throw StateError('Secure storage unavailable');
-    }
   }
 }
 
@@ -394,22 +386,6 @@ void main() {
     expect(saved.endpoints, [endpoint]);
     expect(saved.lastEndpoint, endpoint);
   });
-
-  test(
-    'secure-storage self test reports write/read failures without pairing',
-    () async {
-      final store = _MemoryPairingStore()..failVerify = true;
-      final controller = MobileConnectionController(
-        store: store,
-        transport: _FakeConnectionTransport(),
-      );
-      addTearDown(controller.dispose);
-
-      expect(await controller.verifySecureStorage(), isFalse);
-      expect(controller.message, contains('StateError'));
-      expect(controller.isPaired, isFalse);
-    },
-  );
 
   test('failed secure storage rolls back the issued desktop pairing', () async {
     final store = _MemoryPairingStore()..failWrites = true;

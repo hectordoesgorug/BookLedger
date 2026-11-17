@@ -154,14 +154,6 @@ class _MobileSetupScreenState extends State<MobileSetupScreen> {
                   ),
                 ] else ...[
                   const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: controller.isBusy
-                        ? null
-                        : controller.verifySecureStorage,
-                    icon: const Icon(Icons.lock_outline),
-                    label: const Text('Test secure storage'),
-                  ),
-                  const SizedBox(height: 18),
                   FilledButton.icon(
                     onPressed: controller.isBusy ? null : _scanQr,
                     icon: const Icon(Icons.qr_code_scanner),

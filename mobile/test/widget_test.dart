@@ -43,9 +43,6 @@ class _MemoryPairingStore implements PairingStore {
 
   @override
   Future<void> write(DesktopPairing value) async => pairing = value;
-
-  @override
-  Future<void> verify() async {}
 }
 
 class _NoDesktopDiscovery implements DesktopDiscovery {
@@ -281,6 +278,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Pairing with desktop QR code'), findsNothing);
     expect(find.text('Pair with desktop QR code'), findsOneWidget);
+    expect(find.text('Test secure storage'), findsNothing);
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('Clear Data'), findsOneWidget);

@@ -203,7 +203,6 @@ abstract interface class PairingStore {
   Future<DesktopPairing?> read();
   Future<void> write(DesktopPairing pairing);
   Future<void> clear();
-  Future<void> verify();
 }
 
 class SecurePairingStore implements PairingStore {
@@ -229,24 +228,6 @@ class SecurePairingStore implements PairingStore {
 
   @override
   Future<void> clear() => _storage.delete(key: _pairingStorageKey);
-
-  @override
-  Future<void> verify() async {
-    const key = 'secure_storage_probe_v1';
-    final random = Random.secure();
-    final challenge = base64Url.encode(
-      List<int>.generate(32, (_) => random.nextInt(256)),
-    );
-    try {
-      await _storage.write(key: key, value: challenge);
-      final result = await _storage.read(key: key);
-      if (result != challenge) {
-        throw StateError('Secure-storage round trip did not match.');
-      }
-    } finally {
-      await _storage.delete(key: key);
-    }
-  }
 }
 
 class PairingRejectedException implements Exception {
@@ -653,22 +634,6 @@ class MobileConnectionController extends ChangeNotifier
     return next;
   }
 
-  Future<bool> verifySecureStorage() async {
-    try {
-      await _store.verify();
-      _message = 'Secure storage write/read test passed.';
-      debugPrint('[BookLedger] Secure-storage probe passed.');
-      return true;
-    } on Object catch (error) {
-      final detail = _safeErrorLabel(error);
-      debugPrint('[BookLedger] Secure-storage probe failed: $detail');
-      _message = 'Secure storage test failed ($detail).';
-      return false;
-    } finally {
-      _notify();
-    }
-  }
-
   String _safeErrorLabel(Object error) {
     if (error is PlatformException) {
       return 'PlatformException code=${error.code}';
@@ -809,7 +774,7 @@ class MobileConnectionController extends ChangeNotifier
       _status = MobileConnectionStatus.serviceError;
       if (issuedPairing != null) {
         _message = rolledBack
-            ? 'Desktop pairing was accepted, but secure storage failed ($detail). Test secure storage and retry.'
+            ? 'Desktop pairing was accepted, but secure storage failed ($detail). Retry pairing.'
             : 'Desktop pairing was accepted, but secure storage failed ($detail). Unpair the phone on desktop before retrying.';
       } else {
         _message =
