@@ -12,7 +12,7 @@ The combined Windows portable ZIP includes the production-signed app at `mobile/
 
 BookLedger Mobile stays in portrait and keeps the display awake while it is in the foreground. The device's power button can still lock the screen manually. Android's normal display timeout applies while the app is in the background; returning to BookLedger restores the foreground behavior.
 
-During live cover-photo preview, use the torch button for continuous light, the zoom slider when the camera supports zoom, and the Guide button to cycle between L-frame, 3×3 grid, 4×4 grid, and no guides. These guides are on-screen alignment aids and are not added to saved photos. Camera controls disappear after capture; Retake returns to the selected guide mode.
+During live cover-photo preview, use the torch button for continuous light, the zoom slider for supported 0.5× steps up to 3.0×, and the Guide button to cycle between L-frame, 3×3 grid, 4×4 grid, and Off. Some cameras do not support the 0.5× stop. Zoom and Guide selections are remembered on the device across capture sessions and app restarts. The guide overlays are alignment aids only and are not added to captured photos. Camera controls disappear after capture; Retake restores the selected preferences.
 
 ## Permissions and privacy
 

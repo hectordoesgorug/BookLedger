@@ -662,15 +662,24 @@ void main() {
         find.textContaining('continuous camera lighting on or off'),
         findsOneWidget,
       );
-      expect(find.textContaining('slider to zoom in or out'), findsOneWidget);
+      expect(
+        find.textContaining('0.5× steps from 0.5× up to 3.0×'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('do not offer 0.5×'), findsOneWidget);
+      expect(
+        find.textContaining('Your selected zoom is remembered.'),
+        findsOneWidget,
+      );
       expect(
         find.textContaining('cycle through L-shaped corner guides'),
         findsOneWidget,
       );
       expect(
-        find.textContaining('visual alignment references only'),
+        find.textContaining('Your selection is remembered.'),
         findsOneWidget,
       );
+      expect(find.textContaining('overlays do not crop'), findsOneWidget);
       expect(find.byType(Scrollable), findsWidgets);
       for (
         var scroll = 0;

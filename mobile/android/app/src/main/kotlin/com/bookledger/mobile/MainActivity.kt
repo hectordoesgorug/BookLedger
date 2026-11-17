@@ -81,6 +81,16 @@ class MainActivity : FlutterActivity() {
                         mapOf(
                             "version" to BuildConfig.VERSION_NAME,
                             "theme" to preferences.getString(THEME_KEY, "default"),
+                            "cameraGuideMode" to (
+                                runCatching {
+                                    preferences.getString(CAMERA_GUIDE_KEY, "lFrame")
+                                }.getOrNull()?.takeIf { it in CAMERA_GUIDE_MODES } ?: "lFrame"
+                            ),
+                            "cameraZoom" to (
+                                runCatching {
+                                    preferences.getFloat(CAMERA_ZOOM_KEY, 1.0f).toDouble()
+                                }.getOrNull()?.takeIf { it in CAMERA_ZOOM_LEVELS } ?: 1.0
+                            ),
                         ),
                     )
                     "setTheme" -> {
@@ -89,6 +99,24 @@ class MainActivity : FlutterActivity() {
                             result.success(false)
                         } else {
                             result.success(preferences.edit().putString(THEME_KEY, theme).commit())
+                        }
+                    }
+                    "setCameraPreferences" -> {
+                        val values = call.arguments as? Map<*, *>
+                        val guideMode = values?.get("guideMode") as? String
+                        val zoom = (values?.get("zoom") as? Number)?.toDouble()
+                        if (
+                            guideMode == null || guideMode !in CAMERA_GUIDE_MODES ||
+                            zoom == null || zoom !in CAMERA_ZOOM_LEVELS
+                        ) {
+                            result.success(false)
+                        } else {
+                            result.success(
+                                preferences.edit()
+                                    .putString(CAMERA_GUIDE_KEY, guideMode)
+                                    .putFloat(CAMERA_ZOOM_KEY, zoom.toFloat())
+                                    .commit(),
+                            )
                         }
                     }
                     else -> result.notImplemented()
@@ -195,6 +223,10 @@ class MainActivity : FlutterActivity() {
         const val APP_SETTINGS_CHANNEL = "com.bookledger.mobile/app_settings"
         const val APP_SETTINGS_PREFERENCES = "bookledger_mobile_preferences"
         const val THEME_KEY = "theme"
+        const val CAMERA_GUIDE_KEY = "camera_guide_mode"
+        const val CAMERA_ZOOM_KEY = "camera_zoom"
+        val CAMERA_GUIDE_MODES = setOf("lFrame", "grid3x3", "grid4x4", "off")
+        val CAMERA_ZOOM_LEVELS = setOf(0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
         const val DISCOVERY_CHANNEL = "com.bookledger.mobile/desktop_discovery"
         const val SERVICE_TYPE = "_bookledger._tcp."
         const val DISCOVERY_TIMEOUT_MS = 8_000L

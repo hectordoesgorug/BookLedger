@@ -10,6 +10,32 @@ void main() {
     expect(FramingGuideMode.off.next, FramingGuideMode.lFrame);
   });
 
+  test(
+    'guide preference values load and invalid values default to L-frame',
+    () {
+      expect(framingGuideModeFromPreference('lFrame'), FramingGuideMode.lFrame);
+      expect(
+        framingGuideModeFromPreference('grid3x3'),
+        FramingGuideMode.grid3x3,
+      );
+      expect(
+        framingGuideModeFromPreference('grid4x4'),
+        FramingGuideMode.grid4x4,
+      );
+      expect(framingGuideModeFromPreference('off'), FramingGuideMode.off);
+      expect(
+        framingGuideModeFromPreference('invalid'),
+        FramingGuideMode.lFrame,
+      );
+      expect(framingGuideModeFromPreference(null), FramingGuideMode.lFrame);
+    },
+  );
+
+  test('guide strokes are approximately half their previous widths', () {
+    expect(framingGuideOutlineStrokeWidth, 2.0);
+    expect(framingGuideStrokeWidth, 1.0);
+  });
+
   test('L-frame geometry is centered and portrait-oriented', () {
     final layout = framingGuideLayout(
       const Size(400, 700),

@@ -15,6 +15,8 @@ class PhotoCameraView extends StatefulWidget {
     required this.captureRequestId,
     required this.guideMode,
     required this.onGuideModeChanged,
+    required this.preferredZoom,
+    required this.onZoomChanged,
     required this.onCaptured,
     required this.onCancel,
     super.key,
@@ -23,6 +25,8 @@ class PhotoCameraView extends StatefulWidget {
   final int captureRequestId;
   final FramingGuideMode guideMode;
   final ValueChanged<FramingGuideMode> onGuideModeChanged;
+  final double preferredZoom;
+  final ValueChanged<double> onZoomChanged;
   final Future<void> Function(String path) onCaptured;
   final VoidCallback onCancel;
 
@@ -41,8 +45,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
   bool _torchAvailable = true;
   bool _torchOn = false;
   bool _zoomAvailable = false;
-  double _minimumZoomLevel = 1;
-  double _maximumZoomLevel = 1;
+  List<double> _supportedZoomLevels = const [];
   double _zoomLevel = 1;
   double _appliedZoomLevel = 1;
   double? _queuedZoomLevel;
@@ -130,23 +133,25 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       );
       await candidate.initialize();
 
-      var minZoom = 1.0;
-      var maxZoom = 1.0;
+      var supportedZoomLevels = <double>[];
       var initialZoom = 1.0;
       var zoomAvailable = false;
+      var cameraMinimumZoom = double.nan;
+      var cameraMaximumZoom = double.nan;
       try {
-        minZoom = await candidate.getMinZoomLevel();
-        maxZoom = await candidate.getMaxZoomLevel();
-        if (minZoom.isFinite && maxZoom.isFinite && minZoom <= maxZoom) {
-          initialZoom = initialPhotoZoomLevel(
-            minimum: minZoom,
-            maximum: maxZoom,
+        cameraMinimumZoom = await candidate.getMinZoomLevel();
+        cameraMaximumZoom = await candidate.getMaxZoomLevel();
+        supportedZoomLevels = supportedCameraZoomLevels(
+          minimum: cameraMinimumZoom,
+          maximum: cameraMaximumZoom,
+        );
+        if (supportedZoomLevels.isNotEmpty) {
+          initialZoom = nearestCameraZoomLevel(
+            widget.preferredZoom,
+            supportedZoomLevels,
           );
-          zoomAvailable = hasAdjustableZoom(minimum: minZoom, maximum: maxZoom);
+          zoomAvailable = supportedZoomLevels.length > 1;
           await candidate.setZoomLevel(initialZoom);
-        } else {
-          minZoom = 1;
-          maxZoom = 1;
         }
       } on Object catch (error, stackTrace) {
         developer.log(
@@ -155,8 +160,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
           error: error,
           stackTrace: stackTrace,
         );
-        minZoom = 1;
-        maxZoom = 1;
+        supportedZoomLevels = [];
         initialZoom = 1;
         zoomAvailable = false;
       }
@@ -176,7 +180,8 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       developer.log(
         'Photo camera ${selectedCamera.name} (${selectedCamera.lensType}), '
         'preview ${candidate.value.previewSize}, '
-        'zoom range $minZoom–$maxZoom; selected $initialZoom.',
+        'camera zoom range $cameraMinimumZoom–$cameraMaximumZoom, '
+        'discrete levels $supportedZoomLevels; selected $initialZoom.',
         name: 'BookLedger.camera',
       );
 
@@ -186,8 +191,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
       }
 
       _controller = candidate;
-      _minimumZoomLevel = minZoom;
-      _maximumZoomLevel = maxZoom;
+      _supportedZoomLevels = supportedZoomLevels;
       _zoomLevel = initialZoom;
       _appliedZoomLevel = initialZoom;
       _zoomAvailable = zoomAvailable;
@@ -304,9 +308,9 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     final controller = _controller;
     if (controller == null || !_zoomAvailable || _takingPhoto) return;
 
-    final requested = value.clamp(_minimumZoomLevel, _maximumZoomLevel);
-    setState(() => _zoomLevel = requested.toDouble());
-    _queuedZoomLevel = requested.toDouble();
+    final requested = nearestCameraZoomLevel(value, _supportedZoomLevels);
+    setState(() => _zoomLevel = requested);
+    _queuedZoomLevel = requested;
     if (!_zoomUpdateInFlight) {
       unawaited(_applyQueuedZoom(controller));
     }
@@ -324,6 +328,9 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
         _queuedZoomLevel = null;
         await controller.setZoomLevel(requested);
         _appliedZoomLevel = requested;
+        if (mounted && identical(controller, _controller)) {
+          widget.onZoomChanged(requested);
+        }
       }
     } on Object catch (error, stackTrace) {
       developer.log(
@@ -463,8 +470,9 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
     child: IconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      color: Colors.white,
-      disabledColor: Colors.white38,
+      iconSize: 18,
+      color: Colors.white.withValues(alpha: 0.8),
+      disabledColor: Colors.white.withValues(alpha: 0.304),
       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
       padding: EdgeInsets.zero,
       icon: Icon(icon),
@@ -496,15 +504,17 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
           ),
           child: Row(
             children: [
-              Text(
-                '${_zoomLevel.toStringAsFixed(1)}×',
-                key: const ValueKey('camera-zoom-value'),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
+              if (_supportedZoomLevels.isNotEmpty) ...[
+                Text(
+                  '${_zoomLevel.toStringAsFixed(1)}×',
+                  key: const ValueKey('camera-zoom-value'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 4),
+                const SizedBox(width: 4),
+              ],
               if (_zoomAvailable)
                 Expanded(
                   child: SliderTheme(
@@ -522,8 +532,9 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
                       value: '${_zoomLevel.toStringAsFixed(1)}×',
                       child: Slider(
                         key: const ValueKey('camera-zoom-slider'),
-                        min: _minimumZoomLevel,
-                        max: _maximumZoomLevel,
+                        min: _supportedZoomLevels.first,
+                        max: _supportedZoomLevels.last,
+                        divisions: _supportedZoomLevels.length - 1,
                         value: _zoomLevel,
                         onChanged: _requestZoomLevel,
                       ),
@@ -533,9 +544,7 @@ class _PhotoCameraViewState extends State<PhotoCameraView>
               else
                 Expanded(
                   child: Text(
-                    _maximumZoomLevel == _minimumZoomLevel
-                        ? 'Fixed'
-                        : 'Unavailable',
+                    _supportedZoomLevels.isEmpty ? 'Unavailable' : 'Fixed',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white70),
                   ),

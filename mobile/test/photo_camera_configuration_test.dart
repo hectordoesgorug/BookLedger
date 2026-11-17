@@ -7,22 +7,51 @@ void main() {
     expect(photoCameraResolutionPreset, ResolutionPreset.max);
   });
 
-  test('camera starts at 1x within the supported zoom range', () {
-    expect(initialPhotoZoomLevel(minimum: 1.0, maximum: 10.0), 1.0);
+  test('discrete zoom stops are half steps capped at 3x', () {
+    expect(discreteCameraZoomLevels, [0.5, 1, 1.5, 2, 2.5, 3]);
+    expect(
+      supportedCameraZoomLevels(minimum: 0.5, maximum: 10),
+      discreteCameraZoomLevels,
+    );
   });
 
-  test('camera start zoom clamps to a hardware minimum above 1x', () {
-    expect(initialPhotoZoomLevel(minimum: 2.0, maximum: 10.0), 2.0);
+  test('levels below the camera minimum are omitted', () {
+    expect(supportedCameraZoomLevels(minimum: 1.0, maximum: 3.0), [
+      1.0,
+      1.5,
+      2.0,
+      2.5,
+      3.0,
+    ]);
   });
 
-  test('camera start zoom clamps to a fixed zoom range', () {
-    expect(initialPhotoZoomLevel(minimum: 2.0, maximum: 2.0), 2.0);
+  test('levels above the camera maximum are omitted', () {
+    expect(supportedCameraZoomLevels(minimum: 1.0, maximum: 2.2), [
+      1.0,
+      1.5,
+      2.0,
+    ]);
   });
 
-  test('invalid zoom limits fall back to 1x without enabling the slider', () {
-    expect(initialPhotoZoomLevel(minimum: 4.0, maximum: 2.0), 1.0);
-    expect(initialPhotoZoomLevel(minimum: double.nan, maximum: 2.0), 1.0);
-    expect(hasAdjustableZoom(minimum: 2.0, maximum: 2.0), isFalse);
-    expect(hasAdjustableZoom(minimum: 1.0, maximum: 4.0), isTrue);
+  test('minimum below 1x is not treated as proof that 0.5x is supported', () {
+    expect(supportedCameraZoomLevels(minimum: 0.6, maximum: 3.0).first, 1.0);
+  });
+
+  test('saved zoom resolves to the nearest supported stop', () {
+    expect(nearestCameraZoomLevel(1.0, [0.5, 1, 1.5, 2, 2.5, 3]), 1.0);
+    expect(nearestCameraZoomLevel(2.5, [1, 1.5, 2]), 2.0);
+    expect(nearestCameraZoomLevel(1.0, []), 1.0);
+  });
+
+  test('invalid zoom limits offer no discrete stop', () {
+    expect(supportedCameraZoomLevels(minimum: 4.0, maximum: 2.0), isEmpty);
+    expect(
+      supportedCameraZoomLevels(minimum: double.nan, maximum: 2.0),
+      isEmpty,
+    );
+    expect(
+      supportedCameraZoomLevels(minimum: 1, maximum: double.infinity),
+      isEmpty,
+    );
   });
 }

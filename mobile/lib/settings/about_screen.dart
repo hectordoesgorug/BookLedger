@@ -104,13 +104,13 @@ class AboutScreen extends StatelessWidget {
               'Torch: tap the torch icon to switch continuous camera lighting on or off. It is available only when the camera supports it.',
             ),
             _paragraph(
-              'Zoom: move the slider to zoom in or out when supported. The multiplier shows the current zoom level.',
+              'Zoom: use 0.5× steps from 0.5× up to 3.0×, limited to levels supported by the active camera. Some cameras, including cameras with a 1.0× minimum, do not offer 0.5×. Your selected zoom is remembered.',
             ),
             _paragraph(
-              'Guide: tap the icon to cycle through L-shaped corner guides, a 3×3 yellow grid with a red center dot, a 4×4 yellow grid with a red center dot, and no guides.',
+              'Guide: tap the icon to cycle through L-shaped corner guides, a 3×3 yellow grid with a red center dot, a 4×4 yellow grid with a red center dot, and Off. Your selection is remembered.',
             ),
             _paragraph(
-              'Guides are visual alignment references only; they do not crop, straighten, or otherwise change the saved photograph.',
+              'Guides are visual alignment references only; overlays do not crop, straighten, or otherwise change captured photographs.',
             ),
           ]),
           _section(context, 'Pairing and Connectivity', [

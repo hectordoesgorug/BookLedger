@@ -4,7 +4,25 @@ import 'package:flutter/material.dart';
 
 enum FramingGuideMode { lFrame, grid3x3, grid4x4, off }
 
+const framingGuideOutlineStrokeWidth = 2.0;
+const framingGuideStrokeWidth = 1.0;
+
+FramingGuideMode framingGuideModeFromPreference(String? value) =>
+    switch (value) {
+      'grid3x3' => FramingGuideMode.grid3x3,
+      'grid4x4' => FramingGuideMode.grid4x4,
+      'off' => FramingGuideMode.off,
+      _ => FramingGuideMode.lFrame,
+    };
+
 extension FramingGuideModeDetails on FramingGuideMode {
+  String get preferenceValue => switch (this) {
+    FramingGuideMode.lFrame => 'lFrame',
+    FramingGuideMode.grid3x3 => 'grid3x3',
+    FramingGuideMode.grid4x4 => 'grid4x4',
+    FramingGuideMode.off => 'off',
+  };
+
   String get label => switch (this) {
     FramingGuideMode.lFrame => 'L-frame',
     FramingGuideMode.grid3x3 => '3×3 grid',
@@ -99,12 +117,12 @@ class FramingGuidesPainter extends CustomPainter {
       ..color = Colors.black.withAlpha(180)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 4;
+      ..strokeWidth = framingGuideOutlineStrokeWidth;
     final guide = Paint()
       ..color = const Color(0xFFFFEB3B)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 2;
+      ..strokeWidth = framingGuideStrokeWidth;
 
     if (mode == FramingGuideMode.lFrame) {
       final length = math.min(layout.frame.width, layout.frame.height) * 0.09;

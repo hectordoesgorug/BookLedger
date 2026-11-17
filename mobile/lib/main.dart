@@ -165,6 +165,7 @@ class HomeScreen extends StatelessWidget {
         builder: (_) => CaptureScreen(
           mode: CaptureMode.single,
           connectionController: connectionController,
+          appSettings: appSettings,
         ),
       ),
     );
@@ -173,8 +174,10 @@ class HomeScreen extends StatelessWidget {
   void _openBulkEntry(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            QueueSizeScreen(connectionController: connectionController),
+        builder: (_) => QueueSizeScreen(
+          connectionController: connectionController,
+          appSettings: appSettings,
+        ),
       ),
     );
   }
@@ -410,6 +413,7 @@ class CaptureScreen extends StatefulWidget {
     this.bulkQueue,
     this.workflow,
     this.connectionController,
+    this.appSettings,
     super.key,
   });
 
@@ -418,6 +422,7 @@ class CaptureScreen extends StatefulWidget {
   final BulkCaptureQueue? bulkQueue;
   final SingleEntryWorkflow? workflow;
   final MobileConnectionController? connectionController;
+  final MobileAppSettings? appSettings;
 
   @override
   State<CaptureScreen> createState() => _CaptureScreenState();
@@ -431,6 +436,8 @@ class _CaptureScreenState extends State<CaptureScreen>
   late final bool _ownsBulkQueue;
   int _photoCaptureRequestId = 0;
   FramingGuideMode _guideMode = FramingGuideMode.lFrame;
+  double _preferredZoom = 1.0;
+  late bool _cameraPreferencesReady;
   bool _queueing = false;
   bool _transferring = false;
   String _singleBatchId = newCaptureUuid();
@@ -453,6 +460,11 @@ class _CaptureScreenState extends State<CaptureScreen>
     _ownsWorkflow = widget.workflow == null;
     _workflow = widget.workflow ?? SingleEntryWorkflow();
     _workflow.addListener(_onWorkflowChanged);
+    _cameraPreferencesReady = widget.appSettings == null;
+    final settings = widget.appSettings;
+    if (settings != null) {
+      unawaited(_loadCameraPreferences(settings));
+    }
     _ownsBulkQueue = widget.bulkQueue == null;
     widget.connectionController?.addListener(_onWorkflowChanged);
     if (_isBulk) {
@@ -467,6 +479,54 @@ class _CaptureScreenState extends State<CaptureScreen>
   void _onWorkflowChanged() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _loadCameraPreferences(MobileAppSettings settings) async {
+    await settings.initialize();
+    if (!mounted) return;
+    setState(() {
+      _guideMode = framingGuideModeFromPreference(settings.cameraGuideMode);
+      _preferredZoom = settings.cameraZoom;
+      _cameraPreferencesReady = true;
+    });
+  }
+
+  void _handleGuideModeChanged(FramingGuideMode mode) {
+    if (_guideMode == mode) return;
+    setState(() => _guideMode = mode);
+    final settings = widget.appSettings;
+    if (settings != null) unawaited(_saveGuideMode(settings, mode));
+  }
+
+  Future<void> _saveGuideMode(
+    MobileAppSettings settings,
+    FramingGuideMode mode,
+  ) async {
+    final saved = await settings.setCameraGuideMode(mode.preferenceValue);
+    if (!saved && mounted && _guideMode == mode) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('The camera guide preference could not be saved.'),
+        ),
+      );
+    }
+  }
+
+  void _handleZoomChanged(double zoom) {
+    if (_preferredZoom != zoom) setState(() => _preferredZoom = zoom);
+    final settings = widget.appSettings;
+    if (settings != null) unawaited(_saveZoom(settings, zoom));
+  }
+
+  Future<void> _saveZoom(MobileAppSettings settings, double zoom) async {
+    final saved = await settings.setCameraZoom(zoom);
+    if (!saved && mounted && _preferredZoom == zoom) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('The camera zoom preference could not be saved.'),
+        ),
+      );
     }
   }
 
@@ -583,7 +643,6 @@ class _CaptureScreenState extends State<CaptureScreen>
     );
     if (confirmed == true) {
       await _workflow.clear();
-      if (mounted) setState(() => _guideMode = FramingGuideMode.lFrame);
     }
   }
 
@@ -619,7 +678,6 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
       if (mounted) {
         _workflow.resetAfterSuccessfulQueue();
-        setState(() => _guideMode = FramingGuideMode.lFrame);
       }
     } catch (_) {
       if (mounted) {
@@ -661,7 +719,6 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
       if (sent && mounted) {
         await _workflow.clear();
-        if (mounted) setState(() => _guideMode = FramingGuideMode.lFrame);
         _singleBatchId = newCaptureUuid();
         _showSuccessMessage(
           'Desktop received the capture. Cataloging will follow on desktop.',
@@ -876,13 +933,21 @@ class _CaptureScreenState extends State<CaptureScreen>
       );
     }
     if (_workflow.photoCameraActive) {
+      if (!_cameraPreferencesReady) {
+        return const ColoredBox(
+          color: Colors.black,
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
       return Stack(
         fit: StackFit.expand,
         children: [
           PhotoCameraView(
             captureRequestId: _photoCaptureRequestId,
             guideMode: _guideMode,
-            onGuideModeChanged: (mode) => setState(() => _guideMode = mode),
+            onGuideModeChanged: _handleGuideModeChanged,
+            preferredZoom: _preferredZoom,
+            onZoomChanged: _handleZoomChanged,
             onCaptured: _handlePhotoCaptured,
             onCancel: _workflow.cancelPhotoCapture,
           ),
@@ -1100,9 +1165,14 @@ class _CaptureScreenState extends State<CaptureScreen>
 }
 
 class QueueSizeScreen extends StatefulWidget {
-  const QueueSizeScreen({this.connectionController, super.key});
+  const QueueSizeScreen({
+    this.connectionController,
+    this.appSettings,
+    super.key,
+  });
 
   final MobileConnectionController? connectionController;
+  final MobileAppSettings? appSettings;
 
   @override
   State<QueueSizeScreen> createState() => _QueueSizeScreenState();
@@ -1120,6 +1190,7 @@ class _QueueSizeScreenState extends State<QueueSizeScreen> {
           mode: CaptureMode.bulk,
           queueTarget: _queueSize,
           connectionController: widget.connectionController,
+          appSettings: widget.appSettings,
         ),
       ),
     );
