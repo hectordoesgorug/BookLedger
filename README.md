@@ -67,6 +67,14 @@ BookLedger does not sync your library to a BookLedger-operated cloud service. Co
 
 Desktop and phone communicate using authenticated, **unencrypted local HTTP**. Pair only on a trusted network. Windows Firewall may need to allow BookLedger on a trusted Private network. Android pending captures are session-only and may be lost if the app process ends before transfer is acknowledged. Backups are not encrypted. Barcode scanning runs on-device, though the bundled ML Kit SDK may communicate with Google as described in the [Privacy Notice](docs/PRIVACY_NOTICE.md).
 
+## Checking for updates in current source builds
+
+The desktop workspace has a **Check for Updates** text link beside its status line. Android Settings has the same action below **Clear Data**. Checks run only when selected, contact the official GitHub Releases API over HTTPS, and show stable-release versions and notes without changing library data, pairing or preferences. Source/debug builds can inspect releases but show **Unsupported Update** for packaged updates.
+
+The desktop's **Visit GitHub** link directly below **About** opens the project repository in the default browser. Both desktop links support mouse activation, Tab focus, Enter and Space, with theme-compatible colors and hover/focus emphasis.
+
+This feature is not included in the published v1.1.0 binaries. It opens the official release page for manual instructions; it does not download or install an update. Safe Windows replacement and Android installation remain separate work; see the [update system design](docs/UPDATE_SYSTEM.md) and [verification results](TEST_REPORT.md). Send pending phone captures and back up the desktop library before a manual upgrade.
+
 ## Currency and SRP
 
 Choose the library currency in **Settings → Preferences → Customize**. A fresh library uses PHP. Changing the currency without conversion keeps all numbers and changes how they are interpreted. Converting values uses a dated Frankfurter reference rate, creates a recovery backup, and converts asking prices, sale history, and informational SRPs together. Conversion requires an internet connection; displaying values and changing notation do not. All currencies display two decimal places.

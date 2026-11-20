@@ -6,6 +6,8 @@
 - `bookledger.db.database`: SQLite connection setup, versioned schema migration, canonical locations, integrity checks, consistent snapshots.
 - `bookledger.services.catalog`: validation, duplicate lookup, copy creation/editing, canonical location management, contextual price and explicit status/sales rules.
 - `bookledger.services.description_shortener`: deterministic local selection of complete description sentences.
+- `bookledger.services.updates` and `bookledger.ui.updates`: explicit stable GitHub release discovery and a nonblocking desktop dialog, independent of metadata providers.
+- `bookledger.services.update_archive`: read-only checksum/path/layout prototype; it cannot extract or replace installed files. Android discovery lives in `mobile/lib/updates/`. The [update system design](UPDATE_SYSTEM.md) defines the proposed Windows helper and Android installer contracts and their unverified installation gates.
 - `bookledger.services.isbn`: ISBN normalization, check-digit validation, and safe ISBN-10/ISBN-13 alias conversion (978 ISBN-13 only).
 - `bookledger.services.metadata`: provider orchestration, field merging, and lookup outcomes. Open Library is primary, Google Books is the fallback/enrichment provider, and Booktopia is the final HTML enrichment source for supported missing fields.
 - `bookledger.services.booktopia`: bounded HTTPS ISBN-search and product-page adapter. It verifies page ISBN evidence, parses matched schema.org Book data and standard description markup, and does not use Booktopia prices.

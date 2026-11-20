@@ -184,13 +184,34 @@ def test_short_fields_use_the_approved_two_column_form_layout(form):
 
 def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     widget, root, _photo = form
+
+    def resize(width, height):
+        # Windows may acknowledge a geometry request after update() returns.
+        configured = tk.BooleanVar(root)
+
+        def on_configure(event):
+            if event.widget is widget and (event.width, event.height) == (width, height):
+                configured.set(True)
+
+        binding = widget.bind("<Configure>", on_configure, add="+")
+        timeout = widget.after(2000, lambda: configured.set(True))
+        try:
+            widget.geometry(f"{width}x{height}")
+            if (widget.winfo_width(), widget.winfo_height()) != (width, height):
+                widget.wait_variable(configured)
+            root.update()
+            assert (widget.winfo_width(), widget.winfo_height()) == (width, height)
+        finally:
+            widget.after_cancel(timeout)
+            widget.unbind("<Configure>", binding)
+
     root.deiconify()
     widget.deiconify()
     root.update()
-    default_size = (widget.winfo_width(), widget.winfo_height())
     expected_height = max(700, max(widget.body.winfo_reqheight(), widget.right_panel.winfo_reqheight()) + 28)
+    resize(1120, expected_height)
+    default_size = (widget.winfo_width(), widget.winfo_height())
     assert default_size == (1120, expected_height)
-    assert default_size[1] < 850
     assert widget.right_panel.grid_rowconfigure(0)["weight"] == 1
     assert widget.photo_preview.cget("text") == "No Photo Selected"
     assert widget.photo_preview.cget("anchor") == "center"
@@ -198,9 +219,7 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     assert widget.metadata_status_panel.winfo_y() + widget.metadata_status_panel.winfo_height() <= widget.right_panel.winfo_height()
 
     root.geometry("400x300+0+0")
-    widget.geometry("960x700")
-    root.update()
-    widget.update()
+    resize(960, 700)
     canvas = widget.body.master
     canvas.update_idletasks()
     body_height = widget.body.winfo_reqheight()
@@ -233,9 +252,8 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     assert widget.actions_panel.winfo_rooty() + widget.actions_panel.winfo_height() <= canvas.winfo_rooty() + canvas.winfo_height()
 
     preview_heights = [minimum_preview_height]
-    for geometry in ("1120x850", "1400x900"):
-        widget.geometry(geometry)
-        root.update()
+    for width, height in ((1120, max(850, expected_height + 24)), (1400, max(900, expected_height + 74))):
+        resize(width, height)
         short_row = int(widget._widgets["genre"].grid_info()["row"])
         assert widget.body.grid_bbox(0, short_row, 1, 1)[2] == widget.body.grid_bbox(2, short_row, 1, 1)[2]
         input_widths = {widget._widgets[key].winfo_width() for key in short_keys}

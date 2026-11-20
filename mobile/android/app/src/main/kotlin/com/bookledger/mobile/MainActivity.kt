@@ -59,12 +59,16 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, EXTERNAL_URL_CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method != "openGithub" || call.arguments != GITHUB_URL) {
+                val url = call.arguments as? String
+                val allowed = (call.method == "openGithub" && url == GITHUB_URL) ||
+                    (call.method == "openRelease" && url != null &&
+                        Regex("https://github\\.com/hectordoesgorug/BookLedger/releases/tag/v?[0-9A-Za-z.+-]+$").matches(url))
+                if (!allowed) {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
                 try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL)))
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     result.success(true)
                 } catch (_: ActivityNotFoundException) {
                     result.success(false)
@@ -80,6 +84,9 @@ class MainActivity : FlutterActivity() {
                     "getAppSettings" -> result.success(
                         mapOf(
                             "version" to BuildConfig.VERSION_NAME,
+                            "versionCode" to BuildConfig.VERSION_CODE,
+                            "releaseBuild" to !BuildConfig.DEBUG,
+                            "packageName" to packageName,
                             "theme" to preferences.getString(THEME_KEY, "default"),
                             "cameraGuideMode" to (
                                 runCatching {

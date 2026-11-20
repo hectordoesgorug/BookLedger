@@ -1,5 +1,15 @@
 # Development and release status
 
+## Update discovery — November 20, 2026 (installation pending)
+
+Native source-Windows and isolated debug-Android acceptance now covers light/dark links and dialogs, current v1.1.0 release information, network failures, retry/Back behavior and normal navigation. Native inspection found the Dashboard could hide the status row; the row now reserves its space before the workspace. Desktop **Visit GitHub** was added directly below About, with shared hyperlink styling and keyboard support. Final regressions: **652 desktop passed / 19 Tcl/Tk skipped / 0 failed**, **156 Flutter passed**, and a successful normal Android debug build. Analysis still exits 1 for **21 informational SDK deprecations**. The temporary Android acceptance package was removed after testing; the installed production app was preserved. Details and data-preservation limits are recorded in [TEST_REPORT.md](TEST_REPORT.md).
+
+Earlier verification stabilization recorded **650 desktop tests passed / 18 Tcl/Tk skips / 0 failures**, **156 Flutter tests passed**, three consecutive camera/banner/Settings regression passes and a successful Android debug build with the targeted AGP **9.1.1** patch. Those geometry, camera fixture cleanup and banner decode corrections changed tests without changing production UI behavior at that stage. Native checks then identified the separate workspace/status layout defect corrected above. See [TEST_REPORT.md](TEST_REPORT.md) for exact commands and preserved earlier failures.
+
+Local source changes implement explicit stable GitHub release checks for desktop and Android for [Issue #22](https://github.com/hectordoesgorug/BookLedger/issues/22). The desktop link sits beside the workspace status; Android's action follows Clear Data. Both show versions, release notes, errors and unsupported builds without automatic checking or data/settings changes. These changes are not in the published v1.1.0 binaries.
+
+The [update system design](docs/UPDATE_SYSTEM.md) specifies Windows staging, ownership, helper/lock handoff, journaled activation, rollback and migration gates, plus Android checksum/package/signer/version validation and normal installation approval. A read-only ZIP prototype exercises checksum/path/layout rules on fixtures. No update-file replacement, APK download/installation workflow or production upgrade is implemented or validated. Issue #22 remains incomplete until installation work and packaged-upgrade acceptance are performed; current checks and limitations are recorded in [TEST_REPORT.md](TEST_REPORT.md).
+
 ## v1.1.0 finalization — November 18, 2026
 
 Accepted rc1 binaries are staged unchanged at `dist/v1.1.0/` with official filenames and SHA-256 manifest. Reported physical acceptance and the non-blocking automated geometry exception are recorded in TEST_REPORT.md. The reviewed documentation was committed and pushed before the annotated tag and stable GitHub Release were published. All four published downloads passed independent size/SHA-256 verification. No new application development or binary rebuild was performed.

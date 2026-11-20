@@ -8,6 +8,7 @@ import '../connection/mobile_setup_screen.dart';
 import '../success_notification.dart';
 import 'clear_mobile_data.dart';
 import 'mobile_app_settings.dart';
+import '../updates/update_check_action.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -152,6 +153,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: const Icon(Icons.delete_outline),
             label: const Text('Clear Data'),
           ),
+          const SizedBox(height: 16),
+          UpdateCheckAction(settings: widget.settings),
           if (_clearing)
             const Padding(
               padding: EdgeInsets.all(8),

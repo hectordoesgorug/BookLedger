@@ -33,6 +33,23 @@ class FakeTree:
         self.focused = item
 
 
+@pytest.mark.parametrize("outcome", [True, False, OSError("No browser")])
+def test_github_link_uses_official_repository_and_reports_browser_failures(monkeypatch, outcome):
+    calls, messages = [], []
+    subject = SimpleNamespace(status_var=SimpleNamespace(set=messages.append))
+
+    def open_browser(url, *, new):
+        calls.append((url, new))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(app_module.webbrowser, "open", open_browser)
+    assert BookLedgerApp._open_github(subject) is (outcome is True)
+    assert calls == [("https://github.com/hectordoesgorug/BookLedger", 2)]
+    assert bool(messages) is (outcome is not True)
+
+
 def test_workspace_clear_drops_tree_reference_before_destroying_children():
     class Child:
         def destroy(self):
@@ -229,6 +246,8 @@ def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size(
         root.theme_style = ttk.Style(root)
         root.show_page = lambda *_args: None
         root._open_shop_link = lambda: None
+        root._check_for_updates = lambda: None
+        root._open_github = lambda: None
         root._animate_navigation_button = lambda *_args: None
         root._show_hover_tooltip = lambda *_args: None
         root._hide_hover_tooltip = lambda *_args: None
@@ -237,7 +256,7 @@ def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size(
         root._theme_startup_warning = ""
 
         def refresh_logo():
-            root._brand_image = tk.PhotoImage(master=root, width=186, height=62)
+            root._brand_image = tk.PhotoImage(master=root, width=176, height=66)
             root.brand_logo_label.configure(image=root._brand_image)
 
         root._refresh_brand_logo = refresh_logo
@@ -255,6 +274,19 @@ def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size(
         assert root.mobile_connection_status_label.winfo_rooty() < footer.winfo_children()[2].winfo_rooty()
         assert footer.winfo_children()[2].winfo_rooty() + footer.winfo_children()[2].winfo_height() <= sidebar_bottom
         assert len(root.nav_buttons) == len(NAVIGATION_ITEMS)
+        assert root.github_link.cget("text") == "Visit GitHub"
+        assert root.github_link.winfo_ismapped()
+        assert root.github_link.winfo_rooty() >= root.nav_buttons["About"].winfo_rooty() + root.nav_buttons["About"].winfo_height()
+        assert root.github_link.winfo_rooty() + root.github_link.winfo_height() <= root.brand_logo_label.winfo_rooty()
+        root.status_var.set("Long status " * 100)
+        ttk.Frame(root.workspace, height=1000).pack(fill="both", expand=True)
+        root.update()
+        link = root.update_link
+        assert link.winfo_ismapped() and root.status_label.winfo_ismapped()
+        assert link.winfo_width() >= link.winfo_reqwidth()
+        assert root.status_label.winfo_rootx() + root.status_label.winfo_width() <= link.winfo_rootx()
+        assert link.winfo_rootx() + link.winfo_width() <= root.winfo_rootx() + root.winfo_width()
+        assert link.winfo_rooty() + link.winfo_height() <= root.winfo_rooty() + root.winfo_height()
     finally:
         root.destroy()
 

@@ -426,13 +426,27 @@ void main() {
   testWidgets('home banner asset loads and keeps its source aspect ratio', (
     WidgetTester tester,
   ) async {
-    final bytes = await rootBundle.load('assets/banner.png');
+    final bytes = (await tester.runAsync(
+      () => rootBundle.load('assets/banner.png'),
+    ))!;
     final dimensions = ByteData.sublistView(bytes, 16, 24);
     final sourceRatio = dimensions.getUint32(0) / dimensions.getUint32(4);
 
+    await tester.pumpWidget(
+      const MaterialApp(home: SizedBox(key: ValueKey('image-cache-context'))),
+    );
+    Object? imageError;
+    // Start decoding outside FakeAsync before Image.asset requests the asset.
+    await tester.runAsync(
+      () => precacheImage(
+        const AssetImage('assets/banner.png'),
+        tester.element(find.byKey(const ValueKey('image-cache-context'))),
+        onError: (error, _) => imageError = error,
+      ).timeout(const Duration(seconds: 5)),
+    );
     await tester.pumpWidget(_testApp());
     await tester.pumpAndSettle();
-
+    expect(imageError, isNull);
     final banner = tester.widget<Image>(
       find.byKey(const ValueKey('home-banner')),
     );
@@ -1094,6 +1108,10 @@ void main() {
     expect(themeY, lessThan(clearDataY));
     expect(clearDataY, lessThan(clearButtonBottom));
     expect(clearButtonBottom, lessThanOrEqualTo(904));
+    final updateLink = find.byKey(const ValueKey('check-for-updates'));
+    expect(updateLink, findsOneWidget);
+    expect(tester.getTopLeft(updateLink).dy, greaterThan(clearButtonBottom));
+    expect(tester.getBottomRight(updateLink).dy, lessThanOrEqualTo(904));
     expect(tester.takeException(), isNull);
   });
 

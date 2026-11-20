@@ -14,7 +14,15 @@ BookLedger Mobile stays in portrait and keeps the display awake while it is in t
 
 During live cover-photo preview, use the torch button for continuous light, the zoom slider for supported 0.5× steps up to 3.0×, and the Guide button to cycle between L-frame, 3×3 grid, 4×4 grid, and Off. Some cameras do not support the 0.5× stop. Zoom and Guide selections are remembered on the device across capture sessions and app restarts. The guide overlays are alignment aids only and are not added to captured photos. Camera controls disappear after capture; Retake restores the selected preferences.
 
+## Checking for updates in current source builds
+
+**Settings → Check for Updates**, below Clear Data, performs an explicit stable-release check and displays installed/available versions, release notes and manual next steps. It does not run at startup, download APKs, invoke installation, clear captures, remove pairing or save preferences. Debug/development builds display **Unsupported Update** for production updates. This action is not included in the published v1.1.0 APK.
+
+Transfer pending captures before installing manually: the queue is session-only and may be lost when Android closes the app. A future installer must verify checksum, package, higher version code and production signer, then use Android's normal approval flow. See the [update system design](../docs/UPDATE_SYSTEM.md) and [test report](../TEST_REPORT.md); installation and physical upgrade validation remain pending.
+
 ## Permissions and privacy
+
+Selecting Check for Updates in current source builds also contacts GitHub's public Releases API over HTTPS, without inventory, photographs, pairing tokens or metadata-provider credentials. GitHub receives normal network/request information. The check is optional and never runs at startup.
 
 The app requests Camera access at runtime for ISBN scanning and cover photography. Internet and network-state access support local desktop pairing and reconnection. AndroidX also declares a package-scoped, signature-protected dynamic-receiver permission. The app does not request microphone or broad shared-storage permissions. CameraX writes captured photos to app-private temporary storage; Android's share sheet handles any user-initiated photo sharing.
 
@@ -39,6 +47,8 @@ In BookLedger Desktop, choose **Settings → Mobile App Setup → Export APK**, 
 The production-signed `1.0.0+1` APK uses the existing `bookledger-release` certificate. Android requires future upgrades to use the same signing identity and a greater version code. The November 16 physical smoke session was reported using the exact final Windows ZIP and APK, with Android workflows and desktop transfers passing. A subsequent report recorded PASS for the two restart scenarios skipped in that session. Device details, Android fresh-install versus upgrade status, and whether the follow-up round used the exact final assets were not supplied; see the [test report](../TEST_REPORT.md). Do not uninstall an existing installation for upgrade testing unless its app data has first been safely preserved.
 
 ## Development
+
+The Android build pins AGP **9.1.1** and Gradle **9.3.1**. The current debug build was verified with Flutter **3.50.0**, Dart **3.14.0** and Android Studio's JBR **25.0.4**, retaining JVM target **17**. Flutter emits future toolchain-minimum warnings and Material import deprecations; the [test report](../TEST_REPORT.md) records their classification. A debug build does not verify production signing or an upgrade on a device.
 
 From this directory:
 

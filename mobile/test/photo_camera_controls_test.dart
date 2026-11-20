@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:camera_platform_interface/camera_platform_interface.dart';
@@ -12,18 +13,21 @@ import 'package:mobile/capture/single_entry_workflow.dart';
 import 'package:mobile/main.dart';
 import 'package:mobile/settings/mobile_app_settings.dart';
 
-const _testPhotoBytes = [
-  0x42,
-  0x4f,
-  0x4f,
-  0x4b,
-  0x4c,
-  0x45,
-  0x44,
-  0x47,
-  0x45,
-  0x52,
-];
+final _testPhotoBytes = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAFElEQVR4nGP8//8/AwMDEwMYQCkAORsDA3CXx5UAAAAASUVORK5CYII=',
+);
+
+Future<void> _pumpUntil(WidgetTester tester, bool Function() complete) async {
+  await tester.runAsync(() async {
+    final elapsed = Stopwatch()..start();
+    while (!complete() && elapsed.elapsed < const Duration(seconds: 5)) {
+      await tester.pump();
+      // Let real file/image IO finish between frames on the fake clock.
+      await Future<void>(() {});
+    }
+  });
+  expect(complete(), isTrue, reason: 'Capture/image operation did not finish');
+}
 
 class _FakeCameraPlatform extends CameraPlatform {
   _FakeCameraPlatform({
@@ -515,11 +519,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(camera.flashModes.last, FlashMode.torch);
 
-    await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Take Photo'));
-      await tester.pump();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Take Photo'));
+    await _pumpUntil(tester, () => workflow.isCaptureReady);
     await tester.pump();
     await tester.pumpAndSettle();
     expect(camera.captureCalls, 1);
@@ -528,6 +529,12 @@ void main() {
       findsNothing,
     );
     final photoPath = workflow.photoPath!;
+    await _pumpUntil(
+      tester,
+      () => tester
+          .widgetList<RawImage>(find.byType(RawImage))
+          .any((image) => image.image != null),
+    );
     expect(
       await tester.runAsync(() => File(photoPath).readAsBytes()),
       _testPhotoBytes,
@@ -544,6 +551,10 @@ void main() {
     expect(savedGuideMode, 'grid4x4');
     expect(savedZoom, 2.5);
     expect(camera.flashModes.last, FlashMode.off);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await FileImage(File(photoPath)).evict();
+    expect(camera.disposedCameras, 2);
   });
 
   testWidgets('Bulk Entry uses the same live camera controls', (

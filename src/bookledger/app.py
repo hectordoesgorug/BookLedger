@@ -18,6 +18,8 @@ from datetime import date
 from PIL import Image, ImageTk
 
 from bookledger import __version__
+from bookledger.ui.updates import UpdateDialog, TextLink
+from bookledger.services.updates import REPOSITORY_URL
 from bookledger.config import APP_NAME, BOOK_CONDITIONS, COPY_STATUSES
 from bookledger.db.database import Database
 from bookledger.paths import AppPaths
@@ -385,8 +387,8 @@ class BookLedgerApp(_WindowBase):
 
         configure("Treeview", rowheight=30, font=("Segoe UI", 10), borderwidth=0)
         configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=8)
-        configure("Sidebar.TButton", anchor="w", padding=(14, 4), font=("Segoe UI", 10))
-        configure("SidebarActive.TButton", anchor="w", padding=(14, 4), font=("Segoe UI", 10, "bold"))
+        configure("Sidebar.TButton", anchor="w", padding=(14, 2), font=("Segoe UI", 10))
+        configure("SidebarActive.TButton", anchor="w", padding=(14, 2), font=("Segoe UI", 10, "bold"))
         configure("Primary.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"))
         configure("Invalid.TEntry", fieldbackground="#fff0f0")
         configure("Invalid.TCombobox", fieldbackground="#fff0f0")
@@ -476,6 +478,8 @@ class BookLedgerApp(_WindowBase):
             help_text = NAVIGATION_TOOLTIPS[name]
             button.bind("<Enter>", lambda event, message=help_text: self._show_hover_tooltip(event, message), add="+")
             button.bind("<Leave>", self._hide_hover_tooltip, add="+")
+        self.github_link = TextLink(self.sidebar, self._open_github, text="Visit GitHub")
+        self.github_link.pack(anchor="center", pady=(6, 0))
         ttk.Frame(self.sidebar).pack(fill="both", expand=True)
         footer = ttk.Frame(self.sidebar)
         footer.pack(fill="x")
@@ -495,11 +499,31 @@ class BookLedgerApp(_WindowBase):
         self.search_entry.pack(side="left")
         self.search_entry.bind("<Return>", lambda _e: self.show_page("Catalog"))
         self.workspace = ttk.Frame(right)
-        self.workspace.pack(fill="both", expand=True)
+        status_row = ttk.Frame(right)
+        status_row.pack(side="bottom", fill="x", pady=(12, 0))
+        self.update_link = TextLink(status_row, self._check_for_updates)
+        self.update_link.pack(side="right", padx=(12, 0))
         self.status_var = tk.StringVar(value=self._theme_startup_warning or "Ready")
-        self.status_label = ttk.Label(right, textvariable=self.status_var, anchor="w")
-        self.status_label.pack(fill="x", pady=(12, 0))
+        self.status_label = ttk.Label(status_row, textvariable=self.status_var, anchor="w")
+        self.status_label.pack(side="left", fill="x", expand=True)
         self._bind_status_color(self.status_var, self.status_label)
+        self.workspace.pack(fill="both", expand=True)
+
+    def _open_github(self):
+        try:
+            opened = bool(webbrowser.open(REPOSITORY_URL, new=2))
+        except (OSError, webbrowser.Error):
+            opened = False
+        if not opened:
+            self.status_var.set("Could not open a browser. Visit BookLedger's GitHub repository manually.")
+        return opened
+
+    def _check_for_updates(self):
+        dialog = getattr(self, "_update_dialog", None)
+        if dialog is not None and dialog.winfo_exists():
+            dialog.lift()
+            return
+        self._update_dialog = UpdateDialog(self)
 
     def _build_sidebar_footer(self, footer):
         self._brand_image = None

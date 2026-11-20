@@ -9,6 +9,7 @@ BookLedger stores your book inventory, settings, database, and photos on your Wi
 BookLedger does not send your inventory to a BookLedger-operated cloud service. Some user-triggered actions do use networks:
 
 - An online ISBN lookup sends the ISBN and any required provider credentials to the selected metadata provider over HTTPS. Each provider controls its own handling and retention.
+- In current source builds, selecting Check for Updates sends an unauthenticated HTTPS request to GitHub's public Releases API. It sends no inventory, photographs, pairing tokens or provider credentials. GitHub receives normal network/request information, including the source IP and application User-Agent. Checking opens no installer and does not run automatically.
 - Pairing sends the phone's device name to the desktop. Pairing and photo transfer use token-authenticated, unencrypted HTTP on your local network. A transfer includes the ISBN, capture ID, sequence, timestamp, and photo. Use a trusted network. Pairing tokens are stored locally using Android secure storage and Windows DPAPI protection.
 - Barcode scanning runs on-device using Google ML Kit. Its SDK may contact Google for model updates, fixes, or device compatibility and may send usage or performance metrics. This is based on source and vendor documentation; BookLedger has not independently captured all SDK network traffic.
 

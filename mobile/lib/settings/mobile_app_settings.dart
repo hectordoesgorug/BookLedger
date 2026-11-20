@@ -15,6 +15,8 @@ String mobileVersionLabel(String? version) => version == null
 class MobileAppSettings extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.light;
   String? _version;
+  int? _versionCode;
+  bool _supportsUpdates = false;
   Future<void>? _initialization;
   Future<void> _cameraPreferenceWrites = Future<void>.value();
   String _cameraGuideMode = 'lFrame';
@@ -23,6 +25,8 @@ class MobileAppSettings extends ChangeNotifier {
 
   ThemeMode get themeMode => _themeMode;
   String? get version => _version;
+  int? get versionCode => _versionCode;
+  bool get supportsUpdates => _supportsUpdates;
   String get cameraGuideMode => _cameraGuideMode;
   double get cameraZoom => _cameraZoom;
 
@@ -35,6 +39,12 @@ class MobileAppSettings extends ChangeNotifier {
       );
       final version = values?['version'];
       _version = version is String ? version : null;
+      _versionCode = values?['versionCode'] is int
+          ? values!['versionCode'] as int
+          : null;
+      _supportsUpdates =
+          values?['releaseBuild'] == true &&
+          values?['packageName'] == 'com.bookledger.mobile';
       _themeMode = values?['theme'] == 'dark'
           ? ThemeMode.dark
           : ThemeMode.light;
