@@ -39,14 +39,14 @@ def verified_isbns(*values):
     return {"metadata": {"isbn": list(values)}}
 
 
-def test_registry_and_fresh_defaults_put_archive_between_google_and_booktopia():
-    assert DEFAULT_PROVIDER_IDS == ("open_library", "google_books", "archive_org", "booktopia", "bigbook", "hardcover")
+def test_registry_and_fresh_defaults_put_archive_before_hardcover():
+    assert DEFAULT_PROVIDER_IDS == ("open_library", "google_books", "archive_org", "hardcover", "booktopia", "bigbook")
     assert [item.name for item in PROVIDER_REGISTRY if item.implemented] == [
-        "Open Library", "Google Books", "Archive.org", "Booktopia", "Bigbook", "Hardcover",
+        "Open Library", "Google Books", "Archive.org", "Hardcover", "Booktopia", "Bigbook",
     ]
     settings = ProviderSettings.defaults()
     assert [provider.name for provider in build_providers(settings)] == [
-        "Open Library", "Google Books", "Archive.org", "Booktopia",
+        "Open Library", "Google Books", "Archive.org", "Hardcover", "Booktopia",
     ]
 
 

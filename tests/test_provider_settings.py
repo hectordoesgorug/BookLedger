@@ -13,7 +13,7 @@ def test_absent_provider_configuration_loads_defaults(tmp_path):
     store = ProviderSettingsStore(tmp_path / "config.json", tmp_path / "fallback" / "config.json")
     settings = store.load()
     assert settings.order == list(DEFAULT_PROVIDER_IDS)
-    assert settings.ordered_enabled_ids() == ["open_library", "google_books", "archive_org", "booktopia"]
+    assert settings.ordered_enabled_ids() == ["open_library", "google_books", "archive_org", "hardcover", "booktopia"]
 
 
 def test_provider_order_and_enabled_state_round_trip_and_preserve_unrelated_fields(tmp_path):
@@ -25,7 +25,7 @@ def test_provider_order_and_enabled_state_round_trip_and_preserve_unrelated_fiel
     settings.enabled["google_books"] = False
     store.save(settings)
     reloaded = store.load()
-    assert reloaded.order == settings.order + ["archive_org", "bigbook", "hardcover"]
+    assert reloaded.order == settings.order + ["archive_org", "hardcover", "bigbook"]
     assert reloaded.enabled["google_books"] is False
     assert json.loads(path.read_text(encoding="utf-8"))["unrelated"] == {"keep": True}
 
@@ -37,7 +37,7 @@ def test_incomplete_configuration_uses_safe_defaults_for_missing_providers(tmp_p
     assert settings.order == list(DEFAULT_PROVIDER_IDS)
     assert settings.enabled == {
         "open_library": True, "google_books": False, "archive_org": True, "booktopia": True,
-        "bigbook": False, "hardcover": False,
+        "bigbook": False, "hardcover": True,
     }
 
 
@@ -53,10 +53,10 @@ def test_legacy_provider_order_is_preserved_and_archive_is_appended(tmp_path):
 
     settings = ProviderSettingsStore(path, tmp_path / "fallback.json").load()
 
-    assert settings.order == ["booktopia", "open_library", "google_books", "archive_org", "bigbook", "hardcover"]
+    assert settings.order == ["booktopia", "open_library", "google_books", "archive_org", "hardcover", "bigbook"]
     assert settings.enabled == {
         "open_library": False, "google_books": True, "archive_org": True, "booktopia": True,
-        "bigbook": False, "hardcover": False,
+        "bigbook": False, "hardcover": True,
     }
 
 
@@ -68,17 +68,60 @@ def test_archive_org_enablement_controls_independent_provider_selection():
     assert build_providers(settings) == ()
 
 
-def test_bigbook_and_hardcover_are_registered_after_existing_sources_and_default_disabled():
+def test_fresh_defaults_enable_hardcover_before_booktopia_and_leave_bigbook_optional():
     settings = ProviderSettings.defaults()
-    assert settings.order == ["open_library", "google_books", "archive_org", "booktopia", "bigbook", "hardcover"]
+    assert settings.order == ["open_library", "google_books", "archive_org", "hardcover", "booktopia", "bigbook"]
     assert settings.enabled["bigbook"] is False
-    assert settings.enabled["hardcover"] is False
+    assert settings.enabled["hardcover"] is True
     assert [provider.name for provider in build_providers(settings)] == [
-        "Open Library", "Google Books", "Archive.org", "Booktopia",
+        "Open Library", "Google Books", "Archive.org", "Hardcover", "Booktopia",
     ]
     settings.enabled["hardcover"] = True
     settings.order = ["hardcover"]
     assert [provider.name for provider in build_providers(settings, credentials={"hardcover": "token"})] == ["Hardcover"]
+
+
+def test_saved_provider_preferences_survive_new_defaults_without_rewriting_config(tmp_path):
+    order = ["bigbook", "booktopia", "open_library", "hardcover", "google_books", "archive_org"]
+    enabled = {provider_id: provider_id in {"bigbook", "booktopia"} for provider_id in order}
+    path = tmp_path / "config.json"
+    original = json.dumps({"version": 1, "metadata_providers": {"order": order, "enabled": enabled}})
+    path.write_text(original, encoding="utf-8")
+    settings = ProviderSettingsStore(path, tmp_path / "fallback.json").load()
+    assert settings.order == order
+    assert settings.enabled == enabled
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_config_without_provider_preferences_uses_new_defaults():
+    assert ProviderSettings.from_document({"version": 1, "preferences": {"theme": "clam"}}) == ProviderSettings.defaults()
+
+
+def test_missing_hardcover_token_is_immediate_and_does_not_block_booktopia(monkeypatch):
+    from bookledger.services.hardcover import HardcoverProvider
+    from bookledger.ui.provider_diagnostic import diagnostic_result_detail
+
+    def unexpected_network(*_args, **_kwargs):
+        raise AssertionError("Missing-token lookup must not access the network")
+    monkeypatch.setattr("urllib.request.urlopen", unexpected_network)
+    providers = build_providers(ProviderSettings.defaults())
+    calls = []
+    def lookup(provider):
+        calls.append(provider.name)
+        return MetadataResult("Retrieved", {"title": "Fallback title", "book_details": "Synopsis"}, provider.name, record_found=True)
+    for provider in providers:
+        if not isinstance(provider, HardcoverProvider):
+            monkeypatch.setattr(provider, "lookup", lambda _isbn, p=provider: (
+                lookup(p) if p.name == "Booktopia" else MetadataResult("No data", {}, p.name, record_found=False)
+            ))
+    missing = next(provider for provider in providers if isinstance(provider, HardcoverProvider)).lookup("9780547928227")
+    assert missing.failure_kind == "authentication"
+    assert missing.error == "Hardcover API token is required."
+    assert diagnostic_result_detail(missing) == missing.error
+    result = MetadataLookupService(providers).lookup("9780547928227")
+    assert result.values["title"] == "Fallback Title"
+    assert calls == ["Booktopia"]
+    assert result.provider_statuses["Hardcover"] == "Authentication required or failed"
 
 
 def test_malformed_configuration_is_preserved_and_defaults_are_reported(tmp_path):
@@ -144,7 +187,7 @@ def test_disabled_booktopia_is_not_queried_for_a_missing_synopsis(monkeypatch):
     settings = ProviderSettings.defaults()
     settings.enabled["booktopia"] = False
     providers = build_providers(settings)
-    assert [provider.name for provider in providers] == ["Open Library", "Google Books", "Archive.org"]
+    assert [provider.name for provider in providers] == ["Open Library", "Google Books", "Archive.org", "Hardcover"]
     MetadataLookupService(providers).lookup("9780306406157")
     assert called == ["Open Library", "Google Books", "Archive.org"]
 

@@ -38,6 +38,11 @@ PROVIDER_REGISTRY = (
         lambda _credential: ArchiveOrgProvider(),
     ),
     ProviderDescriptor(
+        "hardcover", "Hardcover", True,
+        ("title", "author", "isbn", "genre", "book_details", "publisher", "publication_year", "edition", "page_count"),
+        lambda credential: HardcoverProvider(credential),
+    ),
+    ProviderDescriptor(
         "booktopia", "Booktopia", True,
         ("title", "author", "book_details", "publisher", "publication_year", "edition", "page_count", "format"),
         lambda _credential: BooktopiaProvider(),
@@ -46,11 +51,6 @@ PROVIDER_REGISTRY = (
         "bigbook", "Bigbook", True,
         ("title", "author", "isbn", "book_details", "publication_year", "page_count"),
         lambda credential: BigbookProvider(credential),
-    ),
-    ProviderDescriptor(
-        "hardcover", "Hardcover", True,
-        ("title", "author", "isbn", "genre", "book_details", "publisher", "publication_year", "edition", "page_count"),
-        lambda credential: HardcoverProvider(credential),
     ),
 )
 

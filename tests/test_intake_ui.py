@@ -95,13 +95,13 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     assert "sale_date" not in widget._widgets
     assert "status" not in widget._widgets
     assert widget._get("location") == DEFAULT_LOCATION
-    assert list(widget.provider_status_vars) == ["Open Library", "Google Books", "Archive.org", "Booktopia"]
+    assert list(widget.provider_status_vars) == ["Open Library", "Google Books", "Archive.org", "Hardcover", "Booktopia"]
     assert all(status.get() == "Not attempted" for status in widget.provider_status_vars.values())
     provider_labels = [
         child.cget("text") for child in widget.metadata_status_panel.winfo_children()
         if isinstance(child, ttk.Label) and child.cget("text").endswith(":")
     ]
-    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Booktopia:"]
+    assert provider_labels == ["Open Library:", "Google Books:", "Archive.org:", "Hardcover:", "Booktopia:"]
     assert not any(
         child.cget("text") == "Fields marked * are required. Metadata lookup is optional."
         for child in widget.body.winfo_children()

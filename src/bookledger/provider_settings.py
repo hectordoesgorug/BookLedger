@@ -11,7 +11,7 @@ from bookledger.provider_registry import DEFAULT_PROVIDER_IDS, PROVIDERS_BY_ID
 
 
 CONFIG_VERSION = 1
-DEFAULT_DISABLED_PROVIDER_IDS = frozenset({"bigbook", "hardcover"})
+DEFAULT_DISABLED_PROVIDER_IDS = frozenset({"bigbook"})
 
 
 @dataclass
