@@ -1,20 +1,20 @@
 # BookLedger v1.1.0 release checklist
 
-**Status:** Published v1.1.0; independent public-download verification completed. Maintainer acceptance and exceptions are recorded in TEST_REPORT.md (Handover #58). Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader maintainer passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
+**Status:** Published v1.1.0; independent public-download verification completed. Reported physical acceptance and exceptions are recorded in TEST_REPORT.md. Detailed boxes below retain their original scope; unreported subchecks are not inferred from broader reported passes. See [candidate report](RELEASE_CANDIDATE_v1.1.0-rc1.md) for exact results, evidence paths, hashes, warnings, and readiness classification. Unchecked items are PENDING unless stated otherwise. Historical v1.0.0 records remain unchanged.
 
 ## Source and identity
 
 - [x] Starting clean `main`: `8b4b904d83627c4b11ae749dd83d32bc8b46d8bc`; local `origin/main` and queried remote match.
-- [x] Handover #56 documentation and post-v1.0.0 changes inspected; historical tag peels to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`.
+- [x] Documentation and post-v1.0.0 changes inspected; historical tag peels to `1224f3ec25b8a3715f3b6b4234ed2bf9f180bc5c`.
 - [x] Canonical desktop version is `1.1.0`; setuptools metadata and desktop footer use that source.
 - [x] Android declaration is `1.1.0+2`; application ID remains `com.bookledger.mobile`; About reads `BuildConfig.VERSION_NAME`.
 - [x] Changelog and draft GitHub release notes prepared and labeled unpublished.
-- [ ] Final source changes reviewed and authorized for commit by maintainer.
+- [ ] Final source changes reviewed and approved for commit.
 
 ## Automated verification
 
 - [x] Focused version/packaging suite: 6 passed.
-- [ ] Desktop full suite has no unresolved failures. After Handover #57A, the target preview test passes; latest full suite was 517 passed, 17 skipped, 1 failed in a separate display-geometry-sensitive minimum-size test. See TEST_REPORT.md.
+- [ ] Desktop full suite has no unresolved failures. After correction of the preview-test assumption, the target preview test passed; latest full suite was 517 passed, 17 skipped, 1 failed in a separate display-geometry-sensitive minimum-size test. See TEST_REPORT.md.
 - [x] Flutter tests: 126 passed, 0 failed, 0 skipped.
 - [x] Flutter analysis: no issues.
 - [x] Dart formatting: 35 files, 0 changed.
@@ -27,7 +27,7 @@
 - [x] Release signature integrity verified by Android SDK tools (v2).
 - [x] Certificate SHA-256 matches historical production APK.
 - [x] APK ID, version name/code, permissions, SDK levels, and non-debuggable flag inspected.
-- [x] Exact release APK notices and resolved release dependency graph inspected; eight existing Maven POM license gaps are documented for maintainer review.
+- [x] Exact release APK notices and resolved release dependency graph inspected; eight existing Maven POM license gaps are documented for further review.
 - [x] Standalone APK byte size and SHA-256 recorded.
 
 ## Windows packages and distribution integrity
@@ -45,11 +45,11 @@
 - [x] Versioned final candidates and SHA-256 manifest verified from final bytes.
 - [x] Existing v1.0.0 archives, APK, checksum manifest, tag, and historical release documents verified unchanged.
 
-## Maintainer physical acceptance — see final maintainer record
+## Reported physical acceptance — see final test record
 
-Maintainer-reported PASS covers the scenarios in TEST_REPORT.md, including production in-place upgrade. Post-upgrade settings/pairing persistence and separate fallback-device testing remain unverified. The remaining geometry test failure is an accepted non-blocking exception. The following granular preparation checklist is retained without inventing additional evidence.
+Reported PASS results cover the scenarios in TEST_REPORT.md, including production in-place upgrade. Post-upgrade settings/pairing persistence and separate fallback-device testing remain unverified. The remaining geometry test failure is an accepted non-blocking exception. The following granular preparation checklist is retained without inventing additional evidence.
 
-Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/FAIL/SKIPPED for every scenario. Use only disposable library data for acceptance. The report identifies exact artifact paths. Prior debug checks and maintainer reports do not complete these boxes.
+Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/FAIL/SKIPPED for every scenario. Use only disposable library data for acceptance. The report identifies exact artifact paths. Prior debug checks and reported results do not complete these boxes.
 
 ### Windows — test both Portable and Fallback ZIPs
 
@@ -84,23 +84,23 @@ Record artifact SHA-256, machine/device model, OS/build, date, tester, and PASS/
 ### Android in-place upgrade
 
 - [ ] Begin with production-signed v1.0.0 (`com.bookledger.mobile`, code 1, production certificate); record existing settings/pairing.
-- [ ] Install the exact production-signed rc1 APK (code 2) in place with maintainer authorization; do not uninstall or clear data.
+- [ ] Install the exact production-signed rc1 APK (code 2) in place; do not uninstall or clear data.
 - [ ] Verify settings and pairing preserved, version/About, scanning, capture, reconnection, and transfers.
 
-The November 17 audit left a debug-signed app installed. A debug installation is not a production upgrade baseline and may reject the production certificate. Do not resolve this by automatically uninstalling or clearing data; the maintainer must arrange an appropriate production baseline/device.
+The November 17 audit left a debug-signed app installed. A debug installation is not a production upgrade baseline and may reject the production certificate. Do not resolve this by automatically uninstalling or clearing data; arrange an appropriate production baseline/device before testing.
 
-## Maintainer decision and publication — intentionally PENDING
+## Release review and publication — preparation-state checklist
 
-- [ ] Codigo review completed; unresolved automated failure and warnings dispositioned.
-- [ ] Maintainer physical acceptance completed on exact candidate artifacts.
-- [ ] Maintainer accepts session-only captures and known limitations; startup/upgrade/integration concerns resolved.
-- [ ] Maintainer reviews license/privacy material and intended distribution requirements; technical checks are not legal clearance.
-- [ ] Maintainer approves release and separately authorizes commit/push.
-- [ ] Maintainer separately approves Git tag creation/push from reviewed source.
-- [ ] Maintainer separately authorizes GitHub Release publication and public asset upload.
+- [ ] Code review completed; unresolved automated failure and warnings dispositioned.
+- [ ] Physical acceptance completed on exact candidate artifacts.
+- [ ] Session-only captures and known limitations accepted; startup/upgrade/integration concerns resolved.
+- [ ] License/privacy material and intended distribution requirements reviewed; technical checks are not legal clearance.
+- [ ] Release review completed; reviewed source committed and pushed.
+- [ ] Annotated Git tag created and pushed from reviewed source.
+- [ ] GitHub Release published and approved assets uploaded.
 - [ ] Post-publication assets downloaded and SHA-256 verified against approved final manifest.
 
-No commit, push, tag, publication, candidate installation, cleanup, or historical-asset replacement is authorized by completing this preparation checklist.
+This preparation checklist is separate from the publication and candidate-verification records below.
 
 ## Finalization verification — November 18, 2026
 
@@ -108,11 +108,11 @@ No commit, push, tag, publication, candidate installation, cleanup, or historica
 - [x] Both ZIP CRC checks and embedded APK identity verified.
 - [x] Production signature, application ID and version verified again.
 - [x] Final `SHA256SUMS.txt` generated: 317 bytes, SHA-256 `d3e0723ea133f36c9661e1109071e31d806731844b524d30e859ef551dfbd005`.
-- [x] Maintainer acceptance recorded with provenance and explicit persistence limits.
-- [x] Remaining automated geometry failure accepted by maintainer as non-blocking.
-- [x] Explicit commit/push authorization received.
-- [x] Annotated tag creation/push authorized and verified.
-- [x] Publication/upload authorized and completed.
+- [x] Reported physical acceptance recorded with provenance and explicit persistence limits.
+- [x] Remaining automated geometry failure accepted as non-blocking.
+- [x] Reviewed source committed and pushed.
+- [x] Annotated tag created, pushed, and verified.
+- [x] Stable release published with approved assets.
 - [x] Published downloads independently hashed.
 
 Publication: https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.1.0; approved commit `01dc3990e9fa321e5cf2f815ce509d5a3736e9ac`. The four downloaded assets match final hashes; historical v1.0.0 metadata is unchanged. Earlier granular acceptance boxes retain their original scope.

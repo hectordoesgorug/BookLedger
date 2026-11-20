@@ -111,3 +111,11 @@ After editing:
 - Explain trade-offs when multiple viable approaches exist.
 - Do not commit, push, delete user data, or perform destructive operations without explicit authorization.
 - Prefer changes that preserve the project's portability and offline operation.
+
+## 10. GitHub Writing Standards
+
+- Write repository documentation, READMEs, changelogs, release notes, issues, comments, pull requests, commit messages, and other GitHub-facing prose in an authentic developer voice. Describe technical changes, decisions, and findings directly; avoid unnecessary third-person coordination language.
+- Keep internal collaboration terminology, agent names, handover identifiers, session numbers, and coordination mechanics out of public project prose. Internal working instructions may use them when needed.
+- Preserve factual accuracy and verification provenance. Distinguish automated results, manually reported physical tests, independently verified results, historical observations, failed checks, and unverified behavior. Never invent personal actions, approval, test execution, implementation history, or firsthand observations.
+- Preserve version numbers, dates, commit identifiers, SHA-256 checksums, test counts, known limitations, and historical context during editorial revisions.
+- Prefer targeted, meaningful improvements over unnecessary rewriting. Do not change technical requirements or historical findings solely for stylistic uniformity. Apply these standards to future GitHub-facing writing as well as current edits.

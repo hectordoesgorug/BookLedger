@@ -17,7 +17,7 @@ Disposable physical checks passed for initial Scan/Manual/No ISBN choices, No IS
 
 Revised intake uses identifier selection, photography, then explicit Send/Queue without Save. Tests cover immediate readiness, correction/Retake preservation, stale camera-session rejection, next-scan progression, capacity/early finish, reconnect and failed-transfer retry, small-screen layout, camera controls and Settings.
 
-Physical Android 16 checks: debug APK installed; initial 2x2 layout inspected; No ISBN opened the camera; test photograph captured; manual ISBN correction retained it; canceled Retake restored it; Bulk Queue advanced to the next scanner (1/5); scanner cancellation retained the queue; hold Queue produced Send for the partial batch. No inventory was transferred. Initial launches displayed Android input-focus ANR dialogs; after dismissal and granting Camera permission the intake screens responded. The startup warning has not been isolated. Full-capacity progression, real barcode detection, permission denial, saved-preference restart, and authenticated reconnect/transfer remain unverified on hardware. The debug APK is left installed for maintainer testing.
+Physical Android 16 checks: debug APK installed; initial 2x2 layout inspected; No ISBN opened the camera; test photograph captured; manual ISBN correction retained it; canceled Retake restored it; Bulk Queue advanced to the next scanner (1/5); scanner cancellation retained the queue; hold Queue produced Send for the partial batch. No inventory was transferred. Initial launches displayed Android input-focus ANR dialogs; after dismissal and granting Camera permission the intake screens responded. The startup warning has not been isolated. Full-capacity progression, real barcode detection, permission denial, saved-preference restart, and authenticated reconnect/transfer remain unverified on hardware. The debug APK remains installed for further testing.
 
 Automated results: `flutter test` - 124 passed, 0 failed, 0 skipped. `flutter analyze` - no issues. `dart format --output=none --set-exit-if-changed lib test` - 35 files, 0 changed. `flutter build apk --debug` succeeded; Gradle warned about restricted `System.load` native access, and dependency resolution reported 19 newer incompatible versions (no dependency changes made). `git diff --check` passed. No desktop code changed; desktop tests were not rerun. Camera-failure recovery and readable identifier-choice controls were included in the final APK rebuild; the final APK was installed without uninstalling or clearing app data.
 
@@ -25,7 +25,7 @@ Automated results: `flutter test` - 124 passed, 0 failed, 0 skipped. `flutter an
 
 Record started: 2026-10-19; latest dated entry: 2026-11-17.
 
-This is a record of specific test runs, investigations, and maintainer-reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; the separate maintainer-reported final-asset session on 2026-11-16 is recorded below.
+This is a record of specific test runs, investigations, and reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; a separate reported final-asset session on 2026-11-16 is recorded below.
 
 ## Optional bibliographic Subtitle support (2026-11-17)
 
@@ -60,11 +60,11 @@ No thumbnail cache, background worker, pagination, or virtualization was added: 
 - `.venv\Scripts\python.exe -m pytest -q -rs --basetemp=.pytest-tmp-issue11-full` — **507 passed, 18 skipped**. Tk UI tests skipped because the installed Tcl/Tk distribution is missing required files, including ttk theme assets.
 - The two added thumbnail pixel-preservation cases are included in the focused and full-suite totals.
 
-## Initial final-asset physical smoke session (maintainer reported, 2026-11-16)
+## Initial final-asset physical smoke session (reported, 2026-11-16)
 
-The maintainer reported performing this physical session with the exact final Windows ZIP and Android APK after verifying the assets. Codex did not perform or independently observe these physical tests. The maintainer reported no errors. The Windows device was described as a Windows 11 laptop; device model, Windows build, Android model/OS, and whether Android installation was fresh or an upgrade were not supplied.
+This physical session was reported using the exact final Windows ZIP and Android APK after the assets had been verified. The tests were not independently observed. No errors were reported. The Windows device was described as a Windows 11 laptop; device model, Windows build, Android model/OS, and whether Android installation was fresh or an upgrade were not supplied.
 
-| # | Result | Maintainer-reported scenario |
+| # | Result | Reported scenario |
 | ---: | --- | --- |
 | 1 | PASS | Windows ZIP size and SHA-256 matched. |
 | 2 | PASS | Fresh Windows extraction and launch without Python. |
@@ -79,21 +79,21 @@ The maintainer reported performing this physical session with the exact final Wi
 | 11 | PASS | Single Entry transfer with ISBN and photo. |
 | 12 | PASS | Bulk Entry transfer. |
 | 13 | PASS | Desktop cataloging and duplicate handling. |
-| 14 | SKIPPED | Backup and persistence after restart. The maintainer deliberately omitted this from the final session and reports rigorous prior testing. |
-| 15 | SKIPPED | Automatic reconnection after restart. The maintainer deliberately omitted this from the final session and reports rigorous prior testing. |
+| 14 | SKIPPED | Backup and persistence after restart. This was deliberately omitted from the final session; prior testing was reported. |
+| 15 | SKIPPED | Automatic reconnection after restart. This was deliberately omitted from the final session; prior testing was reported. |
 
-**Session total: 13 PASS, 2 SKIPPED, 0 FAIL.** These two scenarios were deliberately omitted from this session and are retained as SKIPPED in its historical record. The maintainer reported that both had been rigorously tested previously. No device-specific details or install-versus-upgrade distinction have been inferred for this session.
+**Session total: 13 PASS, 2 SKIPPED, 0 FAIL.** These two scenarios were deliberately omitted from this session and are retained as SKIPPED in its historical record. Earlier testing of both scenarios was reported. No device-specific details or install-versus-upgrade distinction have been inferred for this session.
 
-## Follow-up of previously skipped scenarios (maintainer reported, 2026-11-16)
+## Follow-up of previously skipped scenarios (reported, 2026-11-16)
 
-The maintainer subsequently reported rerunning both scenarios that were skipped in the session above:
+Both scenarios that were skipped in the session above were subsequently reported as rerun:
 
-| Scenario | Result | Maintainer-reported outcome |
+| Scenario | Result | Reported outcome |
 | --- | --- | --- |
 | Windows backup and persistence after restart | PASS | The previously skipped physical smoke scenario passed in the follow-up round. |
 | Android/desktop automatic reconnection after restart | PASS | The previously skipped physical smoke scenario passed in the follow-up round. |
 
-The maintainer reports the latest aggregate across the 15 scenarios as **15 PASS, 0 FAIL, 0 SKIPPED**. This cumulative latest status combines the original session's 13 reported passes with these two subsequently reported passes; it does not change the original session's 13 PASS / 2 SKIPPED record. Codex did not perform or independently observe either physical test round. The follow-up clarification does not specify whether these two reruns used the exact final release assets, and supplies no additional device or OS details.
+The latest aggregate across the 15 scenarios was reported as **15 PASS, 0 FAIL, 0 SKIPPED**. This cumulative status combines the original session's 13 reported passes with these two subsequently reported passes; it does not change the original session's 13 PASS / 2 SKIPPED record. Neither physical test round was independently observed for this report. The follow-up clarification does not specify whether these two reruns used the exact final release assets, and supplies no additional device or OS details.
 
 ## Configurable metadata provider registry
 
@@ -111,7 +111,7 @@ Implementation adds a central provider registry and a versioned root `config.jso
 - `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
 - `git diff --check` — passed; Git emitted configured LF-to-CRLF notices only.
 
-The `9780553290998` direct-fallback test uses synthetic HTML with the maintainer-provided ISBN, title, and author; its synopsis text is explicitly synthetic and no live response was captured. The test simulates the search HTTP error followed by the direct ISBN request resolving to the reported canonical URL. The maintainer's browser observations remain the only live evidence for this listing; no live request for it was made in this environment. A live recheck of both the search and canonical URLs for `9780716736387` failed at DNS resolution (`[Errno 11001] getaddrinfo failed`), so the response code, redirect path, and error-body content remain unverified.
+The `9780553290998` direct-fallback test uses synthetic HTML with a supplied ISBN, title, and author; its synopsis text is explicitly synthetic and no live response was captured. The test simulates the search HTTP error followed by the direct ISBN request resolving to the reported canonical URL. Previously reported browser observations remain the only live evidence for this listing; no live request for it was made in this environment. A live recheck of both the search and canonical URLs for `9780716736387` failed at DNS resolution (`[Errno 11001] getaddrinfo failed`), so the response code, redirect path, and error-body content remain unverified.
 
 ## Booktopia unavailable HTTP-response follow-up
 
@@ -143,7 +143,7 @@ The previous Booktopia parser collected unqualified body `itemprop="description"
 
 No raw current Booktopia HTML or sanitized live capture was available in the development environment. The web-rendered indexed text snapshot for [Crime and Punishment, ISBN 9780140449136](https://www.booktopia.com.au/crime-and-punishment-fyodor-dostoyevsky/book/9780140449136.html) (crawled 1.1 years ago) and [The Strength of the Few, ISBN 9781923058507](https://www.booktopia.com.au/the-strength-of-the-few-james-islington/book/9781923058507.html) (crawled two weeks ago) shows substantial text beneath a Description label, but the transformed snapshots do not expose HTML attributes or response timing. They cannot establish whether the text is in the initial HTTP response, a hidden panel, embedded structured data, or a later browser request. The current page for [The Triumph of Evolution, ISBN 9780716736387](https://www.booktopia.com.au/the-triumph-of-evolution-niles-eldredge/book/9780716736387.html) could not be read through the available web view, and direct requests failed DNS resolution. Thus the live response status, redirect chain, and presence or absence of usable error-body HTML remain unverified; the prior synthetic test is no longer presented as evidence about that listing.
 
-The extraction change is **not yet verified against Booktopia's actual live tab-to-panel markup**. The synthetic fixtures prove the relationship-based parser and rejection policy only. Do not treat them as captured evidence or claim that live synopsis extraction is confirmed. A sanitized current response or inspected relationship from the maintainer's browser is still needed to verify the actual selector and availability signal. If the page structure does not expose a relation supported by the parser, Book Details will remain empty rather than use generic text.
+The extraction change is **not yet verified against Booktopia's actual live tab-to-panel markup**. The synthetic fixtures prove the relationship-based parser and rejection policy only. Do not treat them as captured evidence or claim that live synopsis extraction is confirmed. A sanitized current response or inspected relationship from a browser is still needed to verify the actual selector and availability signal. If the page structure does not expose a relation supported by the parser, Book Details will remain empty rather than use generic text.
 
 The integration remains best-effort and subject to site changes and access policies. No schema or runtime dependency changes were made. The rest of the suite covers catalog validation, sales and status transitions, backup/restore, portable paths and migration, Trash and photo lifecycle, recovery, verification, callbacks, and intake UI behavior. Manual native-Windows GUI acceptance remains pending.
 
@@ -197,7 +197,7 @@ Automated tests cover validated and idempotent staging, duplicate/nullable ISBNs
 
 - `.venv\Scripts\python.exe -m pytest -q tests/test_app_callbacks.py -k catalog_sort` — **3 passed**.
 - `.venv\Scripts\python.exe -m pytest -q tests/test_app_callbacks.py tests/test_catalog.py` — **130 passed, 1 skipped**.
-- `.venv\Scripts\python.exe -m pytest -q -rs` — **497 passed, 19 skipped, 1 failed**. The failure is `test_photo_preview_and_manual_metadata_values_are_preserved`, where the Tk photo preview did not resize after a window geometry change; the same assertion reproduced in isolation and was observed during Handover #46 validation. Skips require missing Tcl/Tk files, including `init.tcl`, `ttk/utils.tcl`, and `ttk/sizegrip.tcl`.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **497 passed, 19 skipped, 1 failed**. The failure is `test_photo_preview_and_manual_metadata_values_are_preserved`, where the Tk photo preview did not resize after a window geometry change; the same assertion reproduced in isolation and was observed during earlier preview testing. Skips require missing Tcl/Tk files, including `init.tcl`, `ttk/utils.tcl`, and `ttk/sizegrip.tcl`.
 - `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
 - `git diff --check` — passed; Git reports configured LF-to-CRLF notices only.
 
@@ -237,7 +237,7 @@ Exact artifacts and evidence are recorded in `docs/RELEASE_CANDIDATE_v1.1.0-rc1.
 
 Candidate assessment remains **BLOCKED for release approval** because of pending physical transfer and upgrade checks, and known session-only Android capture state. No candidate APK was installed.
 
-## Handover #57A — photo-preview resize test diagnosis (2026-11-18)
+## Photo-preview resize test diagnosis (2026-11-18)
 
 `test_photo_preview_and_manual_metadata_values_are_preserved` had asserted that a portrait thumbnail's pixel height must grow when the form height increases at fixed width. This expectation was incorrect: `Image.thumbnail` preserves aspect ratio and fits within both preview bounds, so the unchanged preview width can remain the limiting dimension. The Tk `<Configure>` binding and `_fit_photo_preview` behavior are unchanged. The test now checks the resulting image remains within the actual preview bounds and retains its source aspect ratio, including after requested form resizes. No timer or arbitrary wait was added.
 
@@ -249,27 +249,27 @@ Candidate assessment remains **BLOCKED for release approval** because of pending
 
 Classification: the original pixel-height assertion was a **test defect**; the additional whole-suite resize variability is **window/display geometry sensitivity**. Automated runs do not establish physical Windows visual acceptance. No production code changed; candidate artifacts were not rebuilt or altered.
 
-## Handover #58 — final maintainer acceptance (recorded November 18, 2026)
+## Reported physical acceptance (recorded November 18, 2026)
 
-The maintainer reports PASS using accepted v1.1.0-rc1 for Windows portable execution; APK export; Pairing, Forget Pairing, Unpair and reconnection; multiple-instance blocking; Purge with default Clam preserved; all backup/restore features; Android camera controls; Sales, voids, reports and status transitions; updated desktop layout; poster creation; Single Entry including edge cases; and Bulk Entry including partial and full queues. These are maintainer-reported results, not Codex-observed tests. Device/build details and separate fallback physical testing were not supplied.
+The November 18 physical-test report records PASS using accepted v1.1.0-rc1 for Windows portable execution; APK export; Pairing, Forget Pairing, Unpair and reconnection; multiple-instance blocking; Purge with default Clam preserved; all backup/restore features; Android camera controls; Sales, voids, reports and status transitions; updated desktop layout; poster creation; Single Entry including edge cases; and Bulk Entry including partial and full queues. These results are reported, not independently observed. Device/build details and separate fallback physical testing were not supplied.
 
-Production upgrade PASS: the maintainer first installed the historical production-signed v1.0.0 APK, then installed the exact rc1 APK over it. Android presented an update confirmation and installation succeeded. Post-upgrade settings and pairing persistence were not separately reported as verified.
+Production upgrade PASS was reported after first installing the historical production-signed v1.0.0 APK, then installing the exact rc1 APK over it. Android presented an update confirmation and installation succeeded. Post-upgrade settings and pairing persistence were not separately reported as verified.
 
-The maintainer accepts the remaining display-sensitive minimum-size geometry assertion as a non-blocking release exception, supported by successful physical layout testing. The automated suite remains 517 passed, 17 skipped, 1 failed; it is not fully passing. The original preview failure was a corrected test defect; production preview code was unchanged. The transient mobile-connection failure passed three isolated reruns. Session-only pending captures and the prior unreproduced startup ANR remain disclosed limitations.
+The remaining display-sensitive minimum-size geometry assertion was accepted as a non-blocking release exception based on reported physical layout testing. The automated suite remains 517 passed, 17 skipped, 1 failed; it is not fully passing. The original preview failure was a corrected test defect; production preview code was unchanged. The transient mobile-connection failure passed three isolated reruns. Session-only pending captures and the prior unreproduced startup ANR remain disclosed limitations.
 
-## Publication and independent verification — Handover #58
+## Publication and independent verification (November 18, 2026)
 
-BookLedger v1.1.0 is published at https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.1.0 as a stable release (not draft/prerelease). Annotated tag object `794954ae76d052bfbeae196a9396a26e60afeca3` peels to approved commit `01dc3990e9fa321e5cf2f815ce509d5a3736e9ac`. Commit/push were performed by the maintainer; tagging/push and publication/upload were separately authorized and performed by Codex.
+BookLedger v1.1.0 is published at https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.1.0 as a stable release (not draft/prerelease). Annotated tag object `794954ae76d052bfbeae196a9396a26e60afeca3` peels to reviewed commit `01dc3990e9fa321e5cf2f815ce509d5a3736e9ac`. The reviewed source was committed and pushed before tag creation and publication.
 
 All four public assets were downloaded independently and SHA-256 verified against final staging and the published manifest. Sizes: Portable 60,133,742 bytes; Fallback 60,982,251 bytes; APK 71,633,402 bytes; SHA256SUMS.txt 317 bytes. Candidate binaries were not rebuilt or modified. Historical v1.0.0 release metadata and its asset records exactly match the pre-publication snapshot. Evidence and downloaded bytes are retained under ignored `build/release58-verification/`.
 
-The accepted automated exception remains 517 passed, 17 skipped, 1 failed (display-sensitive minimum-size assertion); maintainer physical acceptance remains attributed to the maintainer. Session-only pending captures, the prior unreproduced ANR, and unverified post-upgrade settings/pairing persistence remain disclosed. No fresh automated or physical test run is implied by publication verification.
+The accepted automated exception remains 517 passed, 17 skipped, 1 failed (display-sensitive minimum-size assertion); physical acceptance remains documented as reported testing. Session-only pending captures, the prior unreproduced ANR, and unverified post-upgrade settings/pairing persistence remain disclosed. No fresh automated or physical test run is implied by publication verification.
 
 ### Historical ANR context clarified (November 18, 2026)
 
 The earlier ANR report concerned a Poco X6 experiencing lag while rapid charging and connected to a PC through TwinDesk. No ANR was reproduced during the subsequent audit, and no root cause has been established. These circumstances are context, not a confirmed explanation or an active verified defect. Historical observations and test results above remain unchanged.
 
-## Configurable currency and SRP investigation — Handover #61 (2026-11-20)
+## Configurable currency and SRP investigation (2026-11-20)
 
 - `.venv\Scripts\python.exe -m pytest tests/test_currency.py tests/test_posters.py tests/test_app_callbacks.py -q -rs` — **97 passed, 1 skipped**. The skip requires complete Tcl/Tk libraries that are missing from this Python installation.
 - `.venv\Scripts\python.exe -m pytest -q -rs` — **534 passed, 18 skipped**. All skips are Tk UI/display checks unavailable with the installed incomplete Tcl/Tk runtime; no tests failed.

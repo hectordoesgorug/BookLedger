@@ -2,7 +2,7 @@
 
 ## 1.1.0 — 2026-11-18
 
-Accepted candidate: **v1.1.0-rc1**. Final release assets are byte-identical copies; published as the stable v1.1.0 GitHub Release after separate Git/tag/publication authorizations. All four public downloads were independently verified.
+The accepted **v1.1.0-rc1** candidate was published as the stable v1.1.0 GitHub Release. Final assets are byte-identical copies, and all four public downloads were independently verified.
 
 ### Desktop
 
@@ -23,10 +23,10 @@ Accepted candidate: **v1.1.0-rc1**. Final release assets are byte-identical copi
 ### Compatibility and limitations
 
 - Desktop schema advances from v11 to v12 by adding nullable `book_records.subtitle`. Existing titles and copy/sales identities remain unchanged. Existing v1.0.0 backups are supported by the restore/migration path. Back up before upgrade; preserve `data/`, `config.json`, and `backups/`. Downgrading a migrated library is not supported; use a pre-upgrade backup with the old application.
-- Android remains `com.bookledger.mobile`, now `1.1.0+2`, with the existing production signing identity. The maintainer reports successful in-place upgrade from historical production v1.0.0 to the exact rc1 APK. Settings/pairing persistence after upgrade was not separately verified.
+- Android remains `com.bookledger.mobile`, now `1.1.0+2`, with the existing production signing identity. A reported test installed the exact rc1 APK over the historical production-signed v1.0.0 installation. Settings/pairing persistence after upgrade was not separately verified.
 - Pending mobile captures remain session-only: process termination can lose the queue even when temporary photos remain. Keep the app open through acknowledgment; durable mobile recovery is deferred by decision.
 - Local transfer remains token-authenticated, unencrypted HTTP on a trusted network. No transport change was made.
-- The earlier ANR report concerned a Poco X6 experiencing lag while rapid charging and connected to a PC through TwinDesk. No ANR was reproduced during the subsequent audit, and no root cause has been established. These circumstances are context, not a confirmed explanation or an active verified defect. Maintainer-reported Single/Bulk acceptance and reconnection passed.
+- The earlier ANR report concerned a Poco X6 experiencing lag while rapid charging and connected to a PC through TwinDesk. No ANR was reproduced during the subsequent audit, and no root cause has been established. These circumstances are context, not a confirmed explanation or an active verified defect. Single/Bulk acceptance and reconnection were reported as passing physical tests.
 - Automated Tk/display skips and physical-device limits remain explicit in the candidate report. Mocked transfer tests do not establish hardware integration.
 - Other backlog work, including library merging, background removal, bulk desktop metadata download, and general desktop resizing, is not included.
 

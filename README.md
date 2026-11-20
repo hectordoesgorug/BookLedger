@@ -58,7 +58,7 @@ Before upgrading, close BookLedger and make a backup. Preserve your existing `da
 
 Restoring a backup replaces the active library; it does not merge data. BookLedger validates a backup and saves a recovery backup before activation. Backups are not encrypted and may contain provider credentials, so store them securely. See the [v1.1.0 release notes](docs/RELEASE_NOTES_v1.1.0.md) for upgrade details.
 
-Android upgrades require the same production signing certificate and a higher version code. The maintainer reported that Android accepted the v1.1.0 APK over the production-signed v1.0.0 installation. Persistence of settings and pairing across that upgrade was not separately verified. Do not uninstall or clear app data to work around a signing conflict.
+Android upgrades require the same production signing certificate and a higher version code. A reported test installed the v1.1.0 APK over the production-signed v1.0.0 installation. Persistence of settings and pairing across that upgrade was not separately verified. Do not uninstall or clear app data to work around a signing conflict.
 
 ## Network and privacy
 
