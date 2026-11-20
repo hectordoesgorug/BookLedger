@@ -32,8 +32,9 @@ def matching_edition(**changes):
         "isbn_10": ISBN10, "isbn_13": ISBN13, "pages": 320,
         "release_date": "2012-10-18", "release_year": None,
         "edition_format": "Paperback", "edition_information": "Revised edition",
-        "description": "Edition synopsis.", "publisher": {"name": "Example Press"},
-        "book": {"title": "The Book", "author_names": ["A. Writer"], "description": "Book synopsis.", "release_year": 2010, "genres": ["Fantasy"]},
+        "publisher": {"name": "Example Press"},
+        "contributions": [{"contribution": "Author", "author": {"name": "A. Writer"}}],
+        "book": {"title": "The Book", "contributions": [{"contribution": "Author", "author": {"name": "A. Writer"}}], "description": "Book synopsis.", "release_year": 2010, "cached_tags": {"Genre": [{"tag": "Fantasy"}]}},
     }
     edition.update(changes)
     return edition
@@ -54,16 +55,19 @@ def test_hardcover_queries_both_isbn_forms_and_maps_verified_edition(monkeypatch
     request = captured["request"]
     body = json.loads(request.data)
     assert request.full_url == HARDCOVER_ENDPOINT
-    assert request.get_header("Authorization") == "private-secret-value"
+    assert request.get_header("Authorization") == "Bearer private-secret-value"
     assert "private-secret-value" not in request.data.decode("utf-8")
     assert "isbn_13" in body["query"] and "isbn_10" in body["query"]
+    assert "author_names" not in body["query"] and "genres" not in body["query"]
+    assert "contributions" in body["query"] and "cached_tags" in body["query"]
+    assert body["query"].count("description") == 2  # Only the two book selections.
     assert body["variables"] == {"isbn10": ISBN10, "isbn13": ISBN13}
     assert captured["timeout"] <= 5
     assert result.values == {
-        "title": "The Book", "author": "A. Writer", "isbn": ISBN13,
+        "title": "The Edition Title", "author": "A. Writer", "isbn": ISBN13,
         "genre": "Fantasy",
         "publisher": "Example Press", "publication_year": 2012, "edition": "Revised edition",
-        "page_count": 320, "book_details": "Edition synopsis.",
+        "page_count": 320, "book_details": "Book synopsis.",
     }
     assert result.record_found is True
 
@@ -99,7 +103,7 @@ def test_hardcover_missing_token_no_match_graphql_errors_and_invalid_json(monkey
 
 @pytest.mark.parametrize(
     ("status", "kind"),
-    [(401, "authentication"), (403, "authorization"), (404, "provider"), (429, "rate_limit"), (500, "provider")],
+    [(401, "authentication"), (402, "provider"), (403, "authorization"), (404, "provider"), (429, "rate_limit"), (500, "provider"), (503, "provider")],
 )
 def test_hardcover_classifies_http_errors(status, kind, monkeypatch):
     def fail(*_args, **_kwargs):
@@ -114,8 +118,8 @@ def test_hardcover_classifies_http_errors(status, kind, monkeypatch):
 def test_hardcover_maps_fallback_metadata_and_timeout(monkeypatch):
     edition = matching_edition(
         title="Edition title", edition_information=None, edition_format="Large print",
-        description=None, publisher=None,
-        book={"title": "", "author_names": ["Writer One", "Writer Two"], "description": "Book description", "release_date": "2008", "genres": []},
+        contributions=[], publisher=None,
+        book={"title": "", "contributions": [{"contribution": "Author", "author": {"name": name}} for name in ("Writer One", "Writer Two")], "description": "Book description", "release_date": "2008", "cached_tags": {}},
     )
     edition["isbn_13"] = None
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response({"data": {"byIsbn13": [], "byIsbn10": [edition]}}))
@@ -128,3 +132,56 @@ def test_hardcover_maps_fallback_metadata_and_timeout(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("timed out")))
     assert HardcoverProvider("token").lookup(ISBN13).failure_kind == "timeout"
+
+
+@pytest.mark.parametrize("token", ["private-token", "Bearer private-token", "bearer private-token"])
+def test_hardcover_accepts_saved_bare_and_prefixed_tokens(token, monkeypatch):
+    def request(req, **_kwargs):
+        assert req.get_header("Authorization") == "Bearer private-token"
+        return Response({"data": {"byIsbn13": [], "byIsbn10": []}})
+    monkeypatch.setattr("urllib.request.urlopen", request)
+    assert HardcoverProvider(token).lookup(ISBN10).status == "No data"
+
+
+def test_hardcover_maps_only_author_roles_and_prefers_edition_contributions(monkeypatch):
+    edition = matching_edition(contributions=[
+        {"contribution": "Translator", "author": {"name": "Translator"}},
+        {"contribution": "Author", "author": {"name": "Edition Author"}},
+        {"contribution": "Author", "author": {"name": "Edition Author"}},
+        {"contribution": "Editor", "author": {"name": "Editor"}},
+    ])
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response({"data": {"byIsbn13": [edition]}}))
+    assert HardcoverProvider("token").lookup(ISBN13).values["author"] == "Edition Author"
+
+
+@pytest.mark.parametrize("book", [None, {}, {"contributions": [None, {"author": {"name": "Unknown role"}}], "cached_tags": {"Mood": [{"tag": "Happy"}]}}])
+def test_hardcover_missing_optional_metadata_is_not_fabricated(book, monkeypatch):
+    edition = matching_edition(book=book, contributions=None, publisher=None)
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response({"data": {"byIsbn13": [edition]}}))
+    result = HardcoverProvider("token").lookup(ISBN13)
+    assert result.status == "Retrieved"
+    for field in ("author", "publisher", "genre", "book_details"):
+        assert result.values[field] is None
+
+
+@pytest.mark.parametrize("payload", [[], {}, {"data": {}}, {"data": {"byIsbn13": None}}, {"data": {"byIsbn13": [None]}}, {"errors": {"message": "secret"}}])
+def test_hardcover_rejects_malformed_responses(payload, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response(payload))
+    assert HardcoverProvider("token").lookup(ISBN13).failure_kind == "unexpected"
+
+
+@pytest.mark.parametrize("message,code,kind", [
+    ("expired token secret", "", "authentication"),
+    ("Unable to verify JWT", "invalid-jwt", "authentication"),
+    ("secret", "insufficient_scope", "authorization"),
+    ("Access denied secret", "", "authorization"),
+    ("rate limit secret", "", "rate_limit"),
+    ("field not found secret", "validation-failed", "provider"),
+])
+def test_hardcover_graphql_errors_are_classified_and_sanitized(message, code, kind, monkeypatch):
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response({
+        "errors": [{"message": message, "extensions": {"code": code}}],
+    }))
+    result = HardcoverProvider("secret").lookup(ISBN13)
+    assert result.failure_kind == kind
+    assert "secret" not in result.error

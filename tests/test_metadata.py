@@ -2,6 +2,11 @@ from unittest.mock import MagicMock, patch
 import urllib.error
 import urllib.parse
 
+import pytest
+
+from bookledger.services.bigbook import BigbookProvider
+from bookledger.services.hardcover import HardcoverProvider
+
 from bookledger.services.metadata import (
     GoogleBooksProvider,
     MetadataLookupService,
@@ -786,3 +791,60 @@ def test_provider_classifies_network_unavailable_error():
 
     assert result.status == "Lookup failed"
     assert result.failure_kind == "network"
+
+
+@pytest.mark.parametrize("provider_type", [BigbookProvider, HardcoverProvider])
+@pytest.mark.parametrize("error,kind", [
+    (TimeoutError("private-credential timed out"), "timeout"),
+    (urllib.error.URLError(ConnectionError("private-credential offline")), "network"),
+    (ValueError("private-credential invalid response"), "unexpected"),
+])
+def test_optional_provider_transport_failures_redact_credentials(provider_type, error, kind, monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise error
+    monkeypatch.setattr("urllib.request.urlopen", fail)
+    result = provider_type("private-credential").lookup("9780306406157")
+    assert result.failure_kind == kind
+    assert "private-credential" not in result.error
+
+
+def test_bigbook_detail_requests_share_the_five_second_budget(monkeypatch):
+    import json
+    clock = [0.0]
+    timeouts = []
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self):
+            return json.dumps({"books": [[{"id": 1}, {"id": 2}]]} if len(timeouts) == 1 else {
+                "identifiers": {"isbn_13": "9780547928227"}, "title": "Unrelated edition",
+            }).encode()
+
+    def request(_request, timeout):
+        timeouts.append(timeout)
+        clock[0] += 2
+        return Response()
+
+    monkeypatch.setattr("bookledger.services.metadata_contract.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("urllib.request.urlopen", request)
+    result = BigbookProvider("key").lookup("9780306406157")
+    assert timeouts == [5.0, 3.0, 1.0]
+    assert result.failure_kind == "timeout"
+
+
+def test_optional_provider_failure_preserves_precedence_and_reports_fallback(monkeypatch):
+    first = StubProvider("Google Books", MetadataResult("Retrieved", {"title": "Accepted title"}, "Google Books"))
+    bigbook = BigbookProvider("key")
+    def fail(*_args):
+        raise urllib.error.HTTPError("https://api.bigbookapi.com/search-books", 402, "private detail", {}, None)
+    monkeypatch.setattr(bigbook, "_request_json_with_headers", fail)
+    hardcover = HardcoverProvider("token")
+    monkeypatch.setattr(hardcover, "lookup", lambda _isbn: MetadataResult(
+        "Retrieved", {"title": "Replacement title", "author": "Author", "book_details": "Synopsis"}, "Hardcover", record_found=True,
+    ))
+    result = MetadataLookupService((first, bigbook, hardcover)).lookup("9780306406157")
+    assert result.values["title"] == "Accepted Title"
+    assert result.values["author"] == "Author"
+    assert result.provider_statuses["Bigbook"] == "Quota exhausted"
+    assert result.provider_statuses["Hardcover"].startswith("Metadata retrieved")

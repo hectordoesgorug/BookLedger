@@ -19,6 +19,13 @@ class HardcoverProvider(MetadataProvider):
     def __init__(self, api_token: str | None = None):
         super().__init__()
         self.api_token = (api_token or "").strip()
+        if self.api_token.lower().startswith("bearer "):
+            self.api_token = self.api_token.split(None, 1)[-1].strip()
+
+    def _failed(self, exc: Exception) -> MetadataResult:
+        result = super()._failed(exc)
+        result.error = f"Hardcover request failed ({result.failure_kind})."
+        return result
 
     @provider_lookup
     def lookup(self, isbn: str) -> MetadataResult:
@@ -34,18 +41,22 @@ class HardcoverProvider(MetadataProvider):
         query EditionByISBN($isbn10: String!, $isbn13: String!) {
           byIsbn13: editions(where: {isbn_13: {_eq: $isbn13}}, limit: 5) {
             id title subtitle isbn_10 isbn_13 pages release_date release_year
-            edition_format edition_information description
+            edition_format edition_information physical_format
             publisher { name }
+            contributions { contribution author { name } }
             book {
-              title description release_date release_year pages author_names genres
+              title description release_date release_year pages cached_tags
+              contributions { contribution author { name } }
             }
           }
           byIsbn10: editions(where: {isbn_10: {_eq: $isbn10}}, limit: 5) {
             id title subtitle isbn_10 isbn_13 pages release_date release_year
-            edition_format edition_information description
+            edition_format edition_information physical_format
             publisher { name }
+            contributions { contribution author { name } }
             book {
-              title description release_date release_year pages author_names genres
+              title description release_date release_year pages cached_tags
+              contributions { contribution author { name } }
             }
           }
         }
@@ -56,7 +67,7 @@ class HardcoverProvider(MetadataProvider):
             headers={
                 "User-Agent": "BookLedger/0.1 (ISBN metadata lookup)",
                 "Content-Type": "application/json",
-                "authorization": self.api_token,
+                "authorization": f"Bearer {self.api_token}",
             },
             method="POST",
         )
@@ -81,9 +92,10 @@ class HardcoverProvider(MetadataProvider):
             if not isinstance(errors, list):
                 return self._failed(ValueError("Hardcover returned invalid GraphQL errors"))
             message = " ".join(str(item.get("message", "")) for item in errors if isinstance(item, dict)).casefold()
-            if any(term in message for term in ("unauthorized", "invalid token", "expired token")):
+            codes = " ".join(str((item.get("extensions") or {}).get("code", "")) for item in errors if isinstance(item, dict) and isinstance(item.get("extensions", {}), dict)).casefold()
+            if any(term in message + codes for term in ("unauthorized", "invalid token", "expired token", "invalid_token", "invalid-jwt", "jwt-invalid")):
                 kind, description = "authentication", "invalid or expired token"
-            elif any(term in message for term in ("forbidden", "permission", "access denied")):
+            elif any(term in message + codes for term in ("forbidden", "permission", "access denied", "insufficient_scope", "access-denied")):
                 kind, description = "authorization", "access denied"
             elif "throttl" in message or "rate limit" in message:
                 kind, description = "rate_limit", "rate limit was reached"
@@ -93,11 +105,13 @@ class HardcoverProvider(MetadataProvider):
         data = payload.get("data")
         if not isinstance(data, dict):
             return self._failed(ValueError("Hardcover returned an invalid GraphQL response"))
+        if not any(key in data for key in ("byIsbn13", "byIsbn10")):
+            return self._failed(ValueError("Hardcover returned no edition selection"))
         editions = []
         for key in ("byIsbn13", "byIsbn10"):
-            values = data.get(key)
-            if values is None:
+            if key not in data:
                 continue
+            values = data[key]
             if not isinstance(values, list) or any(not isinstance(item, dict) for item in values):
                 return self._failed(ValueError("Hardcover returned malformed editions"))
             editions.extend(values)
@@ -142,17 +156,28 @@ class HardcoverProvider(MetadataProvider):
     def _map_edition(cls, edition: dict, requested_isbn: str) -> dict:
         book = edition.get("book") if isinstance(edition.get("book"), dict) else {}
         publisher = edition.get("publisher") if isinstance(edition.get("publisher"), dict) else {}
-        names = book.get("author_names")
-        authors = [name.strip() for name in names if isinstance(name, str)] if isinstance(names, list) else []
-        genres = book.get("genres")
-        title = cls._first_text(book.get("title"), edition.get("title"), edition.get("subtitle"))
-        description = cls._first_text(edition.get("description"), book.get("description"))
+        authors = []
+        for source in (edition, book):
+            contributions = source.get("contributions")
+            for item in contributions if isinstance(contributions, list) else []:
+                if not isinstance(item, dict) or str(item.get("contribution") or "").casefold() != "author":
+                    continue
+                author = item.get("author")
+                name = cls._first_text(author.get("name")) if isinstance(author, dict) else None
+                if name and name not in authors:
+                    authors.append(name)
+            if authors:
+                break
+        tags = book.get("cached_tags")
+        genres = tags.get("Genre") if isinstance(tags, dict) else None
+        title = cls._first_text(edition.get("title"), book.get("title"))
+        description = cls._first_text(book.get("description"))
         edition_text = cls._first_text(edition.get("edition_information"), edition.get("edition_format"), edition.get("physical_format"))
         return {
             "title": title,
             "author": ", ".join(name for name in authors if name) or None,
             "isbn": cls._first_text(edition.get("isbn_13"), edition.get("isbn_10"), requested_isbn),
-            "genre": next((value.strip() for value in genres if isinstance(value, str) and value.strip()), None) if isinstance(genres, list) else None,
+            "genre": next((name for item in genres if isinstance(item, dict) and (name := cls._first_text(item.get("tag")))), None) if isinstance(genres, list) else None,
             "publisher": cls._first_text(publisher.get("name")),
             "publication_year": cls._year(edition.get("release_year"), edition.get("release_date"), book.get("release_year"), book.get("release_date")),
             "edition": edition_text,

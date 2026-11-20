@@ -17,6 +17,11 @@ class BigbookProvider(MetadataProvider):
         super().__init__()
         self.api_key = (api_key or "").strip()
 
+    def _failed(self, exc: Exception) -> MetadataResult:
+        result = super()._failed(exc)
+        result.error = f"Bigbook request failed ({result.failure_kind})."
+        return result
+
     @provider_lookup
     def lookup(self, isbn: str) -> MetadataResult:
         if not self.api_key:
@@ -101,8 +106,6 @@ class BigbookProvider(MetadataProvider):
         if not isinstance(payload, dict):
             return None
         books = payload.get("books")
-        if books is None:
-            return []
         if not isinstance(books, list):
             return None
         flattened = []

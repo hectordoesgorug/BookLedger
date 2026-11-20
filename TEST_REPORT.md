@@ -1,3 +1,67 @@
+## Metadata provider compatibility — November 20, 2026
+
+Baseline: clean `main` at `780798f3442dc3ea3008c9a93cc3ebc305006156`, matching the local `origin/main` reference. Existing description shortening is integrated. This reassessment used public bibliographic identifiers, existing local credentials loaded through `AppConfigStore`, and read-only HTTPS requests. No library database, inventory, backups, provider order, enablement, or credentials were changed. The root configuration bytes were checked before and after the bounded sample run and were unchanged; the profile fallback was absent. Credential values and raw exception bodies are excluded from this report.
+
+### Contract findings
+
+The [official Hardcover documentation repository](https://github.com/hardcoverapp/hardcover-docs/tree/d9439f56e9eccca6d4589fb6897068b12bc3d045) was inspected at `d9439f56e9eccca6d4589fb6897068b12bc3d045`. Its [GraphQL schema](https://github.com/hardcoverapp/hardcover-docs/blob/d9439f56e9eccca6d4589fb6897068b12bc3d045/schema.graphql) and successful authenticated live introspection show that `books.author_names`, `books.genres`, and `editions.description` are absent. Older rendered schema pages still list those fields, so they were not used as the current contract.
+
+The query now requests edition/book contributions with author names, book description, and `book.cached_tags`. Only explicit `Author` contributions populate Author, preferring edition credits and falling back to work credits. Only the `Genre` category supplies Genre; mood and general tags do not. Genre still must satisfy the catalog's approved list. Edition title takes precedence over work title. Publisher, release fields, edition information/format, and pages use supported fields; missing fields remain optional. Both ISBN forms are queried, and unrelated returned identifiers remain rejected.
+
+The [current getting-started source](https://github.com/hardcoverapp/hardcover-docs/blob/d9439f56e9eccca6d4589fb6897068b12bc3d045/src/content/docs/api/Getting-Started.mdx) describes PAT permissions and user-selected expiration introduced after the legacy token system. Its capability map lists catalog read scopes for editions, books, contributions, authors, and publishers; no write scope is needed by this adapter. Actual least-privilege-token enforcement was not live-tested. Legacy tokens can have access equivalent to `all`; the former fixed January 1 expiry description should not be applied to every current PAT. Bearer authentication succeeded; the separate bare-token probe returned HTTP 400. Saved credentials may contain either a bare token or a Bearer prefix; requests now send exactly one prefix. HTTP and GraphQL failures retain sanitized classifications. The current free plan documents 5,000 daily requests, 60 per minute, and burst capacity 10. Each top-level alias counts toward quota; the two ISBN selections cost two units per lookup. Live rate headers agreed with those limits. The old rendered maximum-depth statement was not assumed to apply: the corrected query with nested contributions was accepted live.
+
+[Hardcover's OAuth guidance](https://github.com/hardcoverapp/hardcover-docs/blob/d9439f56e9eccca6d4589fb6897068b12bc3d045/src/content/docs/api/OAuth.mdx) recommends OAuth for applications used by others. PAT entry remains suitable for a personal tool but is not the recommended long-term distributed-app sign-in design. A separately scoped OAuth/PKCE implementation and appropriate token storage should be assessed before promoting Hardcover as a default provider. No OAuth implementation or credential migration was performed. Only public catalog metadata was requested; no user-library or account mutations were attempted.
+
+[BigBook's official documentation](https://bigbookapi.com/docs/) confirms `GET /search-books?isbn=...`, nested `books` groups, `GET /{id}`, and `x-api-key` authentication. Live responses agreed. The detail sample supplies title, authors, description, numeric publication year and page count. Publisher, edition, genre, and SRP are not inferred. The documented/live sample puts ISBN-10 `0439139597` in both ISBN fields; ISBN equivalence still verifies it for `9780439139595`. This is not evidence that other editions can be accepted without matching identifiers. Missing or malformed `books` arrays now produce an invalid-response failure rather than a confirmed miss. Transport errors from both adapters are sanitized, including exception messages that contain credentials.
+
+BigBook documents daily quotas, free-plan throughput of 60 requests per minute, HTTP 402 for exhausted daily allocation, and HTTP 429 for rate limiting. Quota headers were observed on every successful sample response. The tested account began with 50 daily units and ended with 41; this is an observed account allocation, not a promise about every plan. Search and detail calls continue to share one five-second provider budget. No live retries or automatic backoff were used.
+
+### Bounded live requests
+
+Hardcover: ten POST requests total to `https://api.hardcover.app/v1/graphql`. No tokens were included in the URL or GraphQL variables.
+
+| Request | Selection/input | Observed outcome | Total duration |
+| --- | --- | --- | --- |
+| 1 | Introspection of edition, book, and contribution field names | Bearer accepted; HTTP 200, no GraphQL errors | 0.964 s |
+| 2 | Original adapter, `9780547928227` | Lookup failed, provider classification; HTTP status was not captured for this baseline call | 0.793 s |
+| 3 | Corrected contract probe, `9780547928227`, one edition plus public credits/tags | HTTP 200; verified ISBN and supported fields | 0.825 s |
+| 4 | Bare-token comparison, edition ID 0 with limit 1 | HTTP 400; no account records requested | 0.835 s |
+| 5 | Repaired adapter, fiction `9780547928227` | HTTP 200; title, author, ISBN, genre, publisher, year, edition, pages, description | 1.105 s |
+| 6 | Repaired adapter, nonfiction `9780062316097` | HTTP 200; same nine fields | 1.026 s |
+| 7 | Repaired adapter, academic `9780306406157` | HTTP 200; same fields except genre | 0.873 s |
+| 8 | Repaired adapter, equivalent ISBN-10 `054792822X` | HTTP 200; same nine fields as fiction ISBN-13 | 1.056 s |
+| 9 | Repaired adapter, synthetic `9780000000002` | HTTP 200; unexpectedly matched a sparse record: title, author, ISBN, genre, year | 0.833 s |
+| 10 | Synthetic `9799999999990`, direct edition ISBN-13 selection | HTTP 200; empty edition list, no GraphQL errors | 0.790 s |
+
+Requests 5–9 used the adapter's `byIsbn13` and `byIsbn10` selections with the entered ISBN and its valid equivalent. Every retrieved adapter result passed identifier verification. The synthetic ISBN in request 9 is not a reliable no-result fixture: the service actually contains a record for it. Request 10 establishes an empty live result; it does not establish that every synthetic identifier will be absent.
+
+BigBook: nine GET requests total to `https://api.bigbookapi.com`, all with `x-api-key` authentication and no key in the URL.
+
+| Request | Path/input | Observed outcome | Total duration |
+| --- | --- | --- | --- |
+| 1 | `/search-books?isbn=9780547928227` | HTTP 200, empty books | 1.147 s |
+| 2 | `/search-books?isbn=9780062316097` | HTTP 200, empty books | 0.593 s |
+| 3 | `/search-books?isbn=9780306406157` | HTTP 200, empty books | 0.578 s |
+| 4 | ISBN-10 input `054792822X`, normalized request `/search-books?isbn=9780547928227` | HTTP 200, empty books | 0.240 s |
+| 5 | `/search-books?isbn=9780000000002` | HTTP 200, empty books | 0.641 s |
+| 6 | `/16384516`, the official documentation example | HTTP 200, title, authors, description, year, pages, equivalent ISBN-10 | 0.680 s |
+| 7 | `/search-books?isbn=9780439139595` | HTTP 200, nested group containing ID 16384516 | 0.795 s |
+| 8–9 | Complete adapter lookup for `9780439139595`: same search followed by `/16384516` | Both HTTP 200; Retrieved with verified ISBN and six mapped fields | 0.900 s total; response-opening times 0.667/0.232 s |
+
+Empty searches establish limited coverage for these exact identifiers at this time, not a confirmed endpoint defect. The successful documentation example establishes live search/detail compatibility and ISBN equivalence. Live edition mismatch was not deliberately induced; rejection of unrelated editions, credential failures, quota/rate-limit errors, and network failures were tested with deterministic fixtures. No invalid credentials were sent to either live service.
+
+### Recommendations and automated verification
+
+- Hardcover: retain available for manual enabling, disabled by default. The query repair passed bounded live validation. Coverage, scoped-PAT enforcement, future schema changes, and distributed-app authentication still need attention; assess OAuth separately before wider promotion.
+- BigBook: retain available for manual enabling, disabled by default. Authentication and one complete ISBN lookup worked, but coverage was sparse in the representative sample and each successful search may require additional quota for details.
+- `.venv\Scripts\python.exe -m pytest tests/test_hardcover.py tests/test_bigbook.py tests/test_metadata.py tests/test_provider_settings.py -q`: **80 passed** before the additional regression cases.
+- `.venv\Scripts\python.exe -m pytest tests/test_hardcover.py tests/test_bigbook.py tests/test_metadata.py tests/test_provider_settings.py tests/test_provider_diagnostic.py tests/test_intake_ui.py -q -rs`: **167 passed, 17 skipped, 0 failed**. Skips cite incomplete Tcl/Tk files or unavailable display initialization. Automated checks cover both ISBN forms, verified/mismatched editions, explicit author roles, optional fields, malformed responses, HTTP 401/402/403/429/500/503, GraphQL errors over HTTP 200, credential redaction, network/timeout failures, a shrinking five-second detail budget, chain fallback/precedence, diagnostics, manual-value preservation, and default-disabled settings.
+- First `.venv\Scripts\python.exe -m pytest -q -rs`: **598 passed, 19 skipped, 1 failed** in 60.96 seconds. The failure was `tests/test_mobile_connection.py::test_pairing_consumes_expiring_credential_and_authenticates_device`: HTTP 200 was received but the immediate `connected` assertion was false. That test passed on an isolated rerun (**1 passed** in 0.51 seconds). The unchanged connection handler writes the response before recording connection confirmation, which permits a timing race with that assertion. This is an explanation supported by the ordering, not a completed mobile fix. The skips cite Tcl/Tk initialization or missing files. The prior minimum-window geometry failure did not recur.
+- Confirmation `.venv\Scripts\python.exe -m pytest -q -rs`: **597 passed, 19 skipped, 2 failed** in 57.86 seconds. The minimum-window geometry check recurred (`798 > 798` was false), and `tests/test_mobile_connection.py::test_connection_confirmation_expires_recovers_and_is_cleared_by_unpair` failed an immediate `connected` assertion after HTTP 200. Neither the form geometry nor mobile connection implementation/tests were changed. Provider regressions remained passing; the full suite is not green. These failures remain unresolved and were not suppressed or repaired as part of the provider changes.
+- `.venv\Scripts\python.exe -m compileall -q src tests` and `git diff --check`: **passed**. Git emitted configured LF-to-CRLF notices only.
+
+Native Windows acceptance of Settings and diagnostics was not performed. Mocked success and error fixtures do not establish live service availability beyond the requests recorded above.
+
 ## Android release-readiness audit - November 17, 2026
 
 Baseline: clean `main` at `b50d2cfb900f593779d693dc11accd7b4d88afaa`, matching `origin/main`. The audit report is `docs/ANDROID_RELEASE_READINESS_AUDIT.md`; this entry records new runs without replacing earlier results.
@@ -23,7 +87,7 @@ Automated results: `flutter test` - 124 passed, 0 failed, 0 skipped. `flutter an
 
 # Test report history
 
-Record started: 2026-10-19; latest dated entry: 2026-11-17.
+Record started: 2026-10-19; latest dated entry: 2026-11-20.
 
 This is a record of specific test runs, investigations, and reported physical tests, not a current comprehensive validation certificate. Results and limitations apply to the dates and environments recorded in each section. The 2026-11-15 Milestone 5 source-level run did not establish clean-machine Windows compatibility or physical Android end-to-end transfer/cataloging; a separate reported final-asset session on 2026-11-16 is recorded below.
 

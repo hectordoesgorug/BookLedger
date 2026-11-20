@@ -76,7 +76,7 @@ def test_bigbook_missing_key_empty_and_malformed_responses(monkeypatch):
     assert provider.lookup(ISBN13).failure_kind == "unexpected"
 
 
-@pytest.mark.parametrize(("status", "failure_kind"), [(401, "authentication"), (403, "authorization"), (402, "quota"), (429, "rate_limit")])
+@pytest.mark.parametrize(("status", "failure_kind"), [(401, "authentication"), (403, "authorization"), (402, "quota"), (429, "rate_limit"), (500, "provider"), (503, "provider")])
 def test_bigbook_classifies_quota_and_rate_limit(status, failure_kind, monkeypatch):
     provider = BigbookProvider("private-secret-value")
 
@@ -107,4 +107,28 @@ def test_bigbook_classifies_quota_and_rate_limit_during_detail_fetch(status, kin
     monkeypatch.setattr(provider, "_request_json_with_headers", request)
     result = provider.lookup(ISBN13)
     assert result.failure_kind == kind
+
+
+@pytest.mark.parametrize("payload", [{}, {"books": None}, {"books": {}}, {"books": [[None]]}])
+def test_bigbook_malformed_search_is_not_a_confirmed_miss(payload, monkeypatch):
+    provider = BigbookProvider("key")
+    monkeypatch.setattr(provider, "_request_json_with_headers", lambda *_args: payload)
+    assert provider.lookup(ISBN13).failure_kind == "unexpected"
+
+
+def test_bigbook_live_documented_identifier_shape_and_sparse_metadata(monkeypatch):
+    provider = BigbookProvider("key")
+    monkeypatch.setattr(provider, "_request_json_with_headers", lambda url, _headers: (
+        {"books": [[{"id": 16384516}]]} if "search-books" in url else {
+            "title": "Harry Potter and the Goblet of Fire",
+            "identifiers": {"isbn_10": "0439139597", "isbn_13": "0439139597"},
+            "authors": None, "number_of_pages": 734.0, "publish_date": 2000.0,
+        }
+    ))
+    result = provider.lookup("9780439139595")
+    assert result.record_found is True
+    assert result.values["isbn"] == "9780439139595"
+    assert result.values["page_count"] == 734
+    assert result.values["author"] is None and result.values["book_details"] is None
+    assert not {"publisher", "genre", "edition", "srp"} & result.values.keys()
 
