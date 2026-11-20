@@ -244,10 +244,12 @@ def test_v12_migration_preserves_existing_numeric_values(tmp_path):
         conn.execute("DROP TABLE currency_conversions")
         conn.execute("DROP TABLE exchange_rates")
         conn.execute("DROP TABLE currency_state")
+        conn.execute("ALTER TABLE book_records DROP COLUMN book_details_shortened")
+        conn.execute("ALTER TABLE book_records DROP COLUMN book_details_original")
         conn.execute("PRAGMA user_version=12")
     migrated = Database(db.path)
     with migrated.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
         assert conn.execute("SELECT currency FROM currency_state WHERE id=1").fetchone()[0] == "PHP"
         assert conn.execute("SELECT price_minor FROM copies").fetchone()[0] == 12345
         assert conn.execute("SELECT price_minor FROM sales").fetchone()[0] == 12345

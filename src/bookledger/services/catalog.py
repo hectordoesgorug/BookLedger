@@ -509,11 +509,17 @@ class CatalogService:
                     raise ValidationError({"isbn": "This ISBN already has a bibliographic record. Confirm adding another copy and reuse that record."})
             if book_id is None:
                 try:
+                    book_details = (payload.get("book_details") or "").strip() or None
+                    book_details_original = (
+                        (payload.get("book_details_original") or "").strip()
+                        or book_details
+                    )
                     cur = conn.execute(
-                        """INSERT INTO book_records(title,subtitle,author,isbn,genre,book_details,publisher,publication_year,edition,page_count,srp_minor,metadata_source,metadata_status)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        """INSERT INTO book_records(title,subtitle,author,isbn,genre,book_details,book_details_original,book_details_shortened,publisher,publication_year,edition,page_count,srp_minor,metadata_source,metadata_status)
+                           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (payload["title"].strip(), (payload.get("subtitle") or "").strip() or None, payload["author"].strip(), isbn, payload["genre"],
-                         (payload.get("book_details") or "").strip() or None,
+                         book_details, book_details_original,
+                         (payload.get("book_details_shortened") or "").strip() or None,
                          (payload.get("publisher") or "").strip() or None,
                          int(payload["publication_year"]) if str(payload.get("publication_year") or "").isdigit() else None,
                          (payload.get("edition") or "").strip() or None,
@@ -558,7 +564,8 @@ class CatalogService:
     ) -> list[dict]:
         sql = """SELECT c.id AS copy_id,c.copy_uuid,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,c.price_minor,
                         c.price_minor AS display_price_minor,c.status,
-                        b.id AS book_id,b.title,b.subtitle,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,b.book_details,b.srp_minor,
+                        b.id AS book_id,b.title,b.subtitle,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,b.page_count,
+                        b.book_details,b.book_details_original,b.book_details_shortened,b.srp_minor,
                         s.sale_date,b.metadata_source,b.metadata_status
                  FROM copies c JOIN book_records b ON b.id=c.book_id
                  LEFT JOIN sales s ON s.id=(SELECT MAX(s2.id) FROM sales s2 WHERE s2.copy_id=c.id)
@@ -607,7 +614,7 @@ class CatalogService:
                 """SELECT c.id AS copy_id,c.copy_uuid,c.copy_code,c.copy_number,c.format,c.condition,c.location,c.photo_path,
                           c.price_minor,c.price_minor AS display_price_minor,c.status,
                           b.id AS book_id,b.title,b.subtitle,b.author,b.isbn,b.genre,b.publisher,b.publication_year,b.edition,
-                          b.page_count,b.book_details,b.srp_minor,b.metadata_source,b.metadata_status,
+                          b.page_count,b.book_details,b.book_details_original,b.book_details_shortened,b.srp_minor,b.metadata_source,b.metadata_status,
                           (SELECT s.sale_date FROM sales s WHERE s.copy_id=c.id ORDER BY s.id DESC LIMIT 1) AS sale_date
                    FROM copies c JOIN book_records b ON b.id=c.book_id WHERE c.id=?""",
                 (copy_id,),
@@ -642,10 +649,20 @@ class CatalogService:
             if row["status"] == "Sold" and price_minor != row["price_minor"]:
                 raise ValidationError({"price": "Price is locked while this copy is Sold. Change its status before editing Price."})
             book_id = row["book_id"]
+            versions = conn.execute(
+                "SELECT book_details_original,book_details_shortened FROM book_records WHERE id=?",
+                (book_id,),
+            ).fetchone()
+            book_details = (payload.get("book_details") or "").strip() or None
+            book_details_original = payload.get("book_details_original", versions["book_details_original"])
+            book_details_shortened = payload.get("book_details_shortened", versions["book_details_shortened"])
+            if book_details_original is None and book_details_shortened is None:
+                book_details_original = book_details
             try:
                 conn.execute(
-                    """UPDATE book_records SET title=?,subtitle=?,author=?,isbn=?,genre=?,book_details=?,publisher=?,publication_year=?,edition=?,page_count=?,srp_minor=?,metadata_source=?,metadata_status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                    (payload["title"].strip(),(payload.get("subtitle") or "").strip() or None,payload["author"].strip(),isbn,payload["genre"],(payload.get("book_details") or "").strip() or None,
+                    """UPDATE book_records SET title=?,subtitle=?,author=?,isbn=?,genre=?,book_details=?,book_details_original=?,book_details_shortened=?,publisher=?,publication_year=?,edition=?,page_count=?,srp_minor=?,metadata_source=?,metadata_status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                    (payload["title"].strip(),(payload.get("subtitle") or "").strip() or None,payload["author"].strip(),isbn,payload["genre"],book_details,
+                     book_details_original,book_details_shortened,
                      (payload.get("publisher") or "").strip() or None,int(payload["publication_year"]) if str(payload.get("publication_year") or "").isdigit() else None,
                      (payload.get("edition") or "").strip() or None,int(payload["page_count"]) if str(payload.get("page_count") or "").isdigit() else None,
                      srp_minor,payload.get("metadata_source"),payload.get("metadata_status","Manual entry"),book_id),

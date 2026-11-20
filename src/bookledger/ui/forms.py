@@ -13,6 +13,7 @@ from bookledger.services.catalog import CatalogService, ValidationError
 from bookledger.services.isbn import normalize_isbn
 from bookledger.provider_registry import PROVIDERS_BY_NAME
 from bookledger.services.metadata import MetadataLookupService, MetadataResult
+from bookledger.services.description_shortener import shorten_description
 from bookledger.resources import apply_application_icon
 from bookledger.ui.status_colors import status_message_color
 
@@ -52,6 +53,8 @@ class BookForm(tk.Toplevel):
         self.mousewheel_router = mousewheel_router
         self.existing = existing
         self.existing_book_id = existing_book_id
+        self.book_details_original = (existing or {}).get("book_details_original", (existing or {}).get("book_details"))
+        self.book_details_shortened = (existing or {}).get("book_details_shortened")
         self.incoming_capture_id = incoming_capture_id
         self.on_discard_incoming = on_discard_incoming
         self.on_cancel = on_cancel
@@ -101,6 +104,7 @@ class BookForm(tk.Toplevel):
                     text="Discard Incoming Capture",
                     command=self._discard_incoming,
                 ).grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self._update_description_controls()
         self.update_idletasks()
         # The canvas does not propagate the scrollable body's requested height.
         content_height = max(self.body.winfo_reqheight(), self.right_panel.winfo_reqheight())
@@ -269,18 +273,121 @@ class BookForm(tk.Toplevel):
     def _multiline_field(self, parent, label, key, row):
         field_label = ttk.Label(parent, text=label)
         field_label.grid(row=row, column=0, sticky="nw", padx=(0, 10), pady=4)
+        if key == "book_details":
+            self.description_status = tk.StringVar(value="")
+            controls = ttk.Frame(parent)
+            controls.grid(row=row, column=1, columnspan=3, sticky="e", pady=2)
+            self.shorten_button = ttk.Button(controls, text="Shorten", command=self._shorten_book_details)
+            self.shorten_button.pack(side="left")
+            self.review_description_button = ttk.Button(
+                controls, text="Review saved versions", command=self._review_book_details, state="disabled"
+            )
+            self.review_description_button.pack(side="left", padx=(6, 0))
         widget = tk.Text(parent, height=3, width=34, wrap="word", relief="solid", borderwidth=1)
-        widget.grid(row=row, column=1, columnspan=3, sticky="ew", pady=4)
+        widget.grid(row=row + 1, column=1, columnspan=3, sticky="ew", pady=4)
         self._widgets[key] = widget
         error = ttk.Label(parent, text="", foreground="#b42318", wraplength=560)
-        error.grid(row=row + 1, column=1, columnspan=3, sticky="w", pady=(0, 3))
+        error.grid(row=row + 2, column=1, columnspan=3, sticky="w", pady=(0, 3))
         self._errors[key] = error
         self._field_labels[key] = field_label
-        widget.bind("<KeyRelease>", lambda _event: self._clear_valid_error(key), add="+")
+        widget.bind("<KeyRelease>", lambda _event: self._description_changed(), add="+")
         if key in OPTIONAL_METADATA_FIELDS:
             widget.bind("<FocusIn>", lambda _event, field=key: self._clear_placeholder(field), add="+")
             widget.bind("<FocusOut>", lambda _event, field=key: self._restore_placeholder(field), add="+")
-        return row + 2
+        if key == "book_details":
+            ttk.Label(parent, textvariable=self.description_status).grid(row=row + 2, column=0, sticky="nw", pady=(0, 3))
+            return row + 3
+        return row + 3
+
+    def _description_changed(self):
+        self._clear_valid_error("book_details")
+        self._update_description_controls()
+
+    def _update_description_controls(self):
+        widget = self._widgets.get("book_details")
+        if widget is None:
+            return
+        active = self._get("book_details")
+        if self.book_details_original is not None and active == self.book_details_original:
+            status = "Original selected"
+        elif self.book_details_shortened and active == self.book_details_shortened:
+            status = "Shortened version selected"
+        elif self.book_details_original is not None or self.book_details_shortened:
+            status = "Edited manually; saved versions are unchanged"
+        elif active:
+            status = "Not shortened"
+        else:
+            status = ""
+        self.description_status.set(status)
+        self.shorten_button.configure(state="normal" if len(active) > 300 else "disabled")
+        self.review_description_button.configure(
+            state="normal" if self.book_details_original is not None and self.book_details_shortened else "disabled"
+        )
+
+    def _description_comparison(self, original, shortened):
+        dialog = tk.Toplevel(self)
+        dialog.title("Compare Book Details")
+        dialog.transient(self)
+        dialog.geometry("1000x600")
+        dialog.minsize(800, 480)
+        dialog.grab_set()
+        dialog.columnconfigure((0, 1), weight=1, uniform="description-versions")
+        dialog.rowconfigure(0, weight=1)
+        result = {"choice": None}
+        for column, (title, text) in enumerate((("Original", original), ("Shortened", shortened))):
+            panel = ttk.LabelFrame(dialog, text=title, padding=8)
+            panel.grid(row=0, column=column, sticky="nsew", padx=(12 if column == 0 else 6, 6 if column == 0 else 12), pady=12)
+            panel.columnconfigure(0, weight=1)
+            panel.rowconfigure(1, weight=1)
+            ttk.Label(panel, text=f"{len(text)} characters").grid(row=0, column=0, sticky="w", pady=(0, 6))
+            preview = tk.Text(panel, wrap="word", state="normal")
+            scrollbar = ttk.Scrollbar(panel, orient="vertical", command=preview.yview)
+            preview.configure(yscrollcommand=scrollbar.set)
+            preview.grid(row=1, column=0, sticky="nsew")
+            scrollbar.grid(row=1, column=1, sticky="ns")
+            preview.insert("1.0", text)
+            preview.configure(state="disabled")
+        buttons = ttk.Frame(dialog, padding=(12, 0, 12, 12))
+        buttons.grid(row=1, column=0, columnspan=2, sticky="ew")
+
+        def choose(value):
+            result["choice"] = value
+            dialog.destroy()
+
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right")
+        ttk.Button(buttons, text="Use Shortened", command=lambda: choose("shortened")).pack(side="right", padx=8)
+        ttk.Button(buttons, text="Keep Original", command=lambda: choose("original")).pack(side="right", padx=8)
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.wait_window()
+        return result["choice"]
+
+    def _shorten_book_details(self):
+        original = self._get("book_details")
+        shortened = shorten_description(original)
+        if shortened is None:
+            from tkinter import messagebox
+
+            messagebox.showinfo(
+                "Book Details Not Shortened",
+                "No safe shorter version could be made from complete sentences. The text was left unchanged.",
+                parent=self,
+            )
+            return
+        choice = self._description_comparison(original, shortened)
+        if choice is None:
+            return
+        self.book_details_original = original
+        self.book_details_shortened = shortened
+        self._set("book_details", original if choice == "original" else shortened)
+        self._update_description_controls()
+
+    def _review_book_details(self):
+        if not self.book_details_original or not self.book_details_shortened:
+            return
+        choice = self._description_comparison(self.book_details_original, self.book_details_shortened)
+        if choice is not None:
+            self._set("book_details", self.book_details_original if choice == "original" else self.book_details_shortened)
+            self._update_description_controls()
 
     def _photo_row(self, parent, row):
         photo_label = ttk.Label(parent, text="Copy Photo *")
@@ -398,6 +505,7 @@ class BookForm(tk.Toplevel):
             self._set("srp", f"{row['srp_minor'] / 100:.2f}" if row.get("srp_minor") is not None else "")
         if row.get("photo_path"):
             self.set_photo(row["photo_path"])
+        self._update_description_controls()
 
     def _resolve_photo(self, value: str | Path) -> Path:
         path = Path(value)
@@ -641,6 +749,9 @@ class BookForm(tk.Toplevel):
             # Fill empty controls only, preserving manual or newer user input.
             if value not in (None, "") and key in self._widgets and not self._get(key):
                 self._set(key, value)
+                if key == "book_details" and self.book_details_original is None and self.book_details_shortened is None:
+                    self.book_details_original = str(value).strip()
+        self._update_description_controls()
 
     def _refresh(self):
         if self._active_operation is None and self.metadata_status.get().startswith("Metadata unavailable"):
@@ -714,6 +825,8 @@ class BookForm(tk.Toplevel):
         payload["location"] = payload.get("location") or DEFAULT_LOCATION
         payload["metadata_source"] = self.metadata_source
         payload["metadata_status"] = self.metadata_status.get().split(" · ")[0]
+        payload["book_details_original"] = self.book_details_original
+        payload["book_details_shortened"] = self.book_details_shortened
         return payload
 
     def _save_copy(self, payload, existing_book_id=None):
@@ -827,8 +940,11 @@ class BookForm(tk.Toplevel):
         self.photo_preview.configure(image="", text="No Photo Selected")
         self.isbn_override.set(False)
         self.metadata_source = None
+        self.book_details_original = None
+        self.book_details_shortened = None
         self.metadata_status.set("Manual entry")
         self._reset_provider_statuses()
         self._set("location", DEFAULT_LOCATION)
         self._populate_validation({})
         self._update_control_states()
+        self._update_description_controls()

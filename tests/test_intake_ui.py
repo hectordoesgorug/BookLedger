@@ -70,6 +70,7 @@ def test_metadata_keeps_provider_full_title_and_never_splits_or_overwrites_subti
         _widgets={key: object() for key in values},
         _get=lambda key: values.get(key, ""),
         _set=lambda key, value: values.__setitem__(key, value or ""),
+        _update_description_controls=lambda: None,
     )
 
     BookForm._apply_metadata(subject, MetadataResult(
@@ -174,7 +175,7 @@ def test_short_fields_use_the_approved_two_column_form_layout(form):
     synopsis = widget._widgets["book_details"].grid_info()
     assert int(synopsis["column"]) == 1
     assert int(synopsis["columnspan"]) == 3
-    assert int(widget._field_labels["book_details"].grid_info()["row"]) == int(synopsis["row"])
+    assert int(widget._field_labels["book_details"].grid_info()["row"]) + 1 == int(synopsis["row"])
     photo_controls = widget.photo_path_label.master.grid_info()
     assert int(photo_controls["columnspan"]) == 3
     assert int(photo_controls["row"]) == int(widget._field_labels["photo_path"].grid_info()["row"])
@@ -497,6 +498,68 @@ def test_photo_preview_and_manual_metadata_values_are_preserved(form, tmp_path):
     assert resized_landscape_size[0] / resized_landscape_size[1] == pytest.approx(3 / 2, abs=0.01)
 
 
+def test_shortening_cancel_keeps_active_text_and_saved_versions_unchanged(form, monkeypatch):
+    widget, _root, _photo = form
+    source = " ".join((
+        "Mara returns to the village where she grew up and begins cataloging her grandfather's letters.",
+        "She discovers that the family archive connects several generations across the coast.",
+        "Each document adds context to a dispute about the old lighthouse and its keepers.",
+        "The final chapters follow Mara as she decides what to preserve for the next generation.",
+    ))
+    widget._set("book_details", source)
+    monkeypatch.setattr(widget, "_description_comparison", lambda _original, _shortened: None)
+
+    widget._shorten_book_details()
+
+    assert widget._get("book_details") == source
+    assert widget.book_details_original is None
+    assert widget.book_details_shortened is None
+
+
+def test_shortening_and_saved_version_review_require_explicit_selection(form, monkeypatch):
+    widget, _root, _photo = form
+    source = " ".join((
+        "Mara returns to the village where she grew up and begins cataloging her grandfather's letters.",
+        "She discovers that the family archive connects several generations across the coast.",
+        "Each document adds context to a dispute about the old lighthouse and its keepers.",
+        "The final chapters follow Mara as she decides what to preserve for the next generation.",
+    ))
+    widget._set("book_details", source)
+    selected = {}
+
+    def choose_shortened(original, shortened):
+        selected["original"] = original
+        selected["shortened"] = shortened
+        return "shortened"
+
+    monkeypatch.setattr(widget, "_description_comparison", choose_shortened)
+    widget._shorten_book_details()
+
+    shortened = selected["shortened"]
+    assert selected["original"] == source
+    assert shortened and shortened != source
+    assert widget._get("book_details") == shortened
+    assert widget.book_details_original == source
+    assert widget.book_details_shortened == shortened
+    assert widget._payload()["book_details_original"] == source
+    assert widget._payload()["book_details_shortened"] == shortened
+
+    monkeypatch.setattr(widget, "_description_comparison", lambda _original, _shortened: "original")
+    widget._review_book_details()
+    assert widget._get("book_details") == source
+
+
+def test_provider_description_becomes_source_without_automatic_shortening(form):
+    widget, _root, _photo = form
+    source = " ".join(("A provider synopsis sentence with complete details." * 8).split())
+
+    widget._apply_metadata(MetadataResult("Retrieved", {"book_details": source}, "Google Books"))
+
+    assert widget._get("book_details") == source
+    assert widget.book_details_original == source
+    assert widget.book_details_shortened is None
+
+
 def test_booktopia_title_and_author_populate_empty_add_form_fields(form):
     widget, _root, _photo = form
     widget._set("isbn", "9780553290998")
@@ -546,6 +609,7 @@ def test_add_form_metadata_mapping_populates_title_and_author_without_tk_root():
     form = SimpleNamespace(
         _widgets={key: Entry("Manual Title") if key == "title" else Entry() for key in fields},
         metadata_status=Status(),
+        _update_description_controls=lambda: None,
     )
     form._get = lambda key: BookForm._get(form, key)
     form._set = lambda key, value: BookForm._set(form, key, value)

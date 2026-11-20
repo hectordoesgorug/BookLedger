@@ -91,6 +91,15 @@ def test_restore_replaces_snapshot_state_and_preserves_recovery_point(setup):
     config = root / "config.json"
     config.write_text('{"preferences":{"locations":["Snapshot Shelf"]}}', encoding="utf-8")
     copy_id = catalog.create_copy({**payload, "subtitle": "Snapshot subtitle"})
+    original_details = payload["book_details"]
+    shortened_details = "Snapshot shortened synopsis."
+    catalog.update_copy(copy_id, {
+        **payload,
+        "subtitle": "Snapshot subtitle",
+        "book_details": shortened_details,
+        "book_details_original": original_details,
+        "book_details_shortened": shortened_details,
+    })
     catalog.change_status(copy_id, "Sold")
     catalog.change_status(copy_id, "Available", void_reason="Returned Order")
     backups = BackupService(db, data, root / "backups", config)
@@ -105,6 +114,9 @@ def test_restore_replaces_snapshot_state_and_preserves_recovery_point(setup):
     assert [row["title"] for row in rows] == ["Test Book"]
     assert rows[0]["subtitle"] == "Snapshot subtitle"
     assert rows[0]["copy_uuid"] == original_uuid
+    assert rows[0]["book_details"] == shortened_details
+    assert rows[0]["book_details_original"] == original_details
+    assert rows[0]["book_details_shortened"] == shortened_details
     history = catalog.get_copy_details(copy_id)["sale_history"]
     assert len(history) == 1
     assert history[0]["void_reason"] == "Returned Order"
@@ -136,6 +148,8 @@ def test_restore_migrates_v11_backup_and_preserves_legacy_titles(setup):
     conn = sqlite3.connect(legacy_db)
     try:
         conn.execute("ALTER TABLE book_records DROP COLUMN subtitle")
+        conn.execute("ALTER TABLE book_records DROP COLUMN book_details_shortened")
+        conn.execute("ALTER TABLE book_records DROP COLUMN book_details_original")
         conn.execute("PRAGMA user_version=11")
         conn.commit()
     finally:
@@ -272,6 +286,8 @@ def test_restore_migrates_legacy_condition_values_from_an_older_backup(setup):
     staged_db.write_bytes(members[BackupService.DB_MEMBER])
     connection = sqlite3.connect(staged_db)
     connection.execute("ALTER TABLE book_records DROP COLUMN subtitle")
+    connection.execute("ALTER TABLE book_records DROP COLUMN book_details_shortened")
+    connection.execute("ALTER TABLE book_records DROP COLUMN book_details_original")
     connection.execute("UPDATE copies SET condition='Like New' WHERE id=?", (first,))
     connection.execute("UPDATE copies SET condition='Acceptable' WHERE id=?", (second,))
     connection.execute("PRAGMA user_version=10")

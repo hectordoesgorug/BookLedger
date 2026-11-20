@@ -71,6 +71,8 @@ def test_schema_v7_migrates_to_poster_templates_without_touching_copy_records(tm
     with db.connect() as conn:
         conn.execute("INSERT INTO book_records(id,title,author,genre) VALUES(9,'Keep','Author','Science')")
         conn.execute("ALTER TABLE book_records DROP COLUMN subtitle")
+        conn.execute("ALTER TABLE book_records DROP COLUMN book_details_shortened")
+        conn.execute("ALTER TABLE book_records DROP COLUMN book_details_original")
         conn.execute("PRAGMA user_version=7")
         conn.execute("DROP TABLE poster_templates")
         conn.execute("DROP TABLE mobile_incoming_captures")
@@ -78,7 +80,7 @@ def test_schema_v7_migrates_to_poster_templates_without_touching_copy_records(tm
 
     migrated = Database(paths.database)
     with migrated.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 14
         assert conn.execute("SELECT title FROM book_records WHERE id=9").fetchone()[0] == "Keep"
         assert conn.execute("SELECT COUNT(*) FROM poster_templates").fetchone()[0] == 0
 

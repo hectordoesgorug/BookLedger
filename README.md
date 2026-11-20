@@ -23,6 +23,7 @@ See the [v1.1.0 release page](https://github.com/hectordoesgorug/BookLedger/rele
 
 - Keep bibliographic records and track each physical copy, with cover photo, subtitle, condition, location, status, and price.
 - Search, filter, and sort the catalog and inventory. Look up metadata online or enter it manually.
+- Shorten long Book Details offline, compare the complete original and candidate, and choose which version to save.
 - Record sales, retain sales history, void sales, and review inventory and sales reports.
 - Create copy posters, manage a portable library, and back up or restore its data.
 - Protect a library from simultaneous access by a second BookLedger process.

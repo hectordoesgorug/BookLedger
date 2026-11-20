@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 _DATABASE_LOCKS: dict[str, threading.RLock] = {}
 _DATABASE_LOCKS_GUARD = threading.Lock()
@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS book_records (
     isbn TEXT,
     genre TEXT NOT NULL,
     book_details TEXT,
+    book_details_original TEXT,
+    book_details_shortened TEXT,
     publisher TEXT,
     publication_year INTEGER,
     edition TEXT,
@@ -157,7 +159,7 @@ CREATE TABLE IF NOT EXISTS mobile_incoming_captures (
     UNIQUE(batch_uuid, photo_name)
 );
 CREATE INDEX IF NOT EXISTS ix_mobile_incoming_batch_order ON mobile_incoming_captures(batch_uuid,sequence);
-PRAGMA user_version = 13;
+PRAGMA user_version = 14;
 """
 
 
@@ -432,6 +434,18 @@ class Database:
                     conn.execute("PRAGMA user_version = 13")
                     conn.commit()
                     version = 13
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 13:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("ALTER TABLE book_records ADD COLUMN book_details_original TEXT")
+                    conn.execute("ALTER TABLE book_records ADD COLUMN book_details_shortened TEXT")
+                    conn.execute("UPDATE book_records SET book_details_original=book_details")
+                    conn.execute("PRAGMA user_version = 14")
+                    conn.commit()
+                    version = 14
                 except Exception:
                     conn.rollback()
                     raise

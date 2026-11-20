@@ -10,7 +10,7 @@
 
 ## Bibliographic fields
 Required: Title, Author, Genre.
-Optional: ISBN, Book Details/synopsis, Publisher/imprint, Publication year, Edition, Page count, SRP.
+Optional: ISBN, Book Details/synopsis, Publisher/imprint, Publication year, Edition, Page count, SRP. Long descriptions can be shortened locally from complete sentences; the original and candidate remain available for explicit comparison and selection.
 
 ## Approved genres
 Science; Social Science; Politics; Fiction; Medical; History; Art; Biography; Humor; Religion/New Age; Children; General Knowledge; Miscellaneous.
@@ -42,6 +42,8 @@ No validation modal dialogs. On Save, highlight all missing/invalid fields in re
 `Retrieving…`, `No data`, `Lookup failed`, and `Manual entry` are distinct. Optional missing metadata is stored as null. Failed lookups do not erase manual input and do not block saving when required fields are otherwise valid. Metadata provenance belongs in detail views, not the main catalog list.
 
 The intake UI uses the enabled metadata providers in the order configured in Settings. The registry order is Open Library, Google Books, Archive.org, Booktopia, Bigbook, then Hardcover; the original four are enabled by default, while Bigbook and Hardcover start disabled. Each later enabled provider fills supported empty fields without replacing earlier provider or manual values. Lookup stops after title, author, genre, publisher, and publication year are available; edition, format, synopsis, and page count are optional enrichment. Provider request timeouts are bounded. A missing ISBN record is reported separately from timeout, network, and provider failures. The Add Book form offers retry for technical failures. Google Books works without an API key in the current integration; an optional key and connectivity test are available in Settings. Provider credentials are stored locally; backups may contain configuration credentials and are not encrypted.
+
+The Book Details/Synopsis field has an optional offline **Shorten** action for descriptions longer than about 300 characters. It selects a prefix of complete sentences, preserves their order, and may return a slightly longer result when needed to keep a sentence intact. It does not rewrite sentences or remove uncertain content; a single long sentence or other unsuitable input remains unchanged. A scrollable comparison shows both versions and character counts. The user must choose **Keep Original** or **Use Shortened**; canceling leaves the form unchanged. The active description remains the value used by Catalog, Inventory, Details, and posters. Saved original and shortened versions can be reviewed and restored; manual edits stay active without silently changing either saved version.
 
 ## Android companion and intake
 The Android companion scans an ISBN or accepts manual/no-ISBN entry, captures front-cover photographs, and transfers single captures or queued batches to the desktop over the local network. It does not manage the library itself. The desktop stages received captures and catalogs them through the existing Add Book form, one capture at a time. Pairing and transfer use unencrypted local HTTP; pair on a trusted network. See the [mobile guide](../mobile/README.md) for pairing, transfer, permission, and recovery details.
