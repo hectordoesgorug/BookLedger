@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _DATABASE_LOCKS: dict[str, threading.RLock] = {}
 _DATABASE_LOCKS_GUARD = threading.Lock()
@@ -120,6 +120,32 @@ CREATE TABLE IF NOT EXISTS mobile_activity_events (
     event TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS currency_state (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    currency TEXT NOT NULL
+);
+INSERT OR IGNORE INTO currency_state(id,currency) VALUES(1,'PHP');
+CREATE TABLE IF NOT EXISTS exchange_rates (
+    base TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    rate TEXT NOT NULL,
+    rate_date TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY(base,quote,rate_date)
+);
+CREATE TABLE IF NOT EXISTS currency_conversions (
+    id TEXT PRIMARY KEY,
+    from_currency TEXT NOT NULL,
+    to_currency TEXT NOT NULL,
+    rate TEXT NOT NULL,
+    rate_date TEXT,
+    rate_source TEXT NOT NULL,
+    operation_at TEXT NOT NULL,
+    asking_prices INTEGER NOT NULL,
+    sales INTEGER NOT NULL,
+    srps INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS mobile_incoming_captures (
     capture_uuid TEXT PRIMARY KEY,
     batch_uuid TEXT NOT NULL REFERENCES mobile_incoming_batches(batch_uuid) ON DELETE CASCADE,
@@ -131,7 +157,7 @@ CREATE TABLE IF NOT EXISTS mobile_incoming_captures (
     UNIQUE(batch_uuid, photo_name)
 );
 CREATE INDEX IF NOT EXISTS ix_mobile_incoming_batch_order ON mobile_incoming_captures(batch_uuid,sequence);
-PRAGMA user_version = 12;
+PRAGMA user_version = 13;
 """
 
 
@@ -390,6 +416,22 @@ class Database:
                     conn.execute("PRAGMA user_version = 12")
                     conn.commit()
                     version = 12
+                except Exception:
+                    conn.rollback()
+                    raise
+            if version == 12:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("CREATE TABLE IF NOT EXISTS currency_state(id INTEGER PRIMARY KEY CHECK(id=1),currency TEXT NOT NULL)")
+                    conn.execute("INSERT OR IGNORE INTO currency_state(id,currency) VALUES(1,'PHP')")
+                    conn.execute("CREATE TABLE IF NOT EXISTS exchange_rates(base TEXT NOT NULL,quote TEXT NOT NULL,rate TEXT NOT NULL,rate_date TEXT NOT NULL,retrieved_at TEXT NOT NULL,source TEXT NOT NULL,PRIMARY KEY(base,quote,rate_date))")
+                    conn.execute("""CREATE TABLE IF NOT EXISTS currency_conversions(
+                        id TEXT PRIMARY KEY,from_currency TEXT NOT NULL,to_currency TEXT NOT NULL,
+                        rate TEXT NOT NULL,rate_date TEXT,rate_source TEXT NOT NULL,operation_at TEXT NOT NULL,
+                        asking_prices INTEGER NOT NULL,sales INTEGER NOT NULL,srps INTEGER NOT NULL)""")
+                    conn.execute("PRAGMA user_version = 13")
+                    conn.commit()
+                    version = 13
                 except Exception:
                     conn.rollback()
                     raise

@@ -58,6 +58,42 @@ def test_legacy_sales_page_name_resolves_to_sale_history():
     assert captured == {"text": "Sale History", "built": True}
 
 
+@pytest.mark.parametrize(
+    ("choice", "expected"),
+    ((True, "convert"), (False, "reinterpret"), (None, "cancel")),
+)
+def test_currency_change_confirmation_routes_yes_no_and_cancel(choice, expected, monkeypatch):
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    actions = []
+    subject = SimpleNamespace(
+        currency="PHP",
+        currency_var=Value("USD ($)"),
+        currency_service=SimpleNamespace(monetary_counts=lambda: {"asking_prices": 1, "sales": 0, "srps": 0}),
+        _preview_and_convert=lambda source, destination: actions.append(("convert", source, destination)),
+        _commit_currency_change=lambda destination, *, convert: actions.append(("reinterpret" if not convert else "convert", destination)),
+    )
+    monkeypatch.setattr(app_module.messagebox, "askyesnocancel", lambda *_args, **_kwargs: choice)
+
+    BookLedgerApp._apply_currency_selection(subject)
+
+    if expected == "cancel":
+        assert actions == []
+        assert subject.currency_var.get() == "PHP (₱)"
+    elif expected == "convert":
+        assert actions == [("convert", "PHP", "USD")]
+    else:
+        assert actions == [("reinterpret", "USD")]
+
+
 def test_about_navigation_opens_the_about_guide():
     captured = {}
     subject = SimpleNamespace(
@@ -1715,6 +1751,10 @@ def test_purge_resets_config_closes_logging_and_reinitializes_application(tmp_pa
     assert paths.provider_config.is_file()
     assert subject.config_store.get(("api_keys", "google_books")) == ""
     assert subject.config_store.get(("preferences", "shop_url"), "") == ""
+    assert subject.currency == "PHP"
+    assert subject.config_store.get(("preferences", "currency"), "PHP") == "PHP"
+    with subject.db.connect() as conn:
+        assert conn.execute("SELECT currency FROM currency_state WHERE id=1").fetchone()[0] == "PHP"
     assert subject.config_store.get(("logging", "enabled")) is False
     assert subject.catalog.counts()["Total copies"] == 0
     assert subject.posters.list_templates() == []

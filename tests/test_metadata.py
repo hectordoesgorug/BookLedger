@@ -274,6 +274,21 @@ def test_google_books_retries_with_equivalent_isbn_and_accepts_alias_identifier(
     assert result.values["book_details"] == "Full provider description."
 
 
+def test_google_books_ebookstore_list_price_is_not_used_as_physical_copy_srp():
+    provider = GoogleBooksProvider()
+    volume = {
+        "title": "Matched book",
+        "industryIdentifiers": [{"identifier": "9780385504201"}],
+    }
+    # saleInfo belongs to the outer Volume resource and describes Google eBookstore sales.
+    volume_resource = {
+        "volumeInfo": volume,
+        "saleInfo": {"country": "US", "isEbook": True, "listPrice": {"amount": 19.99, "currencyCode": "USD"}},
+    }
+    result = provider._result_from_volume_info(volume_resource["volumeInfo"], ("9780385504201",))
+    assert result.values["srp"] is None
+
+
 def test_google_books_scans_matching_volumes_without_accepting_unrelated_description():
     provider = GoogleBooksProvider()
     requested = []

@@ -268,3 +268,15 @@ The accepted automated exception remains 517 passed, 17 skipped, 1 failed (displ
 ### Historical ANR context clarified (November 18, 2026)
 
 The earlier ANR report concerned a Poco X6 experiencing lag while rapid charging and connected to a PC through TwinDesk. No ANR was reproduced during the subsequent audit, and no root cause has been established. These circumstances are context, not a confirmed explanation or an active verified defect. Historical observations and test results above remain unchanged.
+
+## Configurable currency and SRP investigation — Handover #61 (2026-11-20)
+
+- `.venv\Scripts\python.exe -m pytest tests/test_currency.py tests/test_posters.py tests/test_app_callbacks.py -q -rs` — **97 passed, 1 skipped**. The skip requires complete Tcl/Tk libraries that are missing from this Python installation.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **534 passed, 18 skipped**. All skips are Tk UI/display checks unavailable with the installed incomplete Tcl/Tk runtime; no tests failed.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
+- `git diff --check` — passed.
+- Read-only Frankfurter v2 smoke requests for PHP/USD and USD/PHP on November 20 returned the documented pair/rate/date shape with observation date 2026-11-20. The supported-code list was checked against `/v2/currencies`. These checks establish response compatibility at that time, not continuing service availability.
+
+Automated rate tests use mocked responses. A single database conversion containing 100 copies, 120 sale-history rows (including voided sales), and 2 SRPs made **one** rate request. Tests cover two-decimal formatting across all 20 codes, decimal half-up rounding, zero and overflow rejection, empty-library changes, Yes/No/Cancel routing, explicit differing source/destination, rate reuse and stale rejection, offline, timeout and malformed responses, transaction rollback, config-write interruption/reconciliation, schema v12 migration without numeric changes, backup/restore of currency/cache/audit state, and purge to PHP. Existing reporting and poster tests pass in the full run.
+
+Live Google Books ISBN checks were rate limited (HTTP 429). The three read-only Booktopia product snapshots matched paperbacks but only one displayed supplier RRP; no documented extraction permission or API was found. Open Library, Archive.org, Big Book API, and Hardcover did not document a usable publisher retail-price field. Automated SRP remains empty; manual SRP remains informational. Physical edition coverage, retailer extraction permission, native Settings rendering, and broader desktop visual behavior were not verified. Refer to the currency source review in `docs/ARCHITECTURE.md` for the source-by-source findings and primary references.

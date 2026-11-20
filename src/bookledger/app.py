@@ -44,6 +44,7 @@ from bookledger.services.verification import VerificationService
 from bookledger.ui.forms import BookForm
 from bookledger.ui.scrolling import MouseWheelRouter
 from bookledger.services.posters import PosterService
+from bookledger.services.currency import CurrencyService, ExchangeRateService, SUPPORTED_CURRENCIES, format_money
 from bookledger.ui.poster_designer import PosterDesigner, create_poster_for_copy
 from bookledger.ui.provider_diagnostic import MetadataProviderTestDialog, MetadataProviderTestPanel
 from bookledger.ui.mobile_app_setup import MobileAppSetupPanel
@@ -70,6 +71,14 @@ NAVIGATION_ITEMS = (
     ("Settings", "icon-settings.svg", "⚙"),
     ("About", "icon-help.svg", "?"),
 )
+
+
+def _currency_option(code):
+    return f"{code} ({SUPPORTED_CURRENCIES[code]})"
+
+
+def _currency_code(option):
+    return option.split(" ", 1)[0]
 NAVIGATION_TOOLTIPS = {
     "Dashboard": "View inventory totals and recently added copies.",
     "Catalog": "Browse copy cards, search, filter and sort your library.",
@@ -94,7 +103,7 @@ ABOUT_GUIDE_PAGES = (
         ("steps", None, (
             ("Open the form.", "Choose Acquisitions and Add a book, Catalog and Add Book, or Dashboard and Add a book."),
             ("Enter the book details.", "Title, Author, and Genre are required. ISBN, publisher, year, edition, page count, SRP, and synopsis are optional."),
-            ("Enter copy details.", "Format, Condition, Location, Price in PHP, and a readable Copy Photo are required. Choose Photo to select the image. Location starts at Not Specified."),
+            ("Enter copy details.", "Format, Condition, Location, Price in the selected currency, and a readable Copy Photo are required. Choose Photo to select the image. Location starts at Not Specified."),
             ("Review and save.", "Correct any red field message, then choose Save Book. Your entered details remain in the form if validation fails."),
         )),
         ("bullet", "ISBN lookup", "Enter an ISBN and choose Look Up ISBN. Returned metadata fills empty fields and leaves your existing entries in place. Lookup is optional; manual entry is supported."),
@@ -298,9 +307,13 @@ class BookLedgerApp(_WindowBase):
         defaults = ProviderSettings.defaults().to_document({
             "api_keys": {"google_books": ""},
             "logging": {"enabled": False},
-            "preferences": {"theme": default_theme},
+            "preferences": {"theme": default_theme, "currency": "PHP"},
         })
         self._configuration_warnings += self.config_store.ensure_defaults(defaults)
+        self.currency_service = CurrencyService(self.db, ExchangeRateService(self.db), None, self.config_store)
+        self.currency = self.currency_service.reconcile()
+        if self.currency_service.warning:
+            self._configuration_warnings += (self.currency_service.warning,)
         configured_theme = self.config_store.get(("preferences", "theme"), default_theme)
         self._active_theme = resolve_theme_name(
             self._available_theme_names, configured_theme, default_theme
@@ -342,7 +355,8 @@ class BookLedgerApp(_WindowBase):
         self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
         self.verifier = VerificationService(self.db, self.paths.data)
         self.backups = BackupService(self.db, self.paths.data, self.paths.backups, self.paths.provider_config)
-        self.posters = PosterService(self.db, self.paths)
+        self.currency_service.backup = self.backups
+        self.posters = PosterService(self.db, self.paths, currency=lambda: self.currency)
         self.metadata_lookup = MetadataLookupService(
             build_providers(self.provider_settings, credentials=self._load_api_credentials())
         )
@@ -831,7 +845,7 @@ class BookLedgerApp(_WindowBase):
         frame.pack(fill="both", expand=True)
         if inventory:
             self._catalog_action_button(top, text="Edit Selected", command=self.open_selected_edit).pack(side="right", padx=(0, 8))
-            self._make_tree(frame, columns=("code", "copy_number", "title", "author", "genre", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Copy #", "Title", "Author", "Genre", "Format", "Condition", "Location", "Price (PHP)", "Status"), height=18)
+            self._make_tree(frame, columns=("code", "copy_number", "title", "author", "genre", "format", "condition", "location", "price", "status"), headings=("Copy ID", "Copy #", "Title", "Author", "Genre", "Format", "Condition", "Location", f"Price ({self.currency})", "Status"), height=18)
             self._inventory_status_tags = {}
             for status, color in INVENTORY_STATUS_COLORS.items():
                 tag = f"inventory_status_{status.casefold().replace(' ', '_')}"
@@ -1611,7 +1625,7 @@ class BookLedgerApp(_WindowBase):
             x = left + (day - .5) * slot
             canvas.create_text(x, bottom + 15, text=str(day), fill="#596579", font=("Segoe UI", 8))
         canvas.create_text((left + right) / 2, height - 10, text="Day", fill="#334155", font=("Segoe UI", 9, "bold"))
-        canvas.create_text(12, (top + bottom) / 2, text="Revenue (PHP)", angle=90, fill="#334155", font=("Segoe UI", 9, "bold"))
+        canvas.create_text(12, (top + bottom) / 2, text=f"Revenue ({self.currency})", angle=90, fill="#334155", font=("Segoe UI", 9, "bold"))
 
     def _build_genre_chart(self, parent):
         panel = ttk.LabelFrame(parent, text="Books by Genre", padding=10)
@@ -1993,6 +2007,123 @@ class BookLedgerApp(_WindowBase):
         self.shop_url_entry = ttk.Entry(themes, textvariable=self.shop_url_var)
         self.shop_url_entry.grid(row=5, column=0, columnspan=2, sticky="ew")
         self.shop_url_entry.bind("<Return>", lambda _event: self._save_shop_url())
+
+        ttk.Label(themes, text="Currency:").grid(row=6, column=0, sticky="w", padx=(0, 6), pady=(12, 0))
+        currency = getattr(self, "currency", "PHP")
+        self.currency_var = tk.StringVar(value=_currency_option(currency))
+        currency_choices = tuple(_currency_option(code) for code in SUPPORTED_CURRENCIES)
+        self.currency_selector = ttk.Combobox(themes, values=currency_choices, state="readonly", textvariable=self.currency_var, width=16)
+        self.currency_selector.grid(row=6, column=1, sticky="ew", pady=(12, 0))
+        ttk.Button(themes, text="Apply Currency", command=lambda: self._apply_currency_selection()).grid(row=7, column=0, sticky="ew", padx=(0, 4), pady=(6, 0))
+        ttk.Button(themes, text="Convert Currency…", command=lambda: self._open_currency_conversion()).grid(row=7, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
+
+    def _apply_currency_selection(self):
+        destination = _currency_code(self.currency_var.get())
+        if destination == self.currency:
+            return
+        counts = self.currency_service.monetary_counts()
+        if not any(counts.values()):
+            self._commit_currency_change(destination, convert=False)
+            return
+        choice = messagebox.askyesnocancel(
+            "Change Currency",
+            "Convert existing asking prices, sale history, and SRPs?\n\n"
+            "Yes converts the stored values using an exchange rate.\n"
+            "No keeps the numbers and reinterprets them in the new currency.\n"
+            "Cancel keeps the current currency and all values.",
+            parent=self,
+        )
+        if choice is None:
+            self.currency_var.set(_currency_option(self.currency))
+        elif choice:
+            self._preview_and_convert(self.currency, destination)
+        else:
+            self._commit_currency_change(destination, convert=False)
+
+    def _open_currency_conversion(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Convert Currency")
+        dialog.transient(self)
+        dialog.grab_set()
+        ttk.Label(dialog, text="Convert all retained monetary records.", padding=(12, 12, 12, 4)).grid(row=0, column=0, columnspan=2, sticky="w")
+        from_var = tk.StringVar(value=_currency_option(self.currency))
+        to_var = tk.StringVar(value=_currency_option(self.currency))
+        for row, label, variable in ((1, "From:", from_var), (2, "To:", to_var)):
+            ttk.Label(dialog, text=label).grid(row=row, column=0, sticky="w", padx=12, pady=4)
+            ttk.Combobox(dialog, values=tuple(_currency_option(code) for code in SUPPORTED_CURRENCIES), state="readonly", textvariable=variable, width=16).grid(row=row, column=1, sticky="ew", padx=(4, 12), pady=4)
+        status = tk.StringVar(value="")
+        ttk.Label(dialog, textvariable=status, wraplength=420, justify="left").grid(row=3, column=0, columnspan=2, sticky="ew", padx=12, pady=8)
+
+        def preview():
+            source, destination = _currency_code(from_var.get()), _currency_code(to_var.get())
+            if source == destination:
+                status.set("The currencies are identical; no conversion or API request is needed.")
+                return
+            if source != self.currency and not messagebox.askyesno(
+                "Source Currency Differs",
+                f"The library is currently labeled {self.currency}, but the stored values will be treated as {source}. Continue?",
+                parent=dialog,
+            ):
+                return
+            self._preview_and_convert(source, destination, parent=dialog, close_dialog=dialog)
+
+        ttk.Button(dialog, text="Preview and Convert…", command=preview).grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 12))
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=4, column=1, sticky="ew", padx=12, pady=(4, 12))
+        dialog.columnconfigure(1, weight=1)
+
+    def _preview_and_convert(self, source, destination, *, parent=None, close_dialog=None):
+        parent = parent or self
+        try:
+            counts = self.currency_service.monetary_counts(source=source)
+            if not any(counts.values()):
+                if messagebox.askyesno("Change Currency", f"There are no monetary records to convert. Set the library currency to {destination}?", parent=parent):
+                    self._commit_currency_change(destination, convert=False)
+                    if close_dialog is not None:
+                        close_dialog.destroy()
+                    return True
+                return False
+            rate_info = self.currency_service.exchange_rates.get_rate(source, destination)
+            examples = []
+            with self.db.connect() as conn:
+                for table, column, label in (("copies", "price_minor", "Asking price"), ("sales", "price_minor", "Sale"), ("book_records", "srp_minor", "SRP")):
+                    predicate = " WHERE srp_minor IS NOT NULL" if table == "book_records" else ""
+                    row = conn.execute(f"SELECT {column} FROM {table}{predicate} ORDER BY id LIMIT 1").fetchone()
+                    if row:
+                        from bookledger.services.currency import convert_minor
+                        converted = convert_minor(row[0], rate_info["rate"])
+                        examples.append(f"{label}: {format_money(row[0], source)} → {format_money(converted, destination)}")
+            summary = (
+                f"Source: {source}  ·  Destination: {destination}\n"
+                f"Rate: 1 {source} = {rate_info['rate']} {destination}\n"
+                f"Observation date: {rate_info['rate_date']}  ·  Source: {rate_info['source']}\n"
+                f"Records: {counts['asking_prices']} asking prices, {counts['sales']} sales (including voided), {counts['srps']} SRPs\n"
+                + ("\n".join(examples) if examples else "No monetary records are affected.")
+                + "\n\nAmounts are rounded to two decimal places. A recovery backup will be created before conversion."
+            )
+            if messagebox.askyesno("Confirm Currency Conversion", summary, parent=parent):
+                self._commit_currency_change(destination, convert=True, rate_info=rate_info, source=source)
+                if close_dialog is not None:
+                    close_dialog.destroy()
+                return True
+        except Exception as exc:
+            messagebox.showerror("Currency Conversion Failed", str(exc), parent=parent)
+        return False
+
+    def _commit_currency_change(self, destination, *, convert, rate_info=None, source=None):
+        try:
+            self.currency_service.set_currency(destination, convert=convert, rate_info=rate_info, source=source)
+            self.currency = self.currency_service.current()
+            self.currency_var.set(_currency_option(self.currency))
+            self.show_page(self.current_page)
+            self.status_var.set(f"Currency set to {self.currency}.")
+        except Exception as exc:
+            self.currency = self.currency_service.current()
+            self.currency_var.set(_currency_option(self.currency))
+            messagebox.showerror("Currency Change Failed", str(exc), parent=self)
+            if self.currency != destination:
+                return
+            self.show_page(self.current_page)
+            self.status_var.set(f"Currency is {self.currency}; settings reconciliation will be retried at startup.")
 
     def _build_value_list_editor(self, parent, title, kind, list_values, assignment_count, add_value, rename_value, delete_value, *, row, column):
         panel = ttk.LabelFrame(parent, text=title, padding=10)
@@ -2655,6 +2786,7 @@ class BookLedgerApp(_WindowBase):
             self,
             service=self.catalog,
             photo_service=self.photos,
+            currency=getattr(self, "currency", "PHP"),
             metadata_lookup=self.metadata_lookup,
             mousewheel_router=self._mousewheel_router,
             on_saved=lambda: self._incoming_capture_saved(batch_id, capture["capture_uuid"]),
@@ -2693,7 +2825,7 @@ class BookLedgerApp(_WindowBase):
     def open_add_form(self):
         if self._incoming_reception_active:
             return
-        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup,
+        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=self.metadata_lookup, currency=getattr(self, "currency", "PHP"),
                  mousewheel_router=self._mousewheel_router,
                  on_saved=lambda: self._after_save("Book saved."), on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier))
 
@@ -2720,7 +2852,7 @@ class BookLedgerApp(_WindowBase):
         if not row:
             self.status_var.set("That copy could not be found. Refresh and try again.")
             return
-        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=getattr(self, "metadata_lookup", None),
+        BookForm(self, service=self.catalog, photo_service=self.photos, metadata_lookup=getattr(self, "metadata_lookup", None), currency=getattr(self, "currency", "PHP"),
                  mousewheel_router=getattr(self, "_mousewheel_router", None),
                  on_saved=lambda: self._after_save("Book updated."), on_activity=lambda event, identifier: self._log_event(event, copy_id=identifier), existing=row)
 
@@ -2820,11 +2952,11 @@ class BookLedgerApp(_WindowBase):
             ("edition", "Edition"),
             ("page_count", "Page Count"),
             ("book_details", "Book Details"),
-            ("srp_minor", "SRP (PHP)"),
+            ("srp_minor", f"SRP ({getattr(self, 'currency', 'PHP')})"),
             ("format", "Format"),
             ("condition", "Condition"),
             ("location", "Location"),
-            ("price_minor", "Price (PHP)"),
+            ("price_minor", f"Price ({getattr(self, 'currency', 'PHP')})"),
             ("status", "Status"),
             ("metadata_source", "Metadata Source"),
             ("metadata_status", "Metadata Status"),
@@ -3056,6 +3188,8 @@ class BookLedgerApp(_WindowBase):
             return
         try:
             recovery = self.backups.restore_backup(path)
+            if hasattr(self, "currency_service"):
+                self.currency = self.currency_service.reconcile()
         except Exception as exc:
             self._log_event("backup_restore_failed")
             messagebox.showerror("Restore failed", f"The backup could not be restored: {exc}", parent=self)
@@ -3149,6 +3283,10 @@ class BookLedgerApp(_WindowBase):
             self.config_store = AppConfigStore(
                 self.paths.provider_config, self.paths.provider_config_fallback()
             )
+            self.currency_service = CurrencyService(self.db, ExchangeRateService(self.db), None, self.config_store)
+            self.currency = self.currency_service.reconcile()
+            if self.currency_service.warning:
+                self._configuration_warnings += (self.currency_service.warning,)
             self.config_store.set(("migration_state", "configuration_v1"), True)
             self.config_store.set(("migration_state", "google_books_legacy_checked"), True)
             self.config_store.set(("api_keys", "google_books"), "")
@@ -3181,7 +3319,8 @@ class BookLedgerApp(_WindowBase):
             self.lifecycle = CopyLifecycleService(self.db, self.paths.data)
             self.verifier = VerificationService(self.db, self.paths.data)
             self.backups = BackupService(self.db, self.paths.data, self.paths.backups)
-            self.posters = PosterService(self.db, self.paths)
+            self.currency_service.backup = self.backups
+            self.posters = PosterService(self.db, self.paths, currency=lambda: self.currency)
             self.metadata_lookup = MetadataLookupService(
                 build_providers(self.provider_settings)
             )
@@ -3216,9 +3355,10 @@ class BookLedgerApp(_WindowBase):
             return False
         return self._open_path(self.paths.posters)
 
-    @staticmethod
-    def money(minor):
-        return f"₱{(minor or 0) / 100:,.2f}"
+    def money(self, minor=None):
+        if minor is None:
+            return format_money(self, "PHP")
+        return format_money(minor, getattr(self, "currency", "PHP"))
 
 
 def main():

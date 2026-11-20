@@ -218,7 +218,7 @@ class BackupService:
                 return False, f"Unsupported database schema version: {version}"
             if conn.execute("PRAGMA foreign_key_check").fetchone():
                 return False, "The database contains a foreign-key violation."
-            required = {"copies", "book_records", "sales", "trash_entries", "storage_operations", "app_meta", "locations", "poster_templates", "mobile_activity_events"}
+            required = {"copies", "book_records", "sales", "trash_entries", "storage_operations", "app_meta", "locations", "poster_templates", "mobile_activity_events", "currency_state", "exchange_rates", "currency_conversions"}
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not required.issubset(tables):
                 return False, "The database is missing required BookLedger tables."

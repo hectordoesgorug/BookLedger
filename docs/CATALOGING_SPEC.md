@@ -17,7 +17,7 @@ Science; Social Science; Politics; Fiction; Medical; History; Art; Biography; Hu
 Philosophy and Linguistics are categorized under Social Science. Metadata-returned genres outside the approved list remain visible but must be manually recategorized before saving.
 
 ## Physical-copy fields
-System-generated stable Copy ID; required Format, Condition, Photo, and Price; Location defaults to `Not Specified`; status; stable copy number. Price is the user's valuation and intended selling price in PHP and must be finite and greater than PHP 0. Exactly one photo is stored per physical copy; photos are compressed for portable storage. Locations are canonical values managed in Settings. Existing copy locations are migrated into the registry; renaming updates all assigned copies, and referenced locations cannot be deleted. `Not Specified` is the fixed default.
+System-generated stable Copy ID; required Format, Condition, Photo, and Price; Location defaults to `Not Specified`; status; stable copy number. Price is the user's valuation and intended selling price in the configured application currency and must be finite and greater than zero. A fresh library defaults to PHP; changing the currency notation alone preserves the numeric values. Exactly one photo is stored per physical copy; photos are compressed for portable storage. Locations are canonical values managed in Settings. Existing copy locations are migrated into the registry; renaming updates all assigned copies, and referenced locations cannot be deleted. `Not Specified` is the fixed default.
 
 ## Statuses
 - Available: default status; otherwise unlisted sale inventory.
@@ -27,7 +27,9 @@ System-generated stable Copy ID; required Format, Condition, Photo, and Price; L
 New copies are Available. Add/Edit do not expose status controls; Catalog and Inventory context menus provide explicit status actions. The action for the current status is disabled. Leaving Not for Sale or Sold asks for confirmation; leaving Available or Listed does not. Leaving Sold requires selecting a predefined void reason, records the void timestamp and reason with that sale, and retains the transaction in Sale History excluded from completed-sales revenue.
 
 ## Validation
-Required inputs: Title, Author, Genre, Format, Condition, Price > PHP 0, Photo.
+Required inputs: Title, Author, Genre, Format, Condition, Price > 0 in the configured application currency, Photo.
+
+The application currency is selected in Settings → Preferences → Customize. It applies to asking prices, sale history, and informational SRPs, which display two decimal places. Converting existing amounts requires a current Frankfurter reference rate and creates a recovery backup; choosing No when changing the notation retains the numbers and reinterprets them in the selected currency. Automated SRP remains empty because no verified source for physical-edition publisher retail prices is currently integrated.
 No validation modal dialogs. On Save, highlight all missing/invalid fields in red and show inline explanations. Keep form values. ISBN-10/ISBN-13 check digits are validated with explicit manual override. ISBN itself is optional.
 
 ## Duplicate rules

@@ -40,6 +40,7 @@ class BookForm(tk.Toplevel):
         incoming_capture_id=None,
         on_discard_incoming=None,
         on_cancel=None,
+        currency="PHP",
     ):
         super().__init__(parent)
         apply_application_icon(self)
@@ -54,6 +55,7 @@ class BookForm(tk.Toplevel):
         self.incoming_capture_id = incoming_capture_id
         self.on_discard_incoming = on_discard_incoming
         self.on_cancel = on_cancel
+        self.currency = currency
         self._incoming_sequence_finished = False
         self.incoming_copy_uuid = incoming_capture_id
         self.metadata_lookup = metadata_lookup or MetadataLookupService()
@@ -167,7 +169,8 @@ class BookForm(tk.Toplevel):
             (("Publication Year", "publication_year", {}), ("SRP", "srp", {"read_only": True})),
         ):
             self._field(body, left[0], left[1], row, column=0, **left[2])
-            self._field(body, right[0], right[1], row, column=2, **right[2])
+            label = f"SRP ({self.currency})" if right[1] == "srp" else right[0]
+            self._field(body, label, right[1], row, column=2, **right[2])
             row += 2
         row = self._multiline_field(body, "Book Details/Synopsis", "book_details", row)
 
@@ -177,7 +180,7 @@ class BookForm(tk.Toplevel):
         self._field(body, "Location", "location", row, column=2, values=self.service.list_locations())
         row += 2
         self._field(body, "Condition", "condition", row, column=0, required=True, values=BOOK_CONDITIONS)
-        self._field(body, "Price (PHP)", "price", row, column=2, required=True)
+        self._field(body, f"Price ({self.currency})", "price", row, column=2, required=True)
         row += 2
         row = self._photo_row(body, row)
 

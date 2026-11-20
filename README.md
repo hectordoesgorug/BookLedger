@@ -29,6 +29,8 @@ See the [v1.1.0 release page](https://github.com/hectordoesgorug/BookLedger/rele
 
 Core catalog and inventory work is available offline. Online metadata lookup needs an internet connection.
 
+Library prices use one selected currency. You can change the currency label while keeping the stored numbers, or explicitly convert all asking prices, sale history, and saved SRPs using a dated Frankfurter reference rate. BookLedger requests an exchange rate only when you start a conversion; browsing and reporting stay offline.
+
 ### Android companion
 
 - Scan an ISBN, enter one manually, or continue without an ISBN.
@@ -63,6 +65,12 @@ Android upgrades require the same production signing certificate and a higher ve
 BookLedger does not sync your library to a BookLedger-operated cloud service. Core desktop inventory features work offline; metadata providers require internet access and receive the ISBN and any credentials needed for the lookup.
 
 Desktop and phone communicate using authenticated, **unencrypted local HTTP**. Pair only on a trusted network. Windows Firewall may need to allow BookLedger on a trusted Private network. Android pending captures are session-only and may be lost if the app process ends before transfer is acknowledged. Backups are not encrypted. Barcode scanning runs on-device, though the bundled ML Kit SDK may communicate with Google as described in the [Privacy Notice](docs/PRIVACY_NOTICE.md).
+
+## Currency and SRP
+
+Choose the library currency in **Settings → Preferences → Customize**. A fresh library uses PHP. Changing the currency without conversion keeps all numbers and changes how they are interpreted. Converting values uses a dated Frankfurter reference rate, creates a recovery backup, and converts asking prices, sale history, and informational SRPs together. Conversion requires an internet connection; displaying values and changing notation do not. All currencies display two decimal places.
+
+SRP is informational and never changes the asking Price. Automated SRP lookup is not enabled because the investigated source data did not establish a reliable publisher list price for BookLedger's physical editions.
 
 ## Troubleshooting
 

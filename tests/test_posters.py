@@ -57,7 +57,8 @@ def test_poster_title_uses_main_title_even_when_subtitle_is_present():
 
 
 def test_poster_price_uses_peso_suffix_once_and_rejects_missing_price():
-    assert poster_price(12345) == "₱123.45"
+    assert poster_price(12345) == "PHP ₱123.45"
+    assert poster_price(12345, "SGD") == "SGD S$123.45"
     assert poster_price(12345).count("₱") == 1
     with pytest.raises(ValueError, match="valid sale price"):
         poster_price(None)
@@ -77,7 +78,7 @@ def test_schema_v7_migrates_to_poster_templates_without_touching_copy_records(tm
 
     migrated = Database(paths.database)
     with migrated.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
         assert conn.execute("SELECT title FROM book_records WHERE id=9").fetchone()[0] == "Keep"
         assert conn.execute("SELECT COUNT(*) FROM poster_templates").fetchone()[0] == 0
 

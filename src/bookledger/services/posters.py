@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path, PurePosixPath
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+from bookledger.services.currency import format_money
 
 
 BACKGROUND_NAME = re.compile(r"^template_background_(\d+)\.(png|jpe?g|webp)$", re.IGNORECASE)
@@ -36,10 +37,10 @@ def title_for_poster(title: str, shortened: str | None = None) -> str:
     return value
 
 
-def poster_price(price_minor: int | None) -> str:
+def poster_price(price_minor: int | None, currency="PHP") -> str:
     if price_minor is None or int(price_minor) <= 0:
         raise ValueError("This copy does not have a valid sale price.")
-    return f"₱{int(price_minor) / 100:,.2f}"
+    return format_money(int(price_minor), currency)
 
 
 def _font(size: int):
@@ -66,9 +67,10 @@ def _font(size: int):
 class PosterService:
     """Poster template persistence, portable resources, and PNG rendering."""
 
-    def __init__(self, db, paths):
+    def __init__(self, db, paths, *, currency=lambda: "PHP"):
         self.db = db
         self.paths = paths
+        self.currency = currency
         if self.paths.posters.is_symlink() or self.paths.assets.is_symlink():
             raise RuntimeError("Poster storage must use ordinary folders inside the portable application data.")
         self.paths.posters.resolve().relative_to(self.paths.data.resolve())
@@ -241,14 +243,14 @@ class PosterService:
         return reference
 
     @staticmethod
-    def _field_value(row: dict, field: str, shortened_title: str | None) -> str:
+    def _field_value(row: dict, field: str, shortened_title: str | None, currency="PHP") -> str:
         values = {
             "Title": title_for_poster(row.get("title", ""), shortened_title),
             "Author": row.get("author"), "ISBN": row.get("isbn"), "Publisher/Imprint": row.get("publisher"),
             "Publication Year": row.get("publication_year"), "Edition": row.get("edition"),
             "Page Count": row.get("page_count"), "Format": row.get("format"),
             "Condition": row.get("condition"), "Genre": row.get("genre"),
-            "Price": poster_price(row.get("price_minor")), "Book Details": row.get("book_details"),
+            "Price": poster_price(row.get("price_minor"), currency), "Book Details": row.get("book_details"),
         }
         return "" if values.get(field) is None else str(values.get(field, ""))
 
@@ -293,7 +295,7 @@ class PosterService:
                 except (OSError, ValueError):
                     raise FileNotFoundError("The selected copy photo is missing or unreadable.")
                 continue
-            text = self._field_value(copy_row, field, shortened_title)
+            text = self._field_value(copy_row, field, shortened_title, self.currency())
             if not text:
                 continue
             font_size = max(8, round(float(element.get("font_size", 28)) * image.width / max(1, template.get("preview_width", 600))))

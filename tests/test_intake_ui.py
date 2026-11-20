@@ -128,7 +128,7 @@ def test_add_form_layout_defaults_and_title_case_labels(form):
     title_error = widget._errors["title"].grid_info()
     assert int(title_error["row"]) == title_row + 1
     assert int(title_error["column"]) == 1
-    assert widget._field_labels["srp"].cget("text") == "SRP"
+    assert widget._field_labels["srp"].cget("text") == "SRP (PHP)"
 
 
 def test_short_fields_use_the_approved_two_column_form_layout(form):
@@ -279,7 +279,7 @@ def test_edit_form_uses_the_same_two_column_layout(form):
     assert edit.right_panel.grid_rowconfigure(0)["weight"] == 1
     assert edit.photo_preview.cget("image")
     assert edit.metadata_status_panel.winfo_y() >= edit.photo_panel.winfo_y() + edit.photo_panel.winfo_height()
-    assert edit._field_labels["srp"].cget("text") == "SRP"
+    assert edit._field_labels["srp"].cget("text") == "SRP (PHP)"
     edit.destroy()
 
 

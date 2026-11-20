@@ -38,6 +38,11 @@ class CatalogService:
         self.photos = PhotoService(self.data_dir / "photos", self.data_dir / "trash")
         self.config_store = config_store
 
+    def _currency_code(self):
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT currency FROM currency_state WHERE id=1").fetchone()
+        return row[0] if row else "PHP"
+
     @staticmethod
     def _preference_key(kind: str) -> str:
         return {"genre": "genres", "format": "formats", "location": "locations"}[kind]
@@ -304,9 +309,9 @@ class CatalogService:
             price = float(str(payload.get("price") or "").replace(",", ""))
             scaled_price = price * 100
             if not math.isfinite(price) or price <= 0 or not math.isfinite(scaled_price) or scaled_price > MAX_MONEY_MINOR:
-                errors["price"] = "Enter a valid price greater than PHP 0."
+                errors["price"] = f"Enter a valid price greater than {self._currency_code()} 0."
         except (TypeError, ValueError):
-            errors["price"] = "Enter a valid price greater than PHP 0."
+            errors["price"] = f"Enter a valid price greater than {self._currency_code()} 0."
         photo = str(payload.get("photo_path") or "").strip()
         if photo:
             resolved = self._resolve_photo(photo)
@@ -683,7 +688,7 @@ class CatalogService:
             if current["status"] == "Sold" and void_reason not in SALE_VOID_REASONS:
                 raise ValidationError({"void_reason": "Choose a valid reason for voiding the sale."})
             if status == "Sold" and (current["price_minor"] is None or current["price_minor"] <= 0):
-                raise ValidationError({"price": "Enter a valid current Price greater than PHP 0 before marking Sold."})
+                raise ValidationError({"price": f"Enter a valid current Price greater than {self._currency_code()} 0 before marking Sold."})
             active_sale = conn.execute(
                 "SELECT id FROM sales WHERE copy_id=? AND voided_at IS NULL ORDER BY id DESC LIMIT 1",
                 (copy_id,),

@@ -509,7 +509,7 @@ def test_genre_and_format_options_seed_defaults_and_preserve_legacy_assignments(
     assert CatalogService(db).list_genres() == genres
     assert CatalogService(db).list_formats() == formats
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
 
 
 def test_genre_and_format_rename_migrate_assignments_atomically_and_allow_unassigned_delete(setup):
@@ -585,7 +585,7 @@ def test_v1_database_migrates_existing_locations_and_data(tmp_path):
     assert "Shelf A" in service.list_locations()
     assert service.list_sales()[0]["price_minor"] == 9900
     with db.connect() as migrated:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 13
         assert tuple(migrated.execute("SELECT price_minor,sale_date FROM sales WHERE id=1").fetchone()) == (9900, "2026-10-01")
         assert migrated.execute("SELECT voided_at FROM sales WHERE id=1").fetchone()[0]
     service.change_status(1, "Sold")
@@ -609,7 +609,7 @@ def test_v10_migration_normalizes_legacy_conditions_without_changing_copy_ids(tm
     Database(path)
 
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
         assert [tuple(row) for row in conn.execute("SELECT id,condition FROM copies ORDER BY id")] == [
             (1, "Good as New"), (2, "Fair")
         ]
@@ -635,7 +635,7 @@ def test_v11_migration_adds_empty_subtitle_without_changing_existing_records(set
     for field in ("copy_id", "copy_uuid", "copy_code", "photo_path", "price_minor", "status", "sale_history"):
         assert after[field] == before[field]
     with migrated.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
 
 
 def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_path):
@@ -646,7 +646,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_sales_one_active_copy\n    ON sales(copy_id) WHERE voided_at IS NULL;\n", ""
     ).replace("    copy_uuid TEXT NOT NULL UNIQUE,\n", "").replace(
         "CREATE TRIGGER IF NOT EXISTS copies_copy_uuid_immutable\n    BEFORE UPDATE OF copy_uuid ON copies\n    WHEN OLD.copy_uuid IS NOT NULL AND NEW.copy_uuid IS NOT OLD.copy_uuid\n    BEGIN SELECT RAISE(ABORT, 'copy UUID is immutable'); END;\n", ""
-    ).replace("PRAGMA user_version = 12;", "PRAGMA user_version = 4;")
+    ).replace("PRAGMA user_version = 13;", "PRAGMA user_version = 4;")
     conn = sqlite3.connect(path)
     conn.executescript(legacy_schema)
     conn.execute("DROP TABLE mobile_incoming_captures")
@@ -664,7 +664,7 @@ def test_v4_migration_reconciles_legacy_sales_without_deleting_transactions(tmp_
     db = Database(path)
     with db.connect() as migrated:
         rows = migrated.execute("SELECT id,copy_id,price_minor,sale_date,voided_at FROM sales ORDER BY id").fetchall()
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 13
         assert [(row["id"], row["price_minor"], row["sale_date"]) for row in rows] == [
             (10, 15000, "2026-01-01"), (11, 20000, "2026-02-02"), (12, 25000, "2026-03-03")
         ]
