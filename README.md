@@ -69,9 +69,9 @@ Desktop and phone communicate using authenticated, **unencrypted local HTTP**. P
 
 ## Checking for updates in current source builds
 
-The desktop workspace has a **Check for Updates** text link beside its status line. Android Settings has the same action below **Clear Data**. Checks run only when selected, contact the official GitHub Releases API over HTTPS, and show stable-release versions and notes without changing library data, pairing or preferences. Source/debug builds can inspect releases but show **Unsupported Update** for packaged updates.
+The desktop sidebar has an **Update** page directly below **About**. Android Settings has **Check for Updates** below **Clear Data**. Checks run only when selected, contact the official GitHub Releases API over HTTPS, and show stable-release versions and notes without changing library data, pairing or preferences. Source/debug builds can inspect releases but show **Unsupported Update** for packaged updates. The desktop version appears at the far right of its footer.
 
-The desktop's **Visit GitHub** link directly below **About** opens the project repository in the default browser. Both desktop links support mouse activation, Tab focus, Enter and Space, with theme-compatible colors and hover/focus emphasis.
+Click the application banner or activate it with Enter or Space to open the project repository in the default browser. The configurable shop logo below the navigation continues to open its separately configured shop URL.
 
 This feature is not included in the published v1.1.0 binaries. It opens the official release page for manual instructions; it does not download or install an update. Safe Windows replacement and Android installation remain separate work; see the [update system design](docs/UPDATE_SYSTEM.md) and [verification results](TEST_REPORT.md). Send pending phone captures and back up the desktop library before a manual upgrade.
 

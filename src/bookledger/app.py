@@ -18,7 +18,7 @@ from datetime import date
 from PIL import Image, ImageTk
 
 from bookledger import __version__
-from bookledger.ui.updates import UpdateDialog, TextLink
+from bookledger.ui.updates import UpdatePage
 from bookledger.services.updates import REPOSITORY_URL
 from bookledger.config import APP_NAME, BOOK_CONDITIONS, COPY_STATUSES
 from bookledger.db.database import Database
@@ -72,6 +72,7 @@ NAVIGATION_ITEMS = (
     ("Reports", "icon-reports.svg", "▥"),
     ("Settings", "icon-settings.svg", "⚙"),
     ("About", "icon-help.svg", "?"),
+    ("Update", "icon-update.svg", "↻"),
 )
 
 
@@ -90,6 +91,7 @@ NAVIGATION_TOOLTIPS = {
     "Reports": "Review inventory and sales summaries.",
     "Settings": "Configure mobile pairing, metadata, storage and preferences.",
     "About": "Read the BookLedger user guide.",
+    "Update": "Check for stable BookLedger releases.",
 }
 NAV_ICON_FRAME_SIZE = 36
 NAV_ICON_CONTENT_SIZES = (26, 30, 32)
@@ -389,6 +391,7 @@ class BookLedgerApp(_WindowBase):
         configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=8)
         configure("Sidebar.TButton", anchor="w", padding=(14, 2), font=("Segoe UI", 10))
         configure("SidebarActive.TButton", anchor="w", padding=(14, 2), font=("Segoe UI", 10, "bold"))
+        configure("Banner.TButton", anchor="w", padding=0, borderwidth=0, relief="flat", font=("Segoe UI", 17, "bold"))
         configure("Primary.TButton", padding=(12, 8), font=("Segoe UI", 10, "bold"))
         configure("Invalid.TEntry", fieldbackground="#fff0f0")
         configure("Invalid.TCombobox", fieldbackground="#fff0f0")
@@ -439,12 +442,17 @@ class BookLedgerApp(_WindowBase):
                 self._application_banner_image = ImageTk.PhotoImage(banner, master=self)
         except (OSError, ValueError, Image.DecompressionBombError):
             pass
-        ttk.Label(
+        self.application_banner_button = ttk.Button(
             brand,
             image=self._application_banner_image or "",
             text="BookLedger" if self._application_banner_image is None else "",
-            font=("Segoe UI", 17, "bold"),
-        ).pack(anchor="w")
+            style="Banner.TButton",
+            command=self._open_github,
+        )
+        self.application_banner_button.bind(
+            "<Return>", lambda _event: self.application_banner_button.invoke(), add="+"
+        )
+        self.application_banner_button.pack(anchor="w")
         ttk.Separator(self.sidebar).pack(fill="x", pady=(0, 6))
         self.nav_buttons = {}
         self._nav_image_sets = {}
@@ -478,8 +486,6 @@ class BookLedgerApp(_WindowBase):
             help_text = NAVIGATION_TOOLTIPS[name]
             button.bind("<Enter>", lambda event, message=help_text: self._show_hover_tooltip(event, message), add="+")
             button.bind("<Leave>", self._hide_hover_tooltip, add="+")
-        self.github_link = TextLink(self.sidebar, self._open_github, text="Visit GitHub")
-        self.github_link.pack(anchor="center", pady=(6, 0))
         ttk.Frame(self.sidebar).pack(fill="both", expand=True)
         footer = ttk.Frame(self.sidebar)
         footer.pack(fill="x")
@@ -501,8 +507,8 @@ class BookLedgerApp(_WindowBase):
         self.workspace = ttk.Frame(right)
         status_row = ttk.Frame(right)
         status_row.pack(side="bottom", fill="x", pady=(12, 0))
-        self.update_link = TextLink(status_row, self._check_for_updates)
-        self.update_link.pack(side="right", padx=(12, 0))
+        self.version_label = ttk.Label(status_row, text=f"Version {__version__}", foreground="#64748b", font=("Segoe UI", 9))
+        self.version_label.pack(side="right", padx=(12, 0))
         self.status_var = tk.StringVar(value=self._theme_startup_warning or "Ready")
         self.status_label = ttk.Label(status_row, textvariable=self.status_var, anchor="w")
         self.status_label.pack(side="left", fill="x", expand=True)
@@ -518,13 +524,6 @@ class BookLedgerApp(_WindowBase):
             self.status_var.set("Could not open a browser. Visit BookLedger's GitHub repository manually.")
         return opened
 
-    def _check_for_updates(self):
-        dialog = getattr(self, "_update_dialog", None)
-        if dialog is not None and dialog.winfo_exists():
-            dialog.lift()
-            return
-        self._update_dialog = UpdateDialog(self)
-
     def _build_sidebar_footer(self, footer):
         self._brand_image = None
         self.brand_logo_label = ttk.Label(footer, cursor="hand2")
@@ -534,7 +533,6 @@ class BookLedgerApp(_WindowBase):
         self.mobile_connection_status_var = tk.StringVar()
         self.mobile_connection_status_label = ttk.Label(footer, textvariable=self.mobile_connection_status_var, foreground=NEUTRAL_COLOR)
         self.mobile_connection_status_label.pack(anchor="w", pady=(0, 5))
-        ttk.Label(footer, text=f"Version {__version__}", foreground="#64748b", font=("Segoe UI", 9)).pack(anchor="w")
         self._update_mobile_connection_indicator()
 
     @staticmethod
@@ -734,8 +732,13 @@ class BookLedgerApp(_WindowBase):
             self._build_reports()
         elif name == "About":
             self._build_about_page()
+        elif name == "Update":
+            self._build_update_page()
         else:
             self._build_settings()
+
+    def _build_update_page(self):
+        UpdatePage(self.workspace).pack(fill="both", expand=True)
 
     def _build_about_page(self):
         """Show the verified offline user guide in short, illustrated pages."""

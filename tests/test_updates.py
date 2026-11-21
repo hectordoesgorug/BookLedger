@@ -7,7 +7,7 @@ import urllib.error
 import pytest
 
 from bookledger.services import updates
-from bookledger.ui.updates import UpdateDialog, TextLink
+from bookledger.ui.updates import UpdatePage
 
 
 def release(tag="v1.2.0"):
@@ -143,31 +143,72 @@ def root():
     widget.destroy()
 
 
-def test_desktop_hyperlink_is_not_a_button_and_supports_keyboard(root):
-    calls = []
-    link = TextLink(root, lambda: calls.append(True))
-    link.pack()
-    assert link.winfo_class() == "TLabel" and str(link.cget("takefocus")) == "1"
-    assert link.bind("<Return>") and link.bind("<space>") and link.bind("<Button-1>")
-    link._activate()
-    assert calls == [True]
-
-
-def test_dialog_busy_result_and_late_completion_after_close(root):
-    pending = threading.Event()
-    def check(installed, _package):
-        pending.wait(2)
-        return updates.UpdateResult("Unable to Check", installed, message="Offline")
-    dialog = UpdateDialog(root, checker=check, package="Portable")
-    assert dialog.state_text.get() == "Checking…"
-    assert str(dialog.retry.cget("state")) == "disabled"
-    pending.set()
+def _wait_for_page_result(root, page):
     deadline = time.monotonic() + 2
-    while dialog._busy and time.monotonic() < deadline:
+    while page._busy and time.monotonic() < deadline:
         root.update()
         time.sleep(0.005)
-    assert dialog.state_text.get() == "Unable to Check"
-    assert str(dialog.retry.cget("state")) == "normal"
-    dialog.start()
-    dialog.destroy()
+    assert not page._busy
+
+
+def test_update_page_displays_result_retries_and_opens_release(root, monkeypatch):
+    results = iter((
+        updates.UpdateResult("Update Available", "1.1.0", "1.2.0", message="New release", notes="Release notes", release_url="https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0"),
+        updates.UpdateResult("Unable to Check", "1.1.0", message="Offline"),
+    ))
+    calls = []
+    monkeypatch.setattr("bookledger.ui.updates.webbrowser.open", lambda url, new=0: calls.append((url, new)) or True)
+    page = UpdatePage(root, checker=lambda *_args: next(results), package="Portable")
+    page.pack(fill="both", expand=True)
+    assert page.state_text.get() == "Checking…"
+    assert str(page.retry.cget("state")) == "disabled"
+    _wait_for_page_result(root, page)
+    assert page.state_text.get() == "Update Available"
+    assert page.versions.get() == "Installed: 1.1.0    Available: 1.2.0"
+    assert page.notes.get("1.0", "end-1c") == "Release notes"
+    assert [button.cget("text") for button in page.winfo_children()[-1].winfo_children()] == ["Check Again", "Open Release Page"]
+    page.release.invoke()
+    assert calls == [("https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0", 0)]
+    page.retry.invoke()
+    assert str(page.retry.cget("state")) == "disabled"
+    _wait_for_page_result(root, page)
+    assert page.state_text.get() == "Unable to Check"
+    assert str(page.retry.cget("state")) == "normal"
+    page.destroy()
+
+
+def test_release_notes_use_the_active_theme_colors(root, monkeypatch):
+    class ThemeStyle:
+        def lookup(self, widget_style, _option):
+            return {"TFrame": "#222222", "TLabel": "#eeeeee"}[widget_style]
+
+    monkeypatch.setattr("bookledger.ui.updates.ttk.Style", lambda _widget: ThemeStyle())
+    page = UpdatePage(root, checker=lambda *_args: updates.UpdateResult("Up to Date", "1.1.0"), package="Portable")
+
+    assert page.notes.cget("background") == "#222222"
+    assert page.notes.cget("foreground") == "#eeeeee"
+    assert page.notes.cget("insertbackground") == "#eeeeee"
+    page.destroy()
+
+
+def test_leaving_update_page_cancels_poll_and_returning_starts_a_fresh_check(root):
+    pending = threading.Event()
+    checks = []
+    def check(installed, _package):
+        checks.append(True)
+        pending.wait(2)
+        return updates.UpdateResult("Unable to Check", installed, message="Offline")
+    page = UpdatePage(root, checker=check, package="Portable")
+    page.pack(fill="both", expand=True)
+    assert page.state_text.get() == "Checking…"
+    assert str(page.retry.cget("state")) == "disabled"
+    page.destroy()
+    root.update()
+    pending.set()
+    returned = UpdatePage(root, checker=check, package="Portable")
+    returned.pack(fill="both", expand=True)
+    _wait_for_page_result(root, returned)
+    assert len(checks) == 2
+    assert returned.state_text.get() == "Unable to Check"
+    returned.destroy()
     root.update()

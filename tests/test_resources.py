@@ -26,7 +26,7 @@ def test_bundled_resources_are_relative_to_the_module_not_the_current_directory(
         assert banner.size == (2172, 724)
     for filename in (
         "icon-dashboard.svg", "icon-catalog.svg", "icon-inventory.svg", "icon-acquisitions.svg",
-        "icon-sale history.svg", "icon-reports.svg", "icon-settings.svg", "icon-help.svg",
+        "icon-sale history.svg", "icon-reports.svg", "icon-settings.svg", "icon-help.svg", "icon-update.svg",
     ):
         assert resource_path("assets", filename).is_file()
 
@@ -52,7 +52,7 @@ def test_bundled_resources_use_frozen_resource_root_when_available(tmp_path, mon
 def test_supplied_navigation_svgs_render_to_consistent_enlarged_transparent_images():
     filenames = (
         "icon-dashboard.svg", "icon-catalog.svg", "icon-inventory.svg", "icon-acquisitions.svg",
-        "icon-sale history.svg", "icon-reports.svg", "icon-settings.svg", "icon-help.svg",
+        "icon-sale history.svg", "icon-reports.svg", "icon-settings.svg", "icon-help.svg", "icon-update.svg",
     )
     for filename in filenames:
         image = render_svg_icon(resource_path("assets", filename), frame_size=36, content_size=32)

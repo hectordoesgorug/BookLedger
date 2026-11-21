@@ -126,6 +126,44 @@ def test_about_navigation_opens_the_about_guide():
     assert captured == {"text": "About", "built": True}
 
 
+def test_update_navigation_opens_embedded_workspace_page():
+    captured = {}
+    subject = SimpleNamespace(
+        current_page=None,
+        page_title=SimpleNamespace(configure=lambda **options: captured.update(options)),
+        _clear_workspace=lambda: None,
+        _build_update_page=lambda: captured.setdefault("built", True),
+    )
+
+    BookLedgerApp.show_page(subject, "Update")
+
+    assert subject.current_page == "Update"
+    assert captured == {"text": "Update", "built": True}
+
+
+def test_update_navigation_follows_about_and_uses_update_icon():
+    labels = [item[0] for item in NAVIGATION_ITEMS]
+    assert labels[labels.index("About") + 1] == "Update"
+    assert NAVIGATION_ITEMS[labels.index("Update")][1] == "icon-update.svg"
+
+
+def test_update_page_is_mounted_in_the_main_workspace(monkeypatch):
+    captured = {}
+
+    class Page:
+        def __init__(self, parent):
+            captured["parent"] = parent
+
+        def pack(self, **options):
+            captured["pack"] = options
+
+    monkeypatch.setattr(app_module, "UpdatePage", Page)
+    workspace = object()
+    BookLedgerApp._build_update_page(SimpleNamespace(workspace=workspace))
+
+    assert captured == {"parent": workspace, "pack": {"fill": "both", "expand": True}}
+
+
 def _about_guide_text():
     parts = []
     for _icon, heading, blocks in ABOUT_GUIDE_PAGES:
@@ -226,28 +264,27 @@ def test_sidebar_footer_keeps_shop_logo_above_status_and_version():
         BookLedgerApp._build_sidebar_footer(subject, footer)
         root.update()
         children = footer.winfo_children()
-        assert len(children) == 3
+        assert len(children) == 2
         assert children[0] is subject.brand_logo_label
         assert children[1] is subject.mobile_connection_status_label
-        assert children[2].cget("text").startswith("Version ")
         assert subject.mobile_connection_status_label.winfo_rooty() > subject.brand_logo_label.winfo_rooty()
-        assert children[2].winfo_rooty() > subject.mobile_connection_status_label.winfo_rooty()
     finally:
         root.destroy()
 
 
-def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size():
+@pytest.mark.parametrize("geometry", ["1000x650+0+0", "960x700+0+0"])
+def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size(geometry):
     try:
         root = tk.Tk()
     except tk.TclError as exc:
         pytest.skip(f"Tk widget geometry tests require a display: {exc}")
     try:
-        root.geometry("1000x650+0+0")
+        root.geometry(geometry)
         root.theme_style = ttk.Style(root)
+        github_activations = []
         root.show_page = lambda *_args: None
         root._open_shop_link = lambda: None
-        root._check_for_updates = lambda: None
-        root._open_github = lambda: None
+        root._open_github = lambda: github_activations.append(True)
         root._animate_navigation_button = lambda *_args: None
         root._show_hover_tooltip = lambda *_args: None
         root._hide_hover_tooltip = lambda *_args: None
@@ -271,22 +308,30 @@ def test_sidebar_footer_fits_with_all_navigation_buttons_at_minimum_window_size(
         assert footer_bottom <= sidebar_bottom
         assert root.nav_buttons["About"].winfo_rooty() + root.nav_buttons["About"].winfo_height() <= root.brand_logo_label.winfo_rooty()
         assert root.brand_logo_label.winfo_rooty() < root.mobile_connection_status_label.winfo_rooty()
-        assert root.mobile_connection_status_label.winfo_rooty() < footer.winfo_children()[2].winfo_rooty()
-        assert footer.winfo_children()[2].winfo_rooty() + footer.winfo_children()[2].winfo_height() <= sidebar_bottom
+        assert root.mobile_connection_status_label.winfo_rooty() + root.mobile_connection_status_label.winfo_height() <= sidebar_bottom
         assert len(root.nav_buttons) == len(NAVIGATION_ITEMS)
-        assert root.github_link.cget("text") == "Visit GitHub"
-        assert root.github_link.winfo_ismapped()
-        assert root.github_link.winfo_rooty() >= root.nav_buttons["About"].winfo_rooty() + root.nav_buttons["About"].winfo_height()
-        assert root.github_link.winfo_rooty() + root.github_link.winfo_height() <= root.brand_logo_label.winfo_rooty()
+        assert "Visit GitHub" not in [child.cget("text") for child in root.sidebar.winfo_children() if "text" in child.keys()]
+        assert root.application_banner_button.cget("takefocus") != "0"
+        assert root.application_banner_button.winfo_ismapped()
+        assert root.application_banner_button.cget("image")
+        assert (root._application_banner_image.width(), root._application_banner_image.height()) == (186, 62)
+        assert root.nav_buttons["Update"].winfo_rooty() >= root.nav_buttons["About"].winfo_rooty() + root.nav_buttons["About"].winfo_height()
+        assert root.nav_buttons["Update"].winfo_rooty() + root.nav_buttons["Update"].winfo_height() <= root.brand_logo_label.winfo_rooty()
+        root.application_banner_button.focus_force()
+        root.application_banner_button.event_generate("<KeyPress-Return>")
+        root.update()
+        root.application_banner_button.event_generate("<KeyPress-space>")
+        root.update()
+        assert github_activations == [True, True]
         root.status_var.set("Long status " * 100)
         ttk.Frame(root.workspace, height=1000).pack(fill="both", expand=True)
         root.update()
-        link = root.update_link
-        assert link.winfo_ismapped() and root.status_label.winfo_ismapped()
-        assert link.winfo_width() >= link.winfo_reqwidth()
-        assert root.status_label.winfo_rootx() + root.status_label.winfo_width() <= link.winfo_rootx()
-        assert link.winfo_rootx() + link.winfo_width() <= root.winfo_rootx() + root.winfo_width()
-        assert link.winfo_rooty() + link.winfo_height() <= root.winfo_rooty() + root.winfo_height()
+        version = root.version_label
+        assert version.winfo_ismapped() and root.status_label.winfo_ismapped()
+        assert version.cget("text").startswith("Version ")
+        assert version.winfo_rootx() + version.winfo_width() <= root.winfo_rootx() + root.winfo_width()
+        assert root.status_label.winfo_rootx() + root.status_label.winfo_width() <= version.winfo_rootx()
+        assert version.winfo_rooty() + version.winfo_height() <= root.winfo_rooty() + root.winfo_height()
     finally:
         root.destroy()
 
@@ -1416,7 +1461,7 @@ def test_configure_style_uses_the_matching_ttk_configure_call(
 
     BookLedgerApp._configure_style(subject)
 
-    assert len(calls) == 7
+    assert len(calls) == 8
     assert {source for source, _style_name, _options in calls} == {
         "native" if native_theme else "ttkbootstrap"
     }
@@ -1427,6 +1472,7 @@ def test_configure_style_uses_the_matching_ttk_configure_call(
         "font": ("Segoe UI", 10),
         "borderwidth": 0,
     }
+    assert any(style_name == "Banner.TButton" for _source, style_name, _options in calls)
 
 
 def test_navigation_icons_use_uniform_larger_geometry():
