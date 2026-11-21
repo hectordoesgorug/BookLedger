@@ -548,3 +548,17 @@ Checks run:
 - `git diff --check` — passed with configured LF-to-CRLF notices.
 
 No Android device test was run: `adb` is not installed, and the current stable v1.1.0 release is not newer than the installed version. Tests mock the installer interface; the native package installer, production signature continuity, device permission screen, update result callback, pairing/settings persistence after a real upgrade, and pending-capture behavior during process replacement remain unverified. The debug APK was built but not installed. The new `REQUEST_INSTALL_PACKAGES` permission was not exercised on a device. Existing data and release assets were not changed; Issue #22, commits, and remote refs were not touched.
+
+## Intake-form geometry regression (November 21, 2026)
+
+On this Windows/Tk run, the isolated minimum-size test reproduced twice in five unmodified attempts: after the root's `400×300` Configure event, the transient form did not receive the requested `960×700` Configure event within the test's two-second failure timeout and remained at its previous `1120×850` size. A passing Configure trace showed the parent event followed by the child resize request and the child's `960×700` event. This supports a test-harness event-order race; no production layout defect was reproduced.
+
+The regression test now drains pending idle and window events after confirming the parent geometry and before requesting the transient child's resize. It retains the exact `960×700` assertion and all scroll, field alignment, preview resizing, and button-accessibility checks.
+
+- Isolated geometry regression before synchronization: **3 passed, 2 failed** in five consecutive attempts; both failures remained at `1120×850`.
+- Isolated geometry regression after synchronization: **10 passed, 0 failed, 0 skipped** in ten consecutive attempts.
+- `.venv\Scripts\python.exe -m pytest tests/test_intake_ui.py tests/test_app_callbacks.py -q -rs` — **105 passed, 1 skipped**. The skipped Tk case could not load `tk.tcl` dependencies (`entry.tcl` missing).
+- `.venv\Scripts\python.exe -m pytest tests/test_updates.py tests/test_update_archive.py -q -rs` — **52 passed, 1 skipped**. The skipped Tk case could not load `ttk/progress.tcl`.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **675 passed, 19 skipped, 0 failed**. Skips are Tk/display-dependent checks blocked by missing Tcl/Tk files, including `entry.tcl`, `icons.tcl`, and `ttk/sizegrip.tcl`.
+
+These are automated results from the current Windows test environment. They do not establish behavior on other Windows display configurations or replace manual visual acceptance. No Android checks were repeated because no Android code changed.

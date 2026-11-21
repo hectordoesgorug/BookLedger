@@ -236,6 +236,9 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
         root.after_cancel(parent_timeout)
         root.unbind("<Configure>", parent_binding)
     assert parent_configured.get()
+    # Drain pending owner/transient geometry events before resizing the child.
+    root.update_idletasks()
+    root.update()
     resize(960, 700)
     canvas = widget.body.master
     canvas.update_idletasks()
