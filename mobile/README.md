@@ -30,7 +30,7 @@ Pairing and transfers use unencrypted HTTP over the local network, so pair only 
 
 Barcode image input and results are processed on-device and are not sent to Google by BookLedger. The bundled ML Kit SDK may contact Google for model updates, fixes, and hardware compatibility information, and sends usage/performance metrics. See [ML Kit Terms and Privacy](https://developers.google.com/ml-kit/terms); make this possible SDK traffic visible to users as applicable. The app does not implement its own analytics or telemetry; this source review does not independently observe network traffic.
 
-The APK includes Flutter's generated package notices at `assets/flutter_assets/NOTICES.Z`. Include the repository's `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `licenses/Android/` with direct APK distribution. That folder supplies the Apache 2.0 text and Flutter engine license bundle for this APK's engine revision.
+The APK includes Flutter's generated package notices at `assets/flutter_assets/NOTICES.Z`. Include the repository's `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `licenses/Android/` with direct APK distribution. That folder supplies the Apache 2.0 text and versioned Flutter engine license bundles; include the file matching the APK's engine revision. The v1.2.0 candidate uses `Flutter-engine-LICENSE-371f7720.txt`.
 
 For the desktop and companion data-handling summary, see the [BookLedger Privacy Notice](../docs/PRIVACY_NOTICE.md). In a standalone APK distribution, include that notice alongside this README, `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `licenses/Android/`.
 

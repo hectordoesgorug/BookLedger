@@ -1,3 +1,25 @@
+## v1.2.0-rc1 candidate verification — November 21, 2026
+
+The desktop release version is `1.2.0`; Android is `1.2.0+3`. The full results and staged artifact hashes are in the [v1.2.0 candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md). The published v1.1.0 packages and production phone installation were not changed.
+
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **676 passed, 18 skipped, 0 failed**. Tcl/Tk `init.tcl` and `ttk/sizegrip.tcl` runtime files are missing for the skipped display tests.
+- `.venv\Scripts\python.exe -m pytest tests\test_updates.py tests\test_update_download.py tests\test_update_archive.py tests\test_release_version.py tests\test_portable_packaging.py tests\test_uuid_backup_restore.py tests\test_currency.py -q -rs` — **94 passed, 1 skipped, 0 failed**. The skipped Tk update-page test cannot load `tk.tcl`.
+- `tests\test_intake_ui.py::test_form_minimum_size_keeps_scrollable_content_reachable` — **1 passed in each of five separate runs** at the exact `960×700` requirement.
+- `tests\test_release_version.py` — **3 passed**. The local editable package metadata was refreshed from 1.1.0 to 1.2.0 after the initial full run exposed stale environment metadata and a file-version expectation still set to 1.1.0.
+- `.venv\Scripts\python.exe -m compileall -q src tests`, `.venv\Scripts\python.exe -m pip check`, the pinned isolated Windows build environment's `pip check`, and `git diff --check` — **passed**.
+- From `mobile/`, `flutter test --reporter expanded` — **169 passed, 0 failed, 0 skipped**.
+- From `mobile/`, `flutter test test\update_service_test.dart test\update_check_action_test.dart --reporter expanded` — **43 passed, 0 failed, 0 skipped**.
+- From `mobile/`, `flutter analyze` — **21 informational `package:flutter/material.dart` deprecations, no warnings or errors, exit 1**. These are SDK import notices; no Dart sources changed for the release version update.
+- From `mobile/`, `dart format --output=none --set-exit-if-changed lib test` — **40 files, 0 changed**.
+- Android `flutter build apk --debug --no-pub` — **passed** from an isolated project copy after `flutter pub get` created its generated package configuration. The first copied-tree attempt lacked `.dart_tool/package_config.json` and did not reach compilation.
+- Android `flutter build apk --release --no-pub` — **passed**, 401.9 seconds, with external production signing configuration. The candidate certificate matches the published v1.1.0 APK.
+
+The first full desktop run during version changes had **673 passed, 19 skipped, and 2 failed** because test expectations and installed editable metadata still described v1.1.0. Those causes were corrected before the final full run. The first Fallback packaging smoke test exposed a staging error with the required `_internal/` layout; it was corrected, and fresh extractions of both final packages then launched the v1.2.0 Dashboard and closed normally. The Android runtime dependency report initially hit the release-signing guard because the task name contains `releaseRuntimeClasspath`; rerunning with the external signing configuration resolved the graph without printing or moving credentials. The final graph and notice findings are recorded in `THIRD_PARTY_NOTICES.md`.
+
+Flutter 3.50.0 / Dart 3.14.0, Gradle 9.3.1, AGP 9.1.1, JBR/Java 25.0.4, Build Tools 36.0.0, and Kotlin compiler 2.4.10 were observed. `settings.gradle.kts` declares Kotlin plugin 2.4.0; Gradle's loaded Kotlin plugin classloader and compiler report 2.4.10. Gradle's embedded Kotlin 2.2.21 is a separate runtime. No toolchain version change was made because both Android builds passed. Future Flutter minimums and AGP/Kotlin deprecation notices remain maintenance warnings.
+
+The candidate APK is production-signed, non-debuggable, version 1.2.0/code 3, min SDK 24, target/compile SDK 36, and supports `arm64-v8a`, `armeabi-v7a`, and `x86_64`. No install, upgrade, uninstall, data clear, pairing change, or capture modification was performed on the connected Android 16 device. Native Android upgrade and feature acceptance remain pending.
+
 ## Native update discovery and desktop repository link — November 20, 2026
 
 Baseline: `main` at `255d59ed4cd002da2d928c5f91d659003fe5c40b`, aligned with local `origin/main`, with the existing 25-file uncommitted implementation/stabilization changes preserved. The results here are independently observed native checks and subsequent regressions. Earlier automated and reported physical evidence remains below with its original counts and limitations.

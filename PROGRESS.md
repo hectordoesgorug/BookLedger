@@ -1,12 +1,16 @@
 # Development and release status
 
+## v1.2.0 release candidate preparation — November 21, 2026
+
+The readiness audit is committed and pushed on `main`. Candidate work is local: desktop is `1.2.0`, Android is `1.2.0+3`, and verified candidate assets are staged for physical acceptance. No release has been published. Preserve the v1.1.0 download links in README until publication. See [candidate checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md).
+
 ## Update installation — November 21, 2026
 
 Windows keeps verified downloads manual and now shows package-specific instructions that extract to a separate folder, replace only the Portable executable or the Fallback executable/runtime pair, and preserve library files. Android exposes **Install Update** only after the verified private APK is rechecked for its SHA-256, package ID, and higher version code. It uses Android's package installer with a temporary read-only FileProvider URI grant, per-source install permission guidance, explicit capture-loss confirmation, and post-return version confirmation. No automatic Windows installer, custom manifest-signing framework, silent Android install, or data cleanup was added. The published v1.1.0 release does not contain this updater; a newer production-signed native installation remains unverified.
 
 Verification: Android full Flutter suite **169 passed**; focused update suites **43 passed**; debug APK build passed; Dart formatting checked 40 files with no changes. Flutter analysis exited 1 for **21 informational Material import deprecations**, with no warnings or errors. Focused desktop update tests: **37 passed, 1 Tcl/Tk skip**. Python compilation and `git diff --check` passed. The full desktop suite had **676 passed, 17 skipped, 1 failed** in the known minimum-size intake geometry assertion. No Android device tooling (`adb`) was available. Exact evidence and limitations are in [TEST_REPORT.md](TEST_REPORT.md).
 
-The work is local on `main` and uncommitted. Issue #22, releases, and remote refs were not changed.
+At the time of this historical update-system record, the update installation changes were local. They were subsequently committed and pushed before the v1.2.0 readiness audit. The current candidate-preparation changes are local; no issue, release, or remote ref has been changed for this work.
 
 ## Update discovery and native UI — November 20–21, 2026 (historical record)
 

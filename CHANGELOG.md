@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.0 — Release candidate preparation
+
+**Status:** Unpublished candidate. Verification and physical acceptance are in progress.
+
+### Desktop
+
+- Add configurable currency display and explicit, backed-up conversion for asking prices, retained sales history and SRP values.
+- Add deterministic book-description shortening with an original-versus-shortened review step; keep the original description.
+- Repair existing metadata providers and enable Hardcover ahead of Booktopia by default. BigBook remains available but disabled by default.
+- Refine desktop layout and navigation, and add explicit update checks with verified downloads and package-specific manual Windows update instructions.
+
+### Android
+
+- Add explicit update checks and verified APK downloads. Android's system installer handles any user-approved installation.
+- Increase the Android version to `1.2.0+3` while preserving application ID `com.bookledger.mobile`.
+
+### Compatibility and limitations
+
+- Desktop database schema is 14. Back up before upgrading; v1.1.0 cannot open a migrated schema-14 library, so rollback requires restoring a pre-upgrade backup.
+- The published v1.1.0 binaries do not include the update flow. Install an updater-capable release manually before using it.
+- Windows installation remains manual after download verification. Android installation requires explicit confirmation and the system installer.
+- Pending mobile captures remain session-only. Automated publisher SRP sourcing and additional metadata providers are not included.
+
 ## 1.1.0 — 2026-11-18
 
 The accepted **v1.1.0-rc1** candidate was published as the stable v1.1.0 GitHub Release. Final assets are byte-identical copies, and all four public downloads were independently verified.
