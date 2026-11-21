@@ -1,6 +1,6 @@
 # BookLedger v1.2.0 release checklist
 
-**Status:** Ready for Physical Acceptance; no release approval or publication.
+**Status:** Ready for Release Approval; approval and publication remain pending.
 
 ## Source and version identity
 
@@ -44,9 +44,18 @@
 - [ ] Customized settings preservation and restoring the pre-upgrade backup after package replacement remain unverified for both Windows package types.
 - [x] Read-only wireless ADB preflight confirmed one authorized POCO X6 5G, Android 16/API 36, production `com.bookledger.mobile` v1.1.0+2, and 226 GB free on `/data`.
 - [x] After owner approval, `adb install -r` updated the production package in place to v1.2.0+3; Package Manager retained the original first-install time, and the installed APK bytes and signing certificate match the staged candidate.
+- [x] Owner reports no issues during additional manual acceptance; scenario coverage was not itemized, so prior **PARTIAL** and **SKIPPED** results remain unchanged.
 - [ ] Existing pairing state, settings and captures were not inventoried before the upgrade. The post-upgrade home page showed `Not paired`; prior pairing preservation cannot be determined. No captures were created or modified.
 - [ ] Mobile Settings update control, live release check, network-failure handling, repeated checks, light/dark presentation, capture transfer and in-app installer handoff remain unverified.
 - [x] The Portable candidate's live stable-release check reported v1.1.0 as current and no newer stable release to test an update to.
+
+## Final release-gate assessment
+
+- [x] No release-blocking defect was identified in the recorded automated checks or directly exercised Windows and Android behaviors.
+- [ ] Full physical scenario coverage is not claimed. Windows sales transactions, report accuracy, offline behavior, minimum-window reachability, selected Fallback features, changed-settings migration and post-upgrade backup restoration remain **SKIPPED** or unverified.
+- [ ] Android pairing, settings and capture baselines were not recorded before update; the post-update app showed `Not paired`. Preservation of those previous states cannot be determined. Mobile update UI, network failure, repeated checks, theme presentation, transfer and in-app installer remain unverified.
+- [x] These documented exceptions are assessed as nonblocking for seeking release approval. The owner must review the unchecked candidate source/artifact item and decide whether to accept the limitations before publication.
+- [ ] Release approval and publication have not been granted or performed.
 
 ## Distribution safeguards
 

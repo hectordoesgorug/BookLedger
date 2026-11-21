@@ -1,7 +1,7 @@
 # BookLedger v1.2.0-rc1 candidate report
 
-**Candidate status:** Ready for Physical Acceptance  
-**Release approval:** Not assessed; no release has been published.  
+**Candidate status:** Ready for Release Approval
+**Release approval:** Pending explicit approval; no release has been published.
 **Preparation date:** November 21, 2026
 
 The candidate was prepared from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4` and is represented by commit `4b486a5eaf2ef83a304860d7c464220a97aba004` on `main`. Candidate artifacts remain staged locally; the published v1.1.0 release assets and README download links are unchanged.
@@ -100,6 +100,8 @@ The exact staged Portable and Fallback ZIPs were extracted into isolated test di
 
 The metadata and shortening forms were canceled after review, so those results did not alter the disposable catalog. The provider errors did not prevent the successful providers from filling metadata. The live update request was made from the isolated Portable test app. The test app's first Fallback launch displayed a Windows Firewall prompt; it was canceled without changing firewall settings.
 
+The owner reports no issues during additional manual Windows testing. The tested scenarios were not itemized, so the individual **PARTIAL** and **SKIPPED** results above remain unchanged.
+
 ### Manual v1.1.0-to-v1.2.0 upgrade
 
 Both upgrade checks used separately extracted v1.1.0 packages and disposable libraries. Each v1.1.0 library contained a book, synthetic cover photo, and a backup created before replacement. The exact candidate package contents were then applied following the documented manual replacement steps.
@@ -121,8 +123,14 @@ Read-only preflight identified an authorized POCO X6 5G (`23122PCD1G`, Android 1
 
 `/data` reported 226 GB available of 462 GB. After owner approval, `adb install -r` installed the exact candidate APK successfully as an in-place update. Package Manager reported version name `1.2.0`, version code 3, and an unchanged `firstInstallTime`. The installed APK was pulled read-only; its SHA-256 exactly matched the staged APK (`73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752`) and its signer certificate matched the candidate. The app launched and displayed `BookLedger Mobile · v1.2.0`; the About page also displayed v1.2.0. No uninstall or data clear was performed, and no captures were created or modified.
 
-The home page displayed `Not paired` after the update, but the pairing state was not recorded before installation, so preservation or loss of a prior pairing cannot be determined. Existing captures and user settings were not inventoried before or after the update. The mobile Settings update control, release check, network-failure message, repeated checks, and light/dark presentation remain unverified. The `adb install -r` command confirms package replacement, not the in-app update installer flow. No newer stable release exists to test a v1.2.0-to-later update. The 18 Tcl/Tk skips and 21 Flutter analysis infos remain as reported in Automated verification above.
+The home page displayed `Not paired` after the update, but the pairing state was not recorded before installation, so preservation or loss of a prior pairing cannot be determined. Existing captures and user settings were not inventoried before or after the update. The owner reports no issues during additional manual testing of the updated app, but did not provide a scenario list; the mobile Settings update control, release check, network-failure message, repeated checks, and light/dark presentation therefore remain unverified. The `adb install -r` command confirms package replacement, not the in-app update installer flow. No newer stable release exists to test a v1.2.0-to-later update. The 18 Tcl/Tk skips and 21 Flutter analysis infos remain as reported in Automated verification above.
+
+## Final release-gate assessment — November 21, 2026
+
+No release-blocking defect was identified in the recorded automated checks or the Windows and Android behaviors exercised directly. The exact candidate artifact hashes match the manifest; the installed Android APK matches the candidate bytes and production signing certificate; the in-place update and app launch succeeded. The owner reports no issues during additional manual testing, with no itemized scenario coverage.
+
+The following limitations remain documented and were not converted to passes: Windows sales transactions, report-content accuracy, offline handling and minimum-window reachability; selected Fallback feature workflows; changed-settings migration and cross-version backup restoration; and Android pairing/settings/capture baselines, update UI and capture transfer. The automated desktop suite has 18 Tcl/Tk skips, and Flutter analysis exits 1 with 21 informational deprecations and no warnings or errors. These are nonblocking for seeking release approval, provided the owner reviews the remaining source/artifact checklist item and accepts the disclosed limits. The pre-upgrade Android pairing, settings and capture states cannot be reconstructed from the available evidence.
 
 ## Candidate assessment
 
-**Ready for Physical Acceptance.** All three versioned candidate assets and a checksum manifest are staged in `dist/v1.2.0-rc1/`, and the staged hashes were rechecked during Windows acceptance. The Portable startup delay was not reproduced with process-tree-aware measurement. Windows fresh-package checks and both isolated manual replacement checks passed for the exercised book/photo/backup paths. Full Windows acceptance remains incomplete because sales workflows, offline behavior and minimum-size reachability were skipped; customized-setting preservation and post-upgrade backup restoration were not checked. The Android production APK updated in place and the installed bytes match the candidate, but pairing, settings, captures and update-interface behavior remain unverified. This classification is not release approval. No release tag, issue change, or GitHub Release has been made.
+**Ready for Release Approval, with the limitations above.** Windows core intake/catalog checks and both isolated package-replacement paths passed for the exercised data, photo and backup checks. Android updated in place, launched as v1.2.0, and the installed APK matched the staged candidate and production signer. No release-blocking defect was found. This is a readiness recommendation, not release approval; publication still requires the owner's explicit decision after reviewing the unchecked source/artifact item and the documented exceptions. No release tag, issue change, or GitHub Release has been made.
