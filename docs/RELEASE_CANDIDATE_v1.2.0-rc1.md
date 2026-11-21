@@ -4,7 +4,7 @@
 **Release approval:** Not assessed; no release has been published.  
 **Preparation date:** November 21, 2026
 
-The candidate is built from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4`. Candidate version changes and report updates are local and uncommitted. The published v1.1.0 release assets and README download links remain unchanged.
+The candidate was prepared from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4` and is represented by commit `4b486a5eaf2ef83a304860d7c464220a97aba004` on `main`. Candidate artifacts remain staged locally; the published v1.1.0 release assets and README download links are unchanged.
 
 ## Version and toolchain
 
@@ -52,7 +52,30 @@ The portable and fallback packages use 64-bit CPython 3.14.6 and the exact versi
 | `BookLedger-v1.2.0-rc1-Windows-x64-Fallback.zip` | 61,091,024 | `5011a8366c2619d61f4843867e5c32ebb955547045e3103fa9472eba9413e629` |
 | `BookLedger-v1.2.0-rc1-Android.apk` | 70,915,414 | `73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752` |
 
-The final checksum file is `dist/v1.2.0-rc1/SHA256SUMS-rc1.txt`; all three entries were recomputed from the final staged bytes. Both final ZIPs include the candidate engine license in addition to the Android APK's generated notices. Both ZIPs were freshly extracted and launched on Windows 11 x64. The Fallback package showed the empty Dashboard in about 1.1 seconds. The Portable package took more than 120 seconds to show a window on repeated cold starts, then showed the Dashboard; it closed normally. The cause of the Portable delay is unconfirmed. Assess it during physical acceptance. These checks verify eventual startup, not full feature acceptance or acceptable startup time.
+The final checksum file is `dist/v1.2.0-rc1/SHA256SUMS-rc1.txt`; all three entries were recomputed from the final staged bytes. Both final ZIPs include the candidate engine license in addition to the Android APK's generated notices. Both ZIPs were freshly extracted and launched on Windows 11 x64. The initial Portable startup measurement was invalid because its probe watched the PyInstaller one-file bootloader parent, which has no GUI window, instead of the child process. The corrected process-tree measurements and comparison with v1.1.0 are recorded below. They show the rc1 Portable dashboard within 2.2–3.6 seconds, not more than 120 seconds. All measured windows closed normally.
+
+### Portable startup investigation — November 21, 2026
+
+The exact rc1 Portable ZIP (`60,242,067` bytes; SHA-256 `b1b06ace51b1c0cc849279c00255528b7796b6a85659a3bea425c52a24138645`), rc1 Fallback ZIP (`61,091,024` bytes; SHA-256 `5011a8366c2619d61f4843867e5c32ebb955547045e3103fa9472eba9413e629`), and the published [v1.1.0 Portable ZIP](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.1.0/BookLedger-v1.1.0-Windows-x64-Portable.zip) (`60,133,742` bytes; SHA-256 `6ae46145f019c6b3bc7638e5cc97c78a9caeee6138e88124af6b5be5ba1bf276`) were tested without modifying the staged candidate files.
+
+Measurements were made on Windows 11 Home x64, build 26200, with real-time antivirus protection enabled. Both C: and E: are local NTFS volumes. Fresh disposable extractions, `LOCALAPPDATA`/`APPDATA` profiles, and PyInstaller temp folders were used. The measured duration starts at launching the executable and ends when the visible window title is `BookLedger · Book collection manager`. “First” means first launch after extraction, not a forced cold OS file cache; no system caches or security settings were changed. Every displayed window accepted a normal close request and its process tree exited normally.
+
+| Package and location | Root process created (+08:00) | Time to BookLedger window |
+| --- | --- | ---: |
+| v1.2.0-rc1 Portable, executable and temp on E: | 13:49:51.214 first | 2.257 s |
+| v1.2.0-rc1 Portable, executable and temp on E: | 13:50:10.764 warm | 2.214 s |
+| v1.2.0-rc1 Portable, executable and temp on E: | 13:53:55.309 diagnostic | 3.617 s |
+| v1.2.0-rc1 Portable, executable and temp on C: | 13:52:33.696 first | 2.996 s |
+| v1.2.0-rc1 Portable, executable and temp on C: | 13:52:39.413 warm | 2.657 s |
+| v1.2.0-rc1 Portable, executable and temp on C: | 13:53:49.599 diagnostic | 2.597 s |
+| v1.2.0-rc1 Fallback, extracted on E: | 13:50:31.899 first | 1.317 s |
+| v1.2.0-rc1 Fallback, extracted on E: | 13:50:35.406 warm | 1.094 s |
+| Published v1.1.0 Portable, extracted on E: | 13:50:52.351 first | 1.975 s |
+| Published v1.1.0 Portable, extracted on E: | 13:50:57.305 warm | 2.429 s |
+
+The Portable executable is 25,480,919 bytes. In diagnostic runs, the one-file bootloader created a child process about 1.0 seconds after the parent on E: and 1.3 seconds after the parent on C:. At window creation, its temporary `_MEI` extraction contained 1,038 files totaling 47,078,088 bytes. The app process used about 0.9–1.2 CPU seconds before the BookLedger window was observed. Fallback avoids one-file extraction and reached its window about 1.1–1.3 seconds after launch. These measurements support normal extraction overhead of roughly a second, with additional application initialization; they show no candidate-specific, two-minute stall.
+
+**Classification: Environmental limitation (process-selection error in the measurement harness).** Watching only the process returned by `Start-Process` did not find a window even though the PyInstaller child already displayed the dashboard; that probe could wait past 120 seconds while monitoring the windowless parent. This explains the long wait in the initial investigation probe. The earlier reported >120-second observation is consistent with the same error, but its original instrument was unavailable, so its exact provenance cannot be confirmed. No application or packaging change is indicated by these runs. No Defender event or performance trace was collected, so small run-to-run variation is not attributed to antivirus scanning or a specific disk bottleneck.
 
 ## Device checks and remaining limits
 
@@ -62,4 +85,4 @@ Production-signed in-place upgrade, settings/pairing preservation, camera/scanni
 
 ## Candidate assessment
 
-**Ready for Physical Acceptance.** All three versioned candidate assets and a checksum manifest are staged in `dist/v1.2.0-rc1/`, and both Windows packages pass fresh-extraction startup checks. This classification means the artifacts are ready for isolated physical acceptance; it is not release approval. Android upgrade and feature acceptance remain pending, and no commit, push, tag, issue change, or GitHub Release has been made.
+**Ready for Physical Acceptance.** All three versioned candidate assets and a checksum manifest are staged in `dist/v1.2.0-rc1/`; the Portable startup delay was not reproduced with process-tree-aware measurement and does not currently block physical acceptance. This classification is not release approval. Android upgrade and feature acceptance remain pending. No release tag, issue change, or GitHub Release has been made.

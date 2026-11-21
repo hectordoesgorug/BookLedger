@@ -20,6 +20,27 @@ Flutter 3.50.0 / Dart 3.14.0, Gradle 9.3.1, AGP 9.1.1, JBR/Java 25.0.4, Build To
 
 The candidate APK is production-signed, non-debuggable, version 1.2.0/code 3, min SDK 24, target/compile SDK 36, and supports `arm64-v8a`, `armeabi-v7a`, and `x86_64`. No install, upgrade, uninstall, data clear, pairing change, or capture modification was performed on the connected Android 16 device. Native Android upgrade and feature acceptance remain pending.
 
+## Portable startup investigation — November 21, 2026
+
+Baseline: Windows 11 Home x64, build 26200, `main` at `4b486a5eaf2ef83a304860d7c464220a97aba004`, aligned with `origin/main`. Real-time antivirus protection remained enabled. C: and E: are local NTFS volumes. All runs used fresh disposable package extractions, test profiles through process-scoped `LOCALAPPDATA`/`APPDATA`, and dedicated temporary directories. “First” means first launch after extraction; OS file caches were not forcibly cleared. Timing is executable process launch to the visible `BookLedger · Book collection manager` window title. Each measured app accepted normal close and its process tree exited normally.
+
+| Package and location | Root process created (+08:00) | Window time |
+| --- | --- | ---: |
+| v1.2.0-rc1 Portable, executable/temp on E: | 13:49:51.214 first | 2.257 s |
+| v1.2.0-rc1 Portable, executable/temp on E: | 13:50:10.764 warm | 2.214 s |
+| v1.2.0-rc1 Portable, executable/temp on E: | 13:53:55.309 diagnostic | 3.617 s |
+| v1.2.0-rc1 Portable, executable/temp on C: | 13:52:33.696 first | 2.996 s |
+| v1.2.0-rc1 Portable, executable/temp on C: | 13:52:39.413 warm | 2.657 s |
+| v1.2.0-rc1 Portable, executable/temp on C: | 13:53:49.599 diagnostic | 2.597 s |
+| v1.2.0-rc1 Fallback, extracted on E: | 13:50:31.899 first | 1.317 s |
+| v1.2.0-rc1 Fallback, extracted on E: | 13:50:35.406 warm | 1.094 s |
+| Published v1.1.0 Portable, extracted on E: | 13:50:52.351 first | 1.975 s |
+| Published v1.1.0 Portable, extracted on E: | 13:50:57.305 warm | 2.429 s |
+
+Exact hashes: rc1 Portable `b1b06ace51b1c0cc849279c00255528b7796b6a85659a3bea425c52a24138645`; rc1 Fallback `5011a8366c2619d61f4843867e5c32ebb955547045e3103fa9472eba9413e629`; downloaded [published v1.1.0 Portable](https://github.com/hectordoesgorug/BookLedger/releases/download/v1.1.0/BookLedger-v1.1.0-Windows-x64-Portable.zip) `6ae46145f019c6b3bc7638e5cc97c78a9caeee6138e88124af6b5be5ba1bf276` (60,133,742 bytes). The rc1 Portable executable is 25,480,919 bytes. Diagnostic runs recorded a one-file child process starting 1.008 seconds after its parent on E: and 1.293 seconds after it on C:. While the application window was open, its `_MEI` extraction contained 1,038 files totaling 47,078,088 bytes. Its process used about 0.9–1.2 CPU seconds before the window appeared.
+
+**Classification: Environmental limitation (process-selection error in the measurement harness).** The >120-second delay was not reproduced with process-tree-aware timing. The invalid initial probe watched only the windowless PyInstaller parent while its child had the visible dashboard. This explains the long wait in that probe; the earlier >120-second observation is consistent with the same error, but its original instrument was unavailable, so its exact provenance cannot be confirmed. Normal one-file extraction adds about one second relative to the Fallback package in these runs. No Defender event trace or disk performance trace was collected, and these measurements are from one computer rather than a controlled multi-system benchmark.
+
 ## Native update discovery and desktop repository link — November 20, 2026
 
 Baseline: `main` at `255d59ed4cd002da2d928c5f91d659003fe5c40b`, aligned with local `origin/main`, with the existing 25-file uncommitted implementation/stabilization changes preserved. The results here are independently observed native checks and subsequent regressions. Earlier automated and reported physical evidence remains below with its original counts and limitations.
