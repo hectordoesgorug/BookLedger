@@ -2,7 +2,7 @@
 
 ## v1.2.0 release candidate preparation — November 21, 2026
 
-The v1.2.0 candidate is accepted for review, but no release has been published. Source is at `d4f918113e97ea6fea04f84d68837e9bc0e21004`; the accepted Windows and Android candidate artifacts remain at `dist/v1.2.0-rc1/`. Final review found stale v1.1.0 wording and unavailable relative links in the Windows packages' bundled READMEs. Corrected README content and separate proposed final-named packages are staged at `dist/v1.2.0-proposed/` for owner review; the accepted rc1 files remain unchanged. See the [candidate checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md).
+The v1.2.0 candidate is ready for a separate publication decision; no release has been published. Current local `main` is `7b64159e20d23abb90326a2911ed1b5f44802ea9`, one commit ahead of `origin/main`. The accepted candidate artifacts remain unchanged at `dist/v1.2.0-rc1/`. The owner approved corrected Windows ZIPs, the unchanged Android APK and the new manifest for final artifact preparation; the finalized set is staged at `dist/v1.2.0/`. Visible-window verification for the repackaged ZIPs remains skipped and is recorded in the candidate report and test report. See the [candidate checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md).
 
 ## Update installation — November 21, 2026
 

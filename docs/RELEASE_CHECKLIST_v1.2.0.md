@@ -1,6 +1,6 @@
 # BookLedger v1.2.0 release checklist
 
-**Status:** Not Ready for Publication Authorization; corrected Windows packages require owner review.
+**Status:** Ready for Publication Authorization; publication remains separately unauthorized.
 
 ## Source and version identity
 
@@ -53,19 +53,19 @@
 
 - [x] Recomputed SHA-256 values for all accepted rc1 artifacts; all match `SHA256SUMS-rc1.txt`. ZIP CRC/layout, embedded APK identity, executable versions, license notices and data/signing-material exclusions were checked.
 - [x] Root and Android READMEs were updated to identify v1.2.0 and its final asset names without claiming publication. Links to documentation omitted from the archives now target the versioned GitHub files. Proposed repackaged Windows ZIPs use the corrected documents; the standalone APK is byte-identical to the accepted candidate.
-- [ ] Owner has reviewed and accepted the proposed final-named Windows ZIPs and their new hashes. Until then, neither proposed ZIP supersedes the accepted rc1 file.
-- [ ] Fresh extraction and launch of the corrected proposed Windows ZIPs remain pending owner acceptance of those replacements.
+- [x] Owner approved the corrected final-named Windows ZIPs, unchanged production APK, and new SHA-256 manifest for final artifact preparation. Accepted rc1 files remain preserved; approved final files are staged at `dist/v1.2.0/`.
+- [ ] Fresh-extraction visible-window verification of the corrected Windows ZIPs is **SKIPPED**. Process-start attempts did not capture a window; a follow-up window-enumeration command was blocked by execution policy. This limitation remains disclosed and was accepted for final artifact preparation.
 
 ## Final release-gate assessment
 
 - [x] No application defect was identified in the recorded automated checks or directly exercised Windows and Android behaviors.
 - [ ] Full physical scenario coverage is not claimed. Windows sales transactions, report accuracy, offline behavior, minimum-window reachability, selected Fallback features, changed-settings migration and post-upgrade backup restoration remain **SKIPPED** or unverified.
 - [ ] Android pairing, settings and capture baselines were not recorded before update; the post-update app showed `Not paired`. Preservation of those previous states cannot be determined. Mobile update UI, network failure, repeated checks, theme presentation, transfer and in-app installer remain unverified.
-- [ ] Existing physical-test exceptions remain documented and are assessed as nonblocking if accepted by the owner. Independently, stale bundled README content blocks publication of the current accepted Windows ZIPs until corrected proposed packages are reviewed and accepted.
+- [x] Existing physical-test exceptions remain documented and are assessed as nonblocking for seeking publication authorization. The stale bundled README issue is corrected in the owner-approved final ZIPs; the original rc1 ZIPs remain unchanged and are not staged as final assets.
 - [ ] Release approval and publication have not been granted or performed.
 
 ## Distribution safeguards
 
-- [ ] README download links use final v1.2.0 filenames but resolve only after the release is published; the unchanged v1.1.0 release assets remain available historically.
+- [x] README download links use final v1.2.0 filenames. Local target paths match the staged assets and GitHub versioned-document links map to repository files; external release/tag links are expected to resolve after publication. The v1.1.0 release assets remain available historically.
 - [x] Historical v1.0.0 and v1.1.0 release records and artifacts are preserved.
-- [x] No commit, push, tag, GitHub Release, or issue update is authorized for this candidate-preparation work.
+- [x] No commit, push, tag, GitHub Release, or issue update was performed for this final-artifact preparation. The current local branch is one commit ahead of `origin/main` from the existing documentation review commit.
