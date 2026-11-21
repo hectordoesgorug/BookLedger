@@ -1,10 +1,10 @@
 # BookLedger v1.2.0-rc1 candidate report
 
-**Candidate status:** Ready for Release Approval
+**Candidate status:** Not Ready for Publication Authorization — packaged README correction awaits owner review
 **Release approval:** Pending explicit approval; no release has been published.
 **Preparation date:** November 21, 2026
 
-The candidate was prepared from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4` and is represented by commit `4b486a5eaf2ef83a304860d7c464220a97aba004` on `main`. Candidate artifacts remain staged locally; the published v1.1.0 release assets and README download links are unchanged.
+The candidate was prepared from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4` and is represented by commit `4b486a5eaf2ef83a304860d7c464220a97aba004` on `main`. At final review, branch `main` is at `d4f918113e97ea6fea04f84d68837e9bc0e21004`. The accepted rc1 artifacts and published v1.1.0 assets remain unchanged. The repository README now uses final v1.2.0 asset names, which resolve only after publication.
 
 ## Version and toolchain
 
@@ -133,4 +133,23 @@ The following limitations remain documented and were not converted to passes: Wi
 
 ## Candidate assessment
 
-**Ready for Release Approval, with the limitations above.** Windows core intake/catalog checks and both isolated package-replacement paths passed for the exercised data, photo and backup checks. Android updated in place, launched as v1.2.0, and the installed APK matched the staged candidate and production signer. No release-blocking defect was found. This is a readiness recommendation, not release approval; publication still requires the owner's explicit decision after reviewing the unchecked source/artifact item and the documented exceptions. No release tag, issue change, or GitHub Release has been made.
+**Not Ready for Publication Authorization.** Review on November 21, 2026 found that the accepted Portable and Fallback ZIPs bundle root and Android READMEs that still describe v1.1.0 as the current release and point Android readers to the v1.1.0 APK. This is stale after v1.2.0 publication and would mislead users. Corrected README files and separately staged proposed final-named packages are prepared for owner review; accepted rc1 artifacts remain byte-for-byte unchanged. Owner acceptance of the proposed Windows ZIPs is required before treating them as replacements. The recorded Windows/Android acceptance results and exceptions above are unchanged; no release tag, issue change, or GitHub Release has been made.
+
+## Final publication review — November 21, 2026
+
+The candidate source remains commit `4b486a5eaf2ef83a304860d7c464220a97aba004`; current `main` is `d4f918113e97ea6fea04f84d68837e9bc0e21004`. The only changes since the candidate source are acceptance/release documentation. The accepted files in `dist/v1.2.0-rc1/` were not modified.
+
+Inspection of the accepted ZIPs found that the root README still calls v1.1.0 the latest published release and links to the v1.1.0 Android APK. The packaged `mobile/README.md` also presents v1.1.0 as current. Several relative README links also pointed to files not included in the ZIPs, including the update guide, architecture notes, test report, and banner image. The repository READMEs now describe v1.2.0, use its final filenames while clearly stating it is unpublished, and link to the versioned GitHub files so packaged copies can reach those resources after the v1.2.0 tag is published.
+
+Corrected final-named ZIPs are staged separately in `dist/v1.2.0-proposed/` for review. Each proposed ZIP passed CRC validation and retains the same member list as its accepted counterpart; only the root and mobile README payloads differ. The proposed APK is byte-identical to the accepted APK. As repacking changes the Windows ZIP bytes and hashes, owner review is required before those ZIPs replace the accepted candidate. A fresh-extraction process-start smoke was attempted for both proposed packages, but the GUI window was not independently observed by the available title probe; do not treat that attempt as a visual launch PASS. A further PowerShell window-enumeration check was rejected by the execution policy before it ran. Before publication, confirm the proposed ZIPs by fresh extraction and visible app launch, repeat ZIP/hash/manifest and packaged-content checks, and update the checksums after any further change.
+
+| Proposed final asset | Bytes | SHA-256 | Candidate relationship |
+| --- | ---: | --- | --- |
+| `BookLedger-v1.2.0-Windows-x64-Portable.zip` | 60,220,092 | `154584d4a2485a74b96a9250d5481989cd49f4ca37e02a3e1e72abbfae148b5a` | Candidate Portable payload with corrected root/mobile READMEs |
+| `BookLedger-v1.2.0-Windows-x64-Fallback.zip` | 61,053,994 | `46839ebb5ebe26a4c330f27c69521b752e7d0d224f6b69f3308ed7af97a24da0` | Candidate Fallback payload with corrected root/mobile READMEs |
+| `BookLedger-v1.2.0-Android.apk` | 70,915,414 | `73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752` | Byte-identical copy of accepted candidate APK |
+| `SHA256SUMS.txt` | 317 | `021c02de6d10d065e83d6a4920f1e971fdf5a38601121b7c9b6808e214739ed2` | Manifest for the three proposed final assets |
+
+The original rc1 hashes remain the authoritative accepted-candidate values in the preceding table. The proposed manifest was generated from final-named staged files; independent verification is recorded in `TEST_REPORT.md`. No tag or release has been created. Proposed tag: `v1.2.0`. Proposed release title: `BookLedger v1.2.0`.
+
+After explicit approval, the publication sequence is: commit the approved release documentation and staging decisions; push the reviewed commit to `main`; create and push annotated tag `v1.2.0` on that commit; create release `BookLedger v1.2.0` with the approved notes; upload both Windows ZIPs, the Android APK and `SHA256SUMS.txt`; independently download and verify all four files; confirm GitHub marks v1.2.0 latest stable; and check the README download links. Issue #22 and the unresolved SRP/provider issues remain unchanged in this review.

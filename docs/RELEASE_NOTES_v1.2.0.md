@@ -1,6 +1,6 @@
 # BookLedger v1.2.0 — Release candidate notes
 
-**Status:** Candidate notes; not published.
+**Status:** Draft release notes; v1.2.0 has not been published.
 
 BookLedger v1.2.0 brings configurable currency conversion, offline description shortening, metadata-provider improvements, desktop refinements, and the first update-check and verified-download flows.
 

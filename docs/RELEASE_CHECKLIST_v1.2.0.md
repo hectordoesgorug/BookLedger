@@ -1,6 +1,6 @@
 # BookLedger v1.2.0 release checklist
 
-**Status:** Ready for Release Approval; approval and publication remain pending.
+**Status:** Not Ready for Publication Authorization; corrected Windows packages require owner review.
 
 ## Source and version identity
 
@@ -8,7 +8,7 @@
 - [x] Desktop canonical version is `1.2.0`; Windows file metadata uses the canonical version.
 - [x] Android declares `1.2.0+3`; application ID remains `com.bookledger.mobile`. The only previously distributed production code confirmed so far is v1.1.0 code 2.
 - [x] Existing production signing configuration and keystore are present outside the repository; no credential values are recorded here.
-- [ ] Candidate source and exact artifacts reviewed.
+- [x] Candidate source and exact rc1 artifacts reviewed. The accepted Windows ZIPs contain root and mobile READMEs that still describe v1.1.0 as current; this is a publication documentation blocker for those exact ZIPs. The originals remain unchanged.
 
 ## Automated verification
 
@@ -49,16 +49,23 @@
 - [ ] Mobile Settings update control, live release check, network-failure handling, repeated checks, light/dark presentation, capture transfer and in-app installer handoff remain unverified.
 - [x] The Portable candidate's live stable-release check reported v1.1.0 as current and no newer stable release to test an update to.
 
+## Final package review — November 21, 2026
+
+- [x] Recomputed SHA-256 values for all accepted rc1 artifacts; all match `SHA256SUMS-rc1.txt`. ZIP CRC/layout, embedded APK identity, executable versions, license notices and data/signing-material exclusions were checked.
+- [x] Root and Android READMEs were updated to identify v1.2.0 and its final asset names without claiming publication. Links to documentation omitted from the archives now target the versioned GitHub files. Proposed repackaged Windows ZIPs use the corrected documents; the standalone APK is byte-identical to the accepted candidate.
+- [ ] Owner has reviewed and accepted the proposed final-named Windows ZIPs and their new hashes. Until then, neither proposed ZIP supersedes the accepted rc1 file.
+- [ ] Fresh extraction and launch of the corrected proposed Windows ZIPs remain pending owner acceptance of those replacements.
+
 ## Final release-gate assessment
 
-- [x] No release-blocking defect was identified in the recorded automated checks or directly exercised Windows and Android behaviors.
+- [x] No application defect was identified in the recorded automated checks or directly exercised Windows and Android behaviors.
 - [ ] Full physical scenario coverage is not claimed. Windows sales transactions, report accuracy, offline behavior, minimum-window reachability, selected Fallback features, changed-settings migration and post-upgrade backup restoration remain **SKIPPED** or unverified.
 - [ ] Android pairing, settings and capture baselines were not recorded before update; the post-update app showed `Not paired`. Preservation of those previous states cannot be determined. Mobile update UI, network failure, repeated checks, theme presentation, transfer and in-app installer remain unverified.
-- [x] These documented exceptions are assessed as nonblocking for seeking release approval. The owner must review the unchecked candidate source/artifact item and decide whether to accept the limitations before publication.
+- [ ] Existing physical-test exceptions remain documented and are assessed as nonblocking if accepted by the owner. Independently, stale bundled README content blocks publication of the current accepted Windows ZIPs until corrected proposed packages are reviewed and accepted.
 - [ ] Release approval and publication have not been granted or performed.
 
 ## Distribution safeguards
 
-- [x] README download links remain pointed at the published v1.1.0 assets.
+- [ ] README download links use final v1.2.0 filenames but resolve only after the release is published; the unchanged v1.1.0 release assets remain available historically.
 - [x] Historical v1.0.0 and v1.1.0 release records and artifacts are preserved.
 - [x] No commit, push, tag, GitHub Release, or issue update is authorized for this candidate-preparation work.

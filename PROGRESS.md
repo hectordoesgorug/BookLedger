@@ -2,7 +2,7 @@
 
 ## v1.2.0 release candidate preparation — November 21, 2026
 
-The readiness audit is committed and pushed on `main`. Candidate work is local: desktop is `1.2.0`, Android is `1.2.0+3`, and verified candidate assets are staged for physical acceptance. No release has been published. Preserve the v1.1.0 download links in README until publication. See [candidate checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md).
+The v1.2.0 candidate is accepted for review, but no release has been published. Source is at `d4f918113e97ea6fea04f84d68837e9bc0e21004`; the accepted Windows and Android candidate artifacts remain at `dist/v1.2.0-rc1/`. Final review found stale v1.1.0 wording and unavailable relative links in the Windows packages' bundled READMEs. Corrected README content and separate proposed final-named packages are staged at `dist/v1.2.0-proposed/` for owner review; the accepted rc1 files remain unchanged. See the [candidate checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md).
 
 ## Update installation — November 21, 2026
 

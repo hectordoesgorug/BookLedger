@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.2.0 — Release candidate preparation
+## 1.2.0 — Release preparation
 
-**Status:** Unpublished candidate. Verification and physical acceptance are in progress.
+**Status:** Unpublished. Candidate acceptance is recorded; publication is pending.
 
 ### Desktop
 

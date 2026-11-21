@@ -651,3 +651,20 @@ The owner reports no issues during additional manual testing. The scenarios were
 No release-blocking defect was identified in the available automated results or the behaviors directly exercised on Windows and Android. Remaining nonblocking exceptions are incomplete Windows scenario coverage (including sales transactions, report accuracy, offline handling and minimum-window reachability), settings migration and cross-version backup restoration, and unverified Android pairing/settings/capture baselines and feature flows. The Android home page showed `Not paired`, but the pre-upgrade state is unknown. The desktop full suite recorded 18 Tcl/Tk skips. Flutter analysis exited 1 with 21 informational deprecations, no warnings and no errors. These limitations are suitable for an explicit release decision, but the owner must review the unchecked source/artifact checklist item and decide whether to accept them.
 
 **Disposition: Ready for Release Approval.** This is a recommendation only; release approval and publication remain pending. No automated suites or physical checks were repeated during this documentation reconciliation.
+
+## v1.2.0 final publication review — November 21, 2026
+
+The accepted files under `dist/v1.2.0-rc1/` were rehashed and matched `SHA256SUMS-rc1.txt`. Final-named proposed packages were staged under `dist/v1.2.0-proposed/`; these are separate from and do not overwrite the accepted candidate. The proposed APK is byte-identical to the accepted APK. For both proposed Windows ZIPs, archive member order and names match the accepted ZIP, CRC validation passes, and the only changed payloads are the root `README.md` and `mobile/README.md`. The README discrepancy and proposed correction are detailed in the candidate report.
+
+Proposed asset verification:
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `BookLedger-v1.2.0-Windows-x64-Portable.zip` | 60,220,092 | `154584d4a2485a74b96a9250d5481989cd49f4ca37e02a3e1e72abbfae148b5a` |
+| `BookLedger-v1.2.0-Windows-x64-Fallback.zip` | 61,053,994 | `46839ebb5ebe26a4c330f27c69521b752e7d0d224f6b69f3308ed7af97a24da0` |
+| `BookLedger-v1.2.0-Android.apk` | 70,915,414 | `73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752` |
+| `SHA256SUMS.txt` | 317 | `021c02de6d10d065e83d6a4920f1e971fdf5a38601121b7c9b6808e214739ed2` |
+
+Fresh extraction and process-start attempts were made for both proposed Windows ZIPs. The executables remained running, but the available probe did not capture a visible window title; GUI launch confirmation is therefore **SKIPPED**, not passed. A further PowerShell window-enumeration command was rejected by execution policy before it ran. The previously recorded candidate launch and physical acceptance results remain evidence for the unchanged executable payloads, but do not substitute for visual confirmation of the proposed ZIPs. Both executables were byte-compared with the accepted ZIP members and report FileVersion/ProductVersion `1.2.0`; the Fallback archive contains 1,038 files under `_internal/`. The APK reports package `com.bookledger.mobile`, version `1.2.0`, code `3`; `apksigner` verifies it and reports certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`. No desktop or Flutter test suite was rerun because no application source changed. The final checksum manifest was independently recalculated from the proposed files and matches the listed values.
+
+The candidate acceptance findings and limitations remain unchanged. No commit, push, tag, issue update, asset upload, or GitHub Release was made. Proposed Windows ZIPs require owner review before replacing the accepted rc1 ZIPs.
