@@ -7,6 +7,7 @@ import urllib.error
 import pytest
 
 from bookledger.services import updates
+from bookledger.services.update_download import DownloadCancelled
 from bookledger.ui.updates import UpdatePage
 
 
@@ -166,7 +167,9 @@ def test_update_page_displays_result_retries_and_opens_release(root, monkeypatch
     assert page.state_text.get() == "Update Available"
     assert page.versions.get() == "Installed: 1.1.0    Available: 1.2.0"
     assert page.notes.get("1.0", "end-1c") == "Release notes"
-    assert [button.cget("text") for button in page.winfo_children()[-1].winfo_children()] == ["Check Again", "Open Release Page"]
+    assert [button.cget("text") for button in page.winfo_children()[-1].winfo_children()] == [
+        "Check Again", "Open Release Page", "Download & Verify", "Cancel Download", "Open Download Folder",
+    ]
     page.release.invoke()
     assert calls == [("https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0", 0)]
     page.retry.invoke()
@@ -175,6 +178,70 @@ def test_update_page_displays_result_retries_and_opens_release(root, monkeypatch
     assert page.state_text.get() == "Unable to Check"
     assert str(page.retry.cget("state")) == "normal"
     page.destroy()
+
+
+def test_update_page_reports_verified_download_and_storage_location(root, tmp_path):
+    name = "BookLedger-v1.2.0-Windows-x64-Portable.zip"
+    result = updates.UpdateResult(
+        "Update Available", "1.1.0", "1.2.0", message="New release",
+        release_url="https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0",
+        asset_url=f"{updates.REPOSITORY_URL}/releases/download/v1.2.0/{name}",
+        checksum_url="https://github.com/hectordoesgorug/BookLedger/releases/download/v1.2.0/SHA256SUMS.txt",
+        asset_name=name, asset_size=100, checksum_size=317,
+    )
+
+    def downloader(_result, _cancel, *, staging, progress):
+        progress("Downloading", 100, 100)
+        progress("Verifying", 100, 100)
+        folder = tmp_path / "v1.2.0-Portable-operation"
+        folder.mkdir()
+        path = folder / name
+        path.write_bytes(b"verified fixture")
+        return path
+
+    page = UpdatePage(root, checker=lambda *_args: result, package="Portable", downloader=downloader)
+    page.pack(fill="both", expand=True)
+    _wait_for_page_result(root, page)
+    assert str(page.download.cget("state")) == "normal"
+    page.download.invoke()
+    deadline = time.monotonic() + 2
+    while page._download_cancel is not None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.005)
+    assert page._download_cancel is None
+    assert page.state_text.get() == "Verified Download"
+    assert name in page.download_status.get()
+    assert str(tmp_path) in page.download_status.get()
+    assert "Installation is not available yet." in page.download_status.get()
+    assert str(page.open_download_folder.cget("state")) == "normal"
+    page.destroy()
+
+
+def test_leaving_page_cancels_download_and_removes_its_poll(root):
+    name = "BookLedger-v1.2.0-Windows-x64-Portable.zip"
+    result = updates.UpdateResult(
+        "Update Available", "1.1.0", "1.2.0", message="New release",
+        release_url="https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0",
+        asset_url=f"{updates.REPOSITORY_URL}/releases/download/v1.2.0/{name}",
+        checksum_url="https://github.com/hectordoesgorug/BookLedger/releases/download/v1.2.0/SHA256SUMS.txt",
+        asset_name=name, asset_size=100, checksum_size=317,
+    )
+    started = threading.Event()
+    observed_cancel = threading.Event()
+
+    def downloader(_result, cancel, **_kwargs):
+        started.set()
+        cancel.wait(2)
+        observed_cancel.set()
+        raise DownloadCancelled()
+
+    page = UpdatePage(root, checker=lambda *_args: result, package="Portable", downloader=downloader)
+    page.pack(fill="both", expand=True)
+    _wait_for_page_result(root, page)
+    page.download.invoke()
+    assert started.wait(1)
+    page.destroy()
+    assert observed_cancel.wait(1)
 
 
 def test_release_notes_use_the_active_theme_colors(root, monkeypatch):

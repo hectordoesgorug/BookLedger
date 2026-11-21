@@ -81,6 +81,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 val preferences = getSharedPreferences(APP_SETTINGS_PREFERENCES, MODE_PRIVATE)
                 when (call.method) {
+                    "getUpdateFreeBytes" -> result.success(filesDir.usableSpace)
                     "getAppSettings" -> result.success(
                         mapOf(
                             "version" to BuildConfig.VERSION_NAME,

@@ -68,6 +68,7 @@ void main() {
       expect(find.text('Installed: 1.1.0 (code 2)'), findsOneWidget);
       expect(find.text('Available: 1.2.0'), findsOneWidget);
       expect(find.text('Release notes'), findsOneWidget);
+      expect(find.text('Download & Verify'), findsOneWidget);
       expect(settings.themeMode, ThemeMode.dark);
       expect(methods, ['getAppSettings']);
       expect(photo.readAsBytesSync(), [1, 2, 3]);

@@ -61,6 +61,9 @@ class UpdateResult:
     release_url: str | None = None
     asset_url: str | None = None
     checksum_url: str | None = None
+    asset_name: str | None = None
+    asset_size: int | None = None
+    checksum_size: int | None = None
 
 
 def release_result(payload: object, installed: str, package: str | None) -> UpdateResult:
@@ -85,22 +88,23 @@ def release_result(payload: object, installed: str, package: str | None) -> Upda
     suffix = "Android.apk" if package == "Android" else f"Windows-x64-{package}.zip"
     asset_name = f"BookLedger-{tag}-{suffix}"
 
-    def asset_url(name):
+    def asset(name):
         matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == name]
         expected = f"{REPOSITORY_URL}/releases/download/{tag}/{name}"
         if len(matches) != 1:
             return None
         asset = matches[0]
-        return expected if (
+        return (expected, asset["size"]) if (
             asset.get("browser_download_url") == expected and asset.get("state") == "uploaded"
             and isinstance(asset.get("size"), int) and not isinstance(asset["size"], bool) and asset["size"] > 0
         ) else None
 
-    archive, checksums = asset_url(asset_name), asset_url("SHA256SUMS.txt")
+    archive, checksums = asset(asset_name), asset("SHA256SUMS.txt")
     if not archive or not checksums:
         return UpdateResult("Unsupported Update", **base, message="The release is missing a complete platform asset or checksum manifest.")
     return UpdateResult(
-        "Update Available", **base, asset_url=archive, checksum_url=checksums,
+        "Update Available", **base, asset_url=archive[0], checksum_url=checksums[0],
+        asset_name=asset_name, asset_size=archive[1], checksum_size=checksums[1],
         message="Review the official release instructions. This check does not download or install updates. Back up the desktop library before a manual upgrade.",
     )
 

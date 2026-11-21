@@ -73,7 +73,7 @@ The desktop sidebar has an **Update** page directly below **About**. Android Set
 
 Click the application banner or activate it with Enter or Space to open the project repository in the default browser. The configurable shop logo below the navigation continues to open its separately configured shop URL.
 
-This feature is not included in the published v1.1.0 binaries. It opens the official release page for manual instructions; it does not download or install an update. Safe Windows replacement and Android installation remain separate work; see the [update system design](docs/UPDATE_SYSTEM.md) and [verification results](TEST_REPORT.md). Send pending phone captures and back up the desktop library before a manual upgrade.
+The published v1.1.0 binaries do not include this updater. In eligible packaged builds with a newer stable release, **Download & Verify** saves the official Windows ZIP or Android APK to separate staging storage and checks its SHA-256 against that release's `SHA256SUMS.txt`. Windows ZIPs also receive path, layout, size and CRC validation. Downloads can be canceled; verified files remain staged until manually removed. Source and debug builds cannot download production updates. A checksum next to the release detects transfer or asset mismatches but is not an independent signature. Downloads do not install, extract or replace files; Windows replacement and Android installation require a separate installation workflow. Send pending phone captures and back up the desktop library before any manual upgrade. See the [update system design](docs/UPDATE_SYSTEM.md) and [verification results](TEST_REPORT.md).
 
 ## Currency and SRP
 

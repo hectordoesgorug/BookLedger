@@ -1,7 +1,7 @@
 import hashlib
 from io import BytesIO
 import stat
-from zipfile import ZipFile, ZipInfo
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 import pytest
 
@@ -56,3 +56,19 @@ def test_symlinks_and_excessive_uncompressed_content_are_rejected(monkeypatch):
     monkeypatch.setattr(update_archive, "MAX_UNCOMPRESSED", 1)
     with pytest.raises(ValueError):
         inspect(["BookLedger/BookLedger.exe"])
+
+
+def test_file_path_inspection_streams_crc_and_rejects_corrupt_entry(tmp_path):
+    path = tmp_path / "fixture.zip"
+    with ZipFile(path, "w") as archive:
+        archive.writestr("BookLedger/BookLedger.exe", b"fixture executable")
+    content = path.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+    checksums = f"{digest}  fixture.zip\n"
+    assert update_archive.inspect_archive(path, checksums, "fixture.zip", "Portable") == ("BookLedger.exe",)
+
+    damaged = content.replace(b"fixture executable", b"corrupt executable")
+    path.write_bytes(damaged)
+    checksum = hashlib.sha256(damaged).hexdigest()
+    with pytest.raises(BadZipFile, match="CRC"):
+        update_archive.inspect_archive(path, f"{checksum}  fixture.zip\n", "fixture.zip", "Portable")

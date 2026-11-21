@@ -511,3 +511,20 @@ An isolated geometry replica reported a `1920×1080` screen, Tk scaling `1.33333
 - `.venv\Scripts\python.exe -m pytest -q -rs` — **657 passed, 19 skipped, 0 failed**. Skips are Tk/display checks blocked by missing `init.tcl`, `tk.tcl`/`ttk/scrollbar.tcl`, or `ttk/sizegrip.tcl` files in the installed runtime.
 
 Earlier November 21 full-suite and isolated failures (the child remained `1120×826` or `1120×850`) are retained above as historical results. The event-order correction was followed by ten passes and a passing full suite; test/display timing can still vary across Windows environments. The standalone geometry run and native UI run used disposable test data and did not touch the user's library.
+
+## Verified update downloads (November 21, 2026)
+
+Current source builds can download and verify eligible release packages without installing or replacing application files. Windows accepts only the ZIP matching the running frozen package; Android accepts only an eligible production-signed build. Both stream to isolated staging storage, enforce HTTPS host/redirect and size constraints, verify the exact release asset against `SHA256SUMS.txt`, and retain the verified file. Windows ZIPs also receive path, layout, size, CRC, and protected-user-data checks. Cancellation and failure remove only the operation's incomplete file. Android signing identity, package name, and version code remain for a separate install workflow.
+
+The public latest stable release was v1.1.0, equal to the current installed/source version. Its release metadata listed the APK (71,633,402 bytes), Windows portable ZIP (60,133,742 bytes), fallback ZIP (60,982,251 bytes), and `SHA256SUMS.txt` (317 bytes). Release metadata and the GitHub asset redirect host were inspected, but no release payload was downloaded: there was no newer eligible version, and source/debug builds cannot use the production download flow. No live package transfer, production-signature continuity, installation, or native-device download was verified.
+
+- `.venv\Scripts\python.exe -m pytest tests/test_updates.py tests/test_update_download.py tests/test_update_archive.py -q -rs` — **63 passed, 1 skipped**. The skipped UI test could not load Tcl/Tk `init.tcl`.
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **674 passed, 18 skipped, 0 failed**. One Tk test could not load `tk.tcl`; 17 provider diagnostic UI tests require the missing `ttk/sizegrip.tcl`.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed. `git diff --check` — passed; Git emitted only configured LF-to-CRLF working-copy notices.
+- `flutter test test/update_service_test.dart test/update_check_action_test.dart --reporter expanded` — **36 passed**.
+- `flutter test --reporter expanded` — **162 passed, 0 failed, 0 skipped**.
+- `flutter analyze` — **21 informational deprecations** for existing `package:flutter/material.dart` imports across application and test files; no warnings or errors.
+- `dart format --output=none --set-exit-if-changed lib test` — **39 files checked, 0 changed**.
+- `flutter build apk --debug` — passed; the debug APK was not installed. The build reports future Gradle/AGP/Kotlin minimum-version warnings from the configured toolchain; see the Android development notes above.
+
+Download tests use synthetic releases and transport fixtures. They cover stream integrity, exact release identity and asset name, case-insensitive manifest duplicates, HTTPS redirect policy, cancellation, bounded sizes, low storage, partial-file cleanup, and preservation of unrelated library files. They do not prove a live release transfer or installer behavior. The desktop source session reports the current v1.1.0 release as up to date, so its real download control is ineligible.

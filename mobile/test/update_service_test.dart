@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/updates/update_service.dart';
 
@@ -182,4 +184,337 @@ void main() {
     );
     expect(calls, 0);
   });
+
+  test('download streams APK, reports progress, verifies checksum and isolates storage', () async {
+    final apk = [0x50, 0x4b, 0x03, 0x04, ...utf8.encode('fixture apk')];
+    final name = 'BookLedger-v1.2.0-Android.apk';
+    final manifest = '${sha256.convert(apk)}  $name\n';
+    final payload = release()
+      ..['assets'] = [
+        for (final item in [
+          (name, apk.length),
+          ('SHA256SUMS.txt', utf8.encode(manifest).length),
+        ])
+          {
+            'name': item.$1,
+            'state': 'uploaded',
+            'size': item.$2,
+            'browser_download_url':
+                '$releaseRepository/releases/download/v1.2.0/${item.$1}',
+          },
+      ];
+    final result = releaseResult(payload, '1.1.0', supported: true);
+    final base = await Directory.systemTemp.createTemp('update-stage-');
+    addTearDown(() => base.delete(recursive: true));
+    final capture = File('${base.path}/pending.jpg')
+      ..writeAsBytesSync([9, 8, 7]);
+    final transport = _FixtureTransport({
+      result.checksumUrl!: UpdateDownloadResponse(
+        200,
+        {},
+        Stream.value(utf8.encode(manifest)),
+      ),
+      result.assetUrl!: UpdateDownloadResponse(200, {
+        'content-length': '${apk.length}',
+      }, Stream.value(apk)),
+    });
+    final service = UpdateService(
+      fetchRelease: () async => payload,
+      downloadTransport: () => transport,
+      stagingDirectory: () async => base,
+      freeBytes: () async => 10 * 1024 * 1024,
+    );
+    final progress = <String>[];
+    final verified = await service.download(
+      result,
+      supported: true,
+      cancellation: UpdateDownloadCancellation(),
+      onProgress: (state, _, _) => progress.add(state),
+    );
+    expect(verified.file.readAsBytesSync(), apk);
+    expect(verified.sha256, sha256.convert(apk).toString());
+    expect(
+      verified.file.path,
+      contains('${Platform.pathSeparator}updates${Platform.pathSeparator}'),
+    );
+    expect(progress, contains('Downloading'));
+    expect(progress, contains('Verified'));
+    expect(capture.readAsBytesSync(), [9, 8, 7]);
+    expect(transport.closed, isTrue);
+  });
+
+  test(
+    'malformed, duplicate and mismatched manifests leave no partial APK',
+    () async {
+      final apk = [0x50, 0x4b, 0x03, 0x04, 1, 2, 3];
+      final name = 'BookLedger-v1.2.0-Android.apk';
+      final digest = sha256.convert(apk).toString();
+      for (final manifest in [
+        'bad line\n',
+        '$digest  $name\n$digest  $name\n',
+        '$digest  $name\n$digest  ${name.toUpperCase()}\n',
+        '${'0' * 64}  $name\n',
+      ]) {
+        final payload = release()
+          ..['assets'] = [
+            for (final entry in [
+              (name, apk.length),
+              ('SHA256SUMS.txt', utf8.encode(manifest).length),
+            ])
+              {
+                'name': entry.$1,
+                'state': 'uploaded',
+                'size': entry.$2,
+                'browser_download_url':
+                    '$releaseRepository/releases/download/v1.2.0/${entry.$1}',
+              },
+          ];
+        final result = releaseResult(payload, '1.1.0', supported: true);
+        final base = await Directory.systemTemp.createTemp('update-bad-');
+        final service = UpdateService(
+          downloadTransport: () => _FixtureTransport({
+            result.checksumUrl!: UpdateDownloadResponse(
+              200,
+              {},
+              Stream.value(utf8.encode(manifest)),
+            ),
+            result.assetUrl!: UpdateDownloadResponse(
+              200,
+              {},
+              Stream.value(apk),
+            ),
+          }),
+          stagingDirectory: () async => base,
+          freeBytes: () async => 100000,
+        );
+        await expectLater(
+          service.download(
+            result,
+            supported: true,
+            cancellation: UpdateDownloadCancellation(),
+          ),
+          throwsFormatException,
+        );
+        expect(Directory('${base.path}/updates').listSync(), isEmpty);
+        await base.delete(recursive: true);
+      }
+    },
+  );
+
+  test('download rejects unsafe redirects, HTTP errors, truncation, and low storage', () async {
+    final apk = [0x50, 0x4b, 0x03, 0x04, 1, 2, 3];
+    final name = 'BookLedger-v1.2.0-Android.apk';
+    final manifest = '${sha256.convert(apk)}  $name\n';
+    final payload = release()
+      ..['assets'] = [
+        for (final entry in [
+          (name, apk.length),
+          ('SHA256SUMS.txt', utf8.encode(manifest).length),
+        ])
+          {
+            'name': entry.$1,
+            'state': 'uploaded',
+            'size': entry.$2,
+            'browser_download_url':
+                '$releaseRepository/releases/download/v1.2.0/${entry.$1}',
+          },
+      ];
+    final result = releaseResult(payload, '1.1.0', supported: true);
+    final base = await Directory.systemTemp.createTemp('update-errors-');
+    addTearDown(() => base.delete(recursive: true));
+    Future<UpdateService> service(
+      Map<String, UpdateDownloadResponse> responses, {
+      int free = 100000,
+    }) async => UpdateService(
+      downloadTransport: () => _FixtureTransport(responses),
+      stagingDirectory: () async => base,
+      freeBytes: () async => free,
+    );
+    final redirectService = await service({
+      result.checksumUrl!: UpdateDownloadResponse(
+        200,
+        {},
+        Stream.value(utf8.encode(manifest)),
+      ),
+      result.assetUrl!: UpdateDownloadResponse(302, {
+        'location': 'https://example.com/apk',
+      }, const Stream.empty()),
+    });
+    await expectLater(
+      redirectService.download(
+        result,
+        supported: true,
+        cancellation: UpdateDownloadCancellation(),
+      ),
+      throwsFormatException,
+    );
+    final httpService = await service({
+      result.checksumUrl!: UpdateDownloadResponse(
+        429,
+        {},
+        const Stream.empty(),
+      ),
+    });
+    await expectLater(
+      httpService.download(
+        result,
+        supported: true,
+        cancellation: UpdateDownloadCancellation(),
+      ),
+      throwsA(isA<HttpException>()),
+    );
+    final shortService = await service({
+      result.checksumUrl!: UpdateDownloadResponse(
+        200,
+        {},
+        Stream.value(utf8.encode(manifest)),
+      ),
+      result.assetUrl!: UpdateDownloadResponse(
+        200,
+        {},
+        Stream.value(apk.take(4).toList()),
+      ),
+    });
+    await expectLater(
+      shortService.download(
+        result,
+        supported: true,
+        cancellation: UpdateDownloadCancellation(),
+      ),
+      throwsFormatException,
+    );
+    final lowStorage = await service({}, free: 1);
+    await expectLater(
+      lowStorage.download(
+        result,
+        supported: true,
+        cancellation: UpdateDownloadCancellation(),
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(Directory('${base.path}/updates').listSync(), isEmpty);
+  });
+
+  test('pre-canceled update creates no staged or partial file', () async {
+    final cancellation = UpdateDownloadCancellation()..cancel();
+    final apk = [0x50, 0x4b, 0x03, 0x04, 1];
+    final name = 'BookLedger-v1.2.0-Android.apk';
+    final manifest = '${sha256.convert(apk)}  $name\n';
+    final payload = release()
+      ..['assets'] = [
+        for (final entry in [
+          (name, apk.length),
+          ('SHA256SUMS.txt', utf8.encode(manifest).length),
+        ])
+          {
+            'name': entry.$1,
+            'state': 'uploaded',
+            'size': entry.$2,
+            'browser_download_url':
+                '$releaseRepository/releases/download/v1.2.0/${entry.$1}',
+          },
+      ];
+    final result = releaseResult(payload, '1.1.0', supported: true);
+    final base = await Directory.systemTemp.createTemp('update-cancel-');
+    addTearDown(() => base.delete(recursive: true));
+    final service = UpdateService(
+      downloadTransport: () => _FixtureTransport({}),
+      stagingDirectory: () async => base,
+      freeBytes: () async => 100000,
+    );
+    await expectLater(
+      service.download(result, supported: true, cancellation: cancellation),
+      throwsA(isA<UpdateDownloadCanceled>()),
+    );
+    expect(Directory('${base.path}/updates').listSync(), isEmpty);
+  });
+
+  test(
+    'debug or non-newer update result cannot enter the download flow',
+    () async {
+      final base = await Directory.systemTemp.createTemp('update-ineligible-');
+      addTearDown(() => base.delete(recursive: true));
+      final service = UpdateService(
+        downloadTransport: () => throw StateError('Network must not start.'),
+        stagingDirectory: () async => base,
+        freeBytes: () async => 100000,
+      );
+      final eligible = releaseResult(release(), '1.1.0', supported: true);
+      await expectLater(
+        service.download(
+          eligible,
+          supported: false,
+          cancellation: UpdateDownloadCancellation(),
+        ),
+        throwsFormatException,
+      );
+      final current = releaseResult(
+        release('v1.1.0'),
+        '1.1.0',
+        supported: true,
+      );
+      await expectLater(
+        service.download(
+          current,
+          supported: true,
+          cancellation: UpdateDownloadCancellation(),
+        ),
+        throwsFormatException,
+      );
+      expect(Directory('${base.path}/updates').existsSync(), isFalse);
+    },
+  );
+
+  test('download rejects release identity and filename mismatches before network access', () async {
+    final valid = releaseResult(release(), '1.1.0', supported: true);
+    final service = UpdateService(
+      downloadTransport: () => throw StateError('Network must not start.'),
+    );
+    for (final forged in [
+      UpdateResult(
+        valid.state,
+        valid.installed,
+        available: valid.available,
+        releaseUrl: 'https://example.com/releases/tag/v1.2.0',
+        assetUrl: valid.assetUrl,
+        checksumUrl: valid.checksumUrl,
+        assetName: valid.assetName,
+        assetSize: valid.assetSize,
+        checksumSize: valid.checksumSize,
+      ),
+      UpdateResult(
+        valid.state,
+        valid.installed,
+        available: valid.available,
+        releaseUrl: valid.releaseUrl,
+        assetUrl: valid.assetUrl,
+        checksumUrl: valid.checksumUrl,
+        assetName: 'BookLedger-v9.9.9-Android.apk',
+        assetSize: valid.assetSize,
+        checksumSize: valid.checksumSize,
+      ),
+    ]) {
+      await expectLater(
+        service.download(
+          forged,
+          supported: true,
+          cancellation: UpdateDownloadCancellation(),
+        ),
+        throwsFormatException,
+      );
+    }
+  });
+}
+
+class _FixtureTransport implements UpdateDownloadTransport {
+  _FixtureTransport(this.responses);
+  final Map<String, UpdateDownloadResponse> responses;
+  bool closed = false;
+
+  @override
+  Future<UpdateDownloadResponse> get(Uri uri) async =>
+      responses[uri.toString()]!;
+
+  @override
+  void close() => closed = true;
 }
