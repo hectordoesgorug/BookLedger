@@ -1,10 +1,12 @@
 # BookLedger v1.2.0-rc1 candidate report
 
-**Candidate status:** Ready for Publication Authorization, with disclosed verification limitations
-**Publication authorization:** Pending separate approval; no release has been published.
+**Candidate status:** Published as stable v1.2.0, with disclosed verification limitations
+**Publication:** Approved and published on November 21, 2026 as [BookLedger v1.2.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0).
 **Preparation date:** November 21, 2026
 
-The candidate was prepared from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4` and is represented by commit `4b486a5eaf2ef83a304860d7c464220a97aba004` on `main`. At final review, branch `main` is at `d4f918113e97ea6fea04f84d68837e9bc0e21004`. The accepted rc1 artifacts and published v1.1.0 assets remain unchanged. The repository README now uses final v1.2.0 asset names, which resolve only after publication.
+This report preserves the prepublication checks, approval gates, and staging details as historical evidence. References below to pending publication, branch positions, and local artifact paths describe those reviews, not the current repository or local filesystem. Subsequent stable publication and independent asset verification are recorded in the [release checklist](RELEASE_CHECKLIST_v1.2.0.md#stable-release-publication-and-independent-verification--2026-11-21) and [test report](../TEST_REPORT.md#v120-stable-publication-and-independent-verification--2026-11-21). The documented acceptance limitations remain unchanged.
+
+The candidate was prepared from the source following readiness audit commit `bc66de2e57e5004164e1a622daac2c2bfdbe8fb4` and is represented by commit `4b486a5eaf2ef83a304860d7c464220a97aba004` on `main`. At the initial final review, branch `main` was at `d4f918113e97ea6fea04f84d68837e9bc0e21004`. The accepted rc1 artifacts and published v1.1.0 assets were unchanged during that review. The repository README used final v1.2.0 asset names in preparation for publication.
 
 ## Version and toolchain
 
