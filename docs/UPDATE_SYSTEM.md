@@ -1,8 +1,8 @@
 # Update discovery and installation design
 
-## Implemented discovery
+## Release discovery
 
-Stage 1 performs an explicit user-triggered, unauthenticated HTTPS GET to `https://api.github.com/repos/hectordoesgorug/BookLedger/releases/latest`. It uses GitHub's designated latest stable release, rather than scanning tags or assuming release publication dates are semantic version order. GitHub's [latest-release contract](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) excludes drafts and prereleases; both clients also reject those flags and prerelease tags if returned unexpectedly. No startup timer, provider lookup, telemetry, inventory or configuration write initiates a check.
+The applications perform an explicit user-triggered, unauthenticated HTTPS GET to `https://api.github.com/repos/hectordoesgorug/BookLedger/releases/latest`. They use GitHub's designated latest stable release, rather than scanning tags or assuming release publication dates are semantic version order. GitHub's [latest-release contract](https://docs.github.com/en/rest/releases/releases#get-the-latest-release) excludes drafts and prereleases; both clients also reject those flags and prerelease tags if returned unexpectedly. No startup timer, provider lookup, telemetry, inventory or configuration write initiates a check.
 
 Desktop uses `services/updates.py`; Android uses `updates/update_service.dart`. Both compare semantic major/minor/patch versions numerically, implement prerelease identifier precedence, ignore build metadata for precedence, and reject malformed versions and numeric identifiers with leading zeroes. Responses are limited to 2 MiB, network operations have five-second timeouts, and errors never imply that the installation is up to date. Desktop reads run in a daemon worker and return through a queue polled on Tk's thread; Flutter networking is asynchronous. Closing the UI discards late results. Notes are plain selectable/scrollable text, never executable HTML.
 
@@ -54,82 +54,101 @@ The selected `SHA256SUMS.txt` must be from the same release URL, decode as ASCII
 
 The download feature does not extract an archive, install an APK, request package-installer permission, modify the live application, or touch library, backup, pairing, configuration, photo, poster, or pending-capture data. It cannot terminate a process, acquire an installation lock, select owned files, replace an executable, change a library, or relaunch anything. Tests use synthetic ZIP/APK payloads and disposable storage. A production installation protocol remains a separate design and validation stage.
 
-## Proposed Windows installation protocol
+## Installation architecture
 
-This section is an implementation proposal, not an active update path.
+The following protocol is a design proposal; no updater helper, installer handoff, or application replacement is active. A verified download is not installable by default. The current v1.1.0 assets have no signed installation manifest and remain ineligible even when their checksums match.
 
-```mermaid
-flowchart TD
-  A[Explicit confirmation] --> B[Download and verify official assets]
-  B --> C[Validate inventory and stage outside live files]
-  C --> D[Prepare journal and retain old files]
-  D --> E[Clean shutdown and wait for process exit]
-  E --> F[Helper acquires exclusive update and library locks]
-  F --> G[Replace declared application files]
-  G --> H[Relaunch and check startup health]
-  H --> I[Commit transaction and retain recovery copy]
-  G -->|Failure or interruption| R[Recover from journal]
-  H -->|No health confirmation| R
-```
+### Release manifest version 1
 
-### Release and helper contract
+Each future stable release that supports installation must publish `update.json` and its detached `update.json.sig` beside the existing assets and `SHA256SUMS.txt`. The signature covers the exact UTF-8 bytes of `update.json`, serialized with [JSON Canonicalization Scheme (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785), using Ed25519 ([RFC 8032](https://www.rfc-editor.org/rfc/rfc8032)). Reject duplicate JSON keys, invalid UTF-8, noncanonical bytes, unknown protocol versions, missing required fields, and fields marked critical that the client does not understand. The signed object contains:
 
-Future releases must add versioned `update.json` metadata and per-file ownership inventories alongside the existing checksums. Minimum fields are protocol version, minimum helper version, target OS/architecture/flavor, semantic application version, expected executable identity, supported database schema range, archive name/size/hash, and an inventory of file paths, roles, lengths and hashes. The Android section separately declares application ID, versionName, versionCode, ABI support, minimum SDK and signer certificate digests/approved lineage. Unknown protocol/helper versions must be rejected before download or shutdown; old clients can still open the release page. Current release assets lack this contract and therefore cannot be assumed eligible for automatic installation.
-
-Confirmation must identify version, package flavor, data-preservation plan, backup/recovery location, required free space and restart. Use only the verified repository release paths; allow download redirects only to specifically documented GitHub asset hosts over HTTPS, reject arbitrary redirects, never send provider credentials, and enforce time/size limits. Stream into a new private `.partial` file, compute SHA-256 while reading, compare with the exact official `SHA256SUMS.txt` entry and declared byte count, then atomically rename. Failure leaves no installable candidate. Download interruption can be discarded or resumed only after validating release identity/range support and rehashing the entire result.
-
-Checksums hosted beside assets protect against transfer corruption and asset mixups, not a compromised repository/account. A production trust design must additionally address signed manifests/Windows code signatures, trust-key distribution/rotation and signer continuity; a new signer is not silently accepted. The helper itself must have a trusted identity and reside outside the files being replaced. An old process must not execute an unverified helper received from the new archive.
-
-### Paths, ownership and packaging
-
-Create a transaction-specific staging/recovery directory outside live application files, preferably a private sibling on the same volume for rename semantics. Bind the transaction to canonical installation root, original executable path, parent PID plus process identity, package flavor, versions, nonce and verified inventory digests. The helper must reject symlinks/junctions/reparse points, root substitution and paths outside the exact installation/staging roots. Recheck final filesystem identity immediately before changes; do not trust only a previously resolved string path or a reused PID.
-
-An explicit old/new application ownership inventory is required. Only declared files with matching expected identity can be replaced or retired. A newly declared file colliding with an existing unowned file is a conflict, not permission to overwrite it. Removal applies only to obsolete files listed in the old trusted inventory. Never recursively mirror or extract over the portable folder.
-
-- **One-file:** stage the new executable externally; wait until the old executable and PyInstaller extraction child have exited. Retain the old executable in recovery before replacing it. Never treat a temporary `_MEIPASS` directory as the installation root.
-- **One-folder:** stage the complete new `_internal` tree and executable together. Preserve the complete old runtime and switch it with the executable under the journal. Mixed old/new runtime files must not be launched. Recheck for locked DLLs; bounded retry followed by recovery is required, not delayed arbitrary deletion at reboot.
-- **Always protected:** the entire `data/` and `backups/` trees, portable/fallback `config.json`, pairing credentials, logs, custom assets/photos/posters, the library lock, unknown user files and external signing material. A packaged empty data directory never replaces a live directory.
-- **Licenses, documentation and companion files:** update only individually declared application-managed files; preserve user additions. Never automatically install the bundled companion APK. License inventories must stay consistent with the new binary/runtime, including during rollback.
-
-### Shutdown, locking and activation
-
-Before any shutdown, verify directory writability, disk space for staged plus old versions, file ownership and archive identity. Do not request elevation or fall back to writing somewhere else when the installation is unwritable; explain manual relocation/update instead.
-
-Request the existing normal application shutdown path so transactions, mobile reception, logging and resources close. The helper waits for verified process exit and release of the library handle, then holds both an update mutex and the existing library lock while changing files. A racing application launch must fail clearly or wait; releasing the library lock before launch requires a controlled handoff to the new process, not an unrestricted gap. Timeout, active capture/transfer or a process that refuses to close aborts before replacement. Do not force-kill BookLedger to release a library.
-
-Persist and flush a journal before each rename, recording old/new hashes and per-file transitions: `prepared`, `old-retained`, `new-activated`, `launching`, `healthy`, `committed` or `recovering`. Only the helper mutates application files. Revalidate hashes and paths after activation, then start the canonical executable with the original portable root/working-directory semantics and sanitized arguments. A startup handshake with transaction nonce, executable/version identity and bounded timeout confirms that the intended process launched.
-
-If replacement or startup fails before data migration, reverse completed file operations using the retained verified old inventory, check hashes again and offer to relaunch the old version. Keep recovery data until explicit policy permits cleanup; never delete user data during rollback. On power loss, a bootstrap/recovery mechanism outside replaceable files must read the durable journal before normal application startup and complete recovery idempotently. Re-running recovery cannot clobber a file whose identity changed unexpectedly.
-
-Database compatibility is a separate gate. The application currently may migrate SQLite during startup; a binary rollback alone is unsafe after such a migration. Automatic activation must refuse an unsupported schema transition until a separately validated pre-upgrade database/configuration/assets backup and recovery policy exists. Never silently restore a library snapshot or discard user changes merely because the new executable did not report healthy. The future startup health protocol must distinguish pre-migration binary health from a committed data transition.
-
-## Proposed Android installation protocol
-
-Use the official standalone APK, not a Windows archive's incidental APK. Future discovery metadata must supply trusted versionCode, package ID and signer information; semantic tags/release prose are insufficient. Read installed version/code/package and signer from Android PackageManager. A higher versionCode is mandatory even if versionName looks newer; same/lower codes and incompatible ABI/minimum SDK are rejected. See Android's [versionCode contract](https://developer.android.com/guide/topics/manifest/manifest-element#vcode).
-
-After explicit confirmation, stream to app-private staging, enforce limits and verify SHA-256 against the official manifest. Validate APK signature integrity, package `com.bookledger.mobile`, versionCode ordering, expected ABI/platform and the production signing certificate/approved rotation lineage before offering installation. Never rotate signing keys, accept a debug certificate as proof of production continuity, uninstall the app or clear storage to bypass a conflict.
-
-Warn about pending captures before download and again before leaving for installation. Session-only captures can be lost when the app process is stopped; require successful transfer or deliberate user handling before proceeding. Preserve secure pairing, preferences and app data. A checksum or installer confirmation does not prove preservation across a real production upgrade.
-
-Use Android's standard [PackageInstaller](https://developer.android.com/reference/android/content/pm/PackageInstaller) flow or supported content-URI installer intent, with only the required URI grant and normal user approval. If per-source install permission is needed, explain it and let Android present its standard settings/approval flow; do not grant it silently. Returning from permission settings must recheck permission. Cancellation, insufficient storage, signature conflict and installer failure retain the currently installed app and provide a clear result. No silent installation, shell installer, accessibility shortcut or security bypass is permitted.
-
-Version/package/checksum/signature validation, download storage lifecycle, normal permission/installer integration, cancellation recovery, post-upgrade pairing/preferences checks and physical-device acceptance are a separate stage. Stage 1 does not request install permissions, download APKs, call the installer or claim that an upgrade succeeded.
-
-## Acceptance matrix for installation work
-
-Before enabling a real updater, verify one-file and fallback fixtures plus native Windows/production Android cases:
-
-| Case | Required outcome |
+| Field | Required contents |
 | --- | --- |
-| Wrong hash, duplicate checksum entry, missing asset or substituted URL | Abort without staging an installable candidate |
-| Traversal, absolute/drive paths, symlink/reparse, ADS, reserved/colliding Windows paths, expansion bomb | Reject before writing application files |
-| Unknown helper protocol, wrong architecture/package or unowned-file collision | Unsupported update; current installation untouched |
-| User data/configuration/photos/posters/backups/licenses/companion additions | Hashes preserved except explicitly declared managed application files |
-| Read-only directory, disk full, locked executable/DLL, concurrent launch | Bounded failure and verified recovery; no partial runtime launched |
-| Crash/power loss before/after every journal transition | Idempotent recovery to a consistent old or committed new application |
-| Relaunch fails, health nonce/PID mismatch or timeout | Verified binary rollback only where data schema permits it |
-| Migration required or rollback would use an incompatible schema | Stop for the validated backup/data-recovery protocol, never silently downgrade data |
-| Android wrong signer/package, same/lower code, unknown-source permission denied or install canceled | Existing app/data retained; no uninstall/clear-data fallback |
-| Production-signed upgrade with pending captures and saved pairing/preferences | Transfer warning honored; actual device verifies data/settings/pairing behavior |
+| `format`, `protocolVersion`, `keyId` | Fixed format identifier, integer protocol version (`1`), and identifier resolving only to a client-pinned public key or a valid signed rotation chain. |
+| `release` | Exact GitHub tag, semantic version, and release-notes URL. The API release tag and URL must match. |
+| `minimumLauncherVersion` | Minimum trusted Windows launcher version needed to parse the manifest and safely activate it. |
+| `platform` | OS, architecture, and exact package flavor: Windows `x86_64` plus `onefile` (`Portable`) or `onedir` (`Fallback`); Android package `com.bookledger.mobile`. |
+| `artifact` | Exact standalone asset filename, byte size, and lowercase SHA-256. GitHub API asset name/size and the same-release checksum entry must agree. |
+| `files` | Windows-only complete inventory of application-owned relative paths inside the version payload, roles, byte sizes, and SHA-256 values, including the application executable, `_internal` contents for `onedir`, and app-owned licenses/resources. No wildcards. The stable root launcher is separately versioned and is not replaced by an application update. |
+| `dataCompatibility` | Current-readable and post-startup SQLite schema ranges, migration-required flag and target schema, plus configuration format read/write range and whether startup mutates it. |
+| `android` | Exact package ID, `versionName`, strictly increasing `versionCode`, min/target SDK, supported ABIs, current signer certificate SHA-256 and any explicitly authorized Android signing-certificate lineage. |
 
-Current automated archive fixtures verify only checksum/path/layout inspection. They do not exercise helper activation, lock handoff, file replacement, signing trust or physical installation. Native UI and installation evidence must be recorded separately from mocked results in the test report.
+The Windows inventory is rooted in the archive's expected `BookLedger/` or `Fallback/` tree and describes files that can be placed only inside a versioned application payload. Android's `artifact` is the standalone APK; never select the APK incidentally bundled in a Windows archive. Android PackageManager and the operating system's installer remain authoritative for device compatibility and installation acceptance. The manifest's SDK and ABI fields allow BookLedger to reject an incompatible candidate before leaving its UI.
+
+The client cross-checks the manifest against the official GitHub release tag, exact asset names, release metadata sizes, asset URLs, and `SHA256SUMS.txt`. Those adjacent values provide consistency and transfer checks, not publisher authentication. The signed manifest's artifact digest and file inventory authenticate the selected payload. Absence, malformed contents, unsupported critical fields, unknown key, invalid signature, mismatched metadata, or an unsupported helper version means **not installable**; retain Check for Updates and Open Release Page, and make no filesystem or app-data changes. Do not retrofit this contract onto v1.1.0 or alter historical assets.
+
+### Publisher trust and key lifecycle
+
+Use the signed manifest as the primary Windows trust mechanism because it can authenticate the complete ZIP and every extracted application file, including unsigned third-party runtime files. Authenticode verifies a signed Windows file and publisher chain, but signing only `BookLedger.exe` does not authenticate an entire PyInstaller directory. Authenticode remains useful as additional publisher evidence for the stable launcher/helper; BookLedger currently has no documented Windows Authenticode signing pipeline, so signing certificate acquisition and protected custody are prerequisites if that additional control is selected. See Microsoft's [SignTool verification guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/using-signtool-to-verify-a-file-signature) and [Authenticode timestamp guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures).
+
+Keep a long-lived Ed25519 release-signing key offline and use it to sign each manifest. Embed only its public trust anchor in the installed launcher and supported application builds. Rotate keys through a transition record signed by the old trusted key; clients verify the chain back to the pinned anchor and reject unannounced replacements. Never accept a new key merely because it appears in a GitHub release. Do not place the private key in the repository, build artifacts, or routine CI environment. If it is lost or compromised, fail closed; recovery requires a separately authenticated launcher/application bootstrap or documented manual installation. The existing v1.1.0 installation has no pinned manifest key, so it cannot securely authenticate its first helper or automatically adopt this protocol. It needs a one-time manual trust transition to a package containing the trusted launcher and ownership metadata. That bootstrap does not have the manifest's in-band protection; do not claim automated authenticity until an independent bootstrap trust method is selected.
+
+The Android package ID and current release identity are `com.bookledger.mobile`, version `1.1.0`, version code `2`, min SDK `24`, and target/compile SDK `36`. `mobile/pubspec.yaml` supplies the version, while the current Flutter Gradle extension supplies SDK defaults. The release-candidate verification report records signer certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`, matching the documented v1.0.0 production certificate. Before an installer is enabled, independently inspect the exact published v1.1.0 APK and record its signer/lineage through `apksigner`; do not inspect or export private signing keys. Android's [SigningInfo](https://developer.android.com/reference/android/content/pm/SigningInfo) exposes current signers and Android-validated certificate history. A higher Android [`versionCode`](https://developer.android.com/guide/topics/manifest/manifest-element#vcode) is required for an update. Fail closed on absent or ambiguous signer metadata, a debug signer, package mismatch, unsupported rotation, or a different production certificate.
+
+As of November 21, 2026, Google's [Android developer verification rollout](https://developer.android.com/developer-verification) applies from September 30, 2026 to installs through participating stores in Brazil, Indonesia, Singapore, and Thailand; Google's [FAQ](https://developer.android.com/developer-verification/guides/faq) says direct sideloads are not in that initial enforcement. Google plans a global expansion in 2027. BookLedger distributes APKs directly, so before that broader rollout the project should register `com.bookledger.mobile` through Android Developer Console or another supported route and prove package ownership with the existing signing identity. Public GitHub distribution is not a good fit for the limited-distribution account capped at 20 devices. The account path and registration must be resolved before global enforcement; do not access the signing key as part of this design task. The app must not bypass Android's user-facing verification or advanced sideloading flow if a device requires it.
+
+### Windows package and recovery architecture
+
+Do not unpack over either existing Windows layout. A multi-file in-place replacement cannot make a fallback executable and `_internal` runtime change atomically. Future portable packages should add a stable, signed `BookLedgerLauncher.exe` at the portable root and place complete immutable releases under `versions/<release-id>/`. The one-file version directory contains `BookLedger.exe`; the one-folder version directory contains `BookLedger.exe` and the complete `_internal/` tree. `data/`, `backups/`, `config.json`, logs, custom files, and the existing `.bookledger-instance.lock` remain in the portable root. The launcher passes that canonical root explicitly to the app; `AppPaths` currently derives it from `sys.executable`, so supporting this layout requires a documented `--portable-root` argument and tests for every path consumer.
+
+The launcher is the stable bootstrap, update mutex owner, and recovery entry point. It starts and supervises the versioned app; installation requests return through a same-user, ACL-protected IPC channel bound to the active process instance, not a user-supplied arbitrary path. On confirmation, the app uses its normal shutdown path and exits cleanly. The launcher waits for the child process and library lock to be released; it does not kill the app. The launcher keeps the per-install update mutex throughout activation. A launcher-started app accepts an update nonce only from that launcher instance; other launcher starts wait or fail while the mutex is held. The app also checks the existing exclusive library lock, so a direct or racing executable cannot open the same library during activation. Failure to acquire either lock aborts without changing the active version.
+
+Revalidate the selected install root, volume identity, junction/reparse status, launcher identity, package flavor, signed manifest, downloaded ZIP, and available space immediately before activation. Check space on the download and install volumes for the archive, extracted tree, and retained previous version. Reject read-only or ambiguous roots and never request elevation or silently choose a different directory. Copy the verified archive to a transaction-specific staging directory on the installation volume, rehash it, and extract only into a new `versions/.staging-<nonce>/` directory. Validate every path, declared size/hash, ZIP CRC, required executable/runtime, and absence of protected paths before renaming that complete tree to a unique version directory. Reject collisions; do not overwrite or delete unknown files. The app updater never extracts into the portable root.
+
+After the new version is complete, write and flush a transaction journal containing the install-root identity, old/new version IDs, manifest digest, schema/config compatibility, and state. Atomically replace a small `active.json` pointer via a flushed same-volume temporary file and Windows `ReplaceFile` or an equivalent tested replacement primitive ([Microsoft file replacement guidance](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-and-replacing-files)). The immutable previous version stays in place. If the pointer is old, continue using old; if it names a fully verified new tree, launch it. If the journal or pointer is corrupt or references an incomplete tree, stop and preserve evidence unless a valid journal identifies a fully verified old tree. Never guess a recovery target. Never recursively clean old versions. Remove an old version only through a later explicit cleanup action after verifying every file against its trusted inventory and confirming no unknown/user files exist.
+
+On launch, the launcher verifies the active version against its signed manifest and starts the canonical executable with the portable root, sanitized arguments, a one-time health nonce, and its PID/version identity. The app reports health only after database/config startup validation and UI initialization. If launch or handshake fails, the launcher may restore the previous active pointer only when the new app has not changed data and the old app declares compatibility with the current database/configuration. A fixed timeout is an implementation setting, not evidence of health by itself. Keep at least the active and prior version; preserve staging/recovery evidence when ownership is uncertain. The current v1.1.0 direct-executable package has neither this launcher layout nor an authenticated ownership receipt and is not eligible for automated activation.
+
+### Database, configuration, and backup gate
+
+The current repository database schema is `14`; `Database` applies sequential SQLite migrations at startup. `BackupService.create_backup()` creates and verifies an archive containing the database, photos, trash, managed assets, configuration, poster backgrounds, and posters. It does not make a binary rollback safe after that database has been migrated. Backups are not encrypted and can contain provider credentials.
+
+The first automatic activation protocol must accept only releases whose declared schema/config ranges include the current data and whose startup requires no schema migration or configuration-format rewrite. For any future release that changes schema or config, show the migration and recovery plan, require a freshly verified backup with a user-visible path before installation, and stop if backup creation or validation fails. Do not automatically restore a backup: restore replaces current data and requires a separate, explicit user decision after explaining that post-backup edits would be lost. If the new app fails after a schema migration, do not launch an older binary unless the signed compatibility declaration says it can read the new schema. Otherwise retain the migrated data and backup, block older startup, and provide a forward-repair/manual recovery route. No silent data downgrade or rollback is allowed.
+
+### Android installer handoff
+
+Download only the standalone APK to the existing app-private staging directory. Before presenting installation, verify the manifest signature and artifact hash, parse and verify the APK signature, then compare candidate package ID, `versionName`, strictly higher `versionCode`, min SDK, target SDK, ABI, and signer/approved lineage with PackageManager data for the installed app and device. Android's package installer must revalidate the signature at installation. A newer semantic tag with an equal or lower version code is not installable; do not uninstall or clear app data to bypass any conflict.
+
+After a second explicit **Install** confirmation, use Android `PackageInstaller` sessions and set user action to required on API 31 and later; on older supported Android versions use the platform's normal approval flow and never request a no-user-action install. Do not request `UPDATE_PACKAGES_WITHOUT_USER_ACTION`. Declare `REQUEST_INSTALL_PACKAGES` only as part of the separately reviewed installer implementation; check `canRequestPackageInstalls()` where available and, if needed, explain Android's per-source setting before linking to its system UI. Returning from settings must recheck the permission. Write the already verified APK into a package-installer session and handle pending-user-action, success, user cancellation, blocked/invalid/incompatible installs, storage failure, and timeout. See Android's [PackageInstaller](https://developer.android.com/reference/android/content/pm/PackageInstaller), [`SessionParams.setRequireUserAction`](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams), and [package-install permission check](https://developer.android.com/reference/android/content/pm/PackageManager#canRequestPackageInstalls()). A content-URI installer intent is a fallback only; it requires an app-private `FileProvider` path and a temporary read-only URI grant, never `file://` or broad storage permission. If an API level cannot provide the required verified, user-approved handoff, keep the APK download-only on that device.
+
+Before leaving the app, warn that pending captures are session-only; offer transfer/retry and an explicit choice to proceed understanding they may be lost. Installation must not clear captures, pairing, preferences, secure storage, or app data. Cancellation before session commit abandons the session and leaves the current app unchanged; once control is in Android's installer, the user decides there. On return/relaunch, verify the installed version/code, database integrity, settings/pairing presence, and normal desktop reconnection. Report install success only after PackageInstaller success and PackageManager confirms the new identity. Installer success alone does not prove data continuity. Android does not provide this app a safe automatic downgrade path; failed post-install startup requires forward repair or a separate user-approved backup recovery, never silent uninstall/downgrade.
+
+### Implementation sequence and readiness
+
+1. Define and independently review the version-1 manifest schema, offline signing-key custody/rotation policy, and trust-bootstrap method. Create test-only signing keys and synthetic artifacts for automated verification.
+2. Refactor Windows packaging for the stable launcher, immutable version directories, explicit portable-root handoff, signed ownership receipts, update mutex, journal, and startup health channel. Test the launcher/helper independently before UI integration.
+3. Implement Windows activation only for signed, schema/config-compatible packages; test crash recovery and preserve all user-controlled paths.
+4. Add Android manifest/APK validation and user-approved PackageInstaller flow; declare only needed permission and verify certificate lineage against the exact production APK on a disposable device.
+5. Resolve and complete Android developer/app registration before the global verification rollout; verify the normal and any applicable advanced installation flows without bypassing user controls.
+6. Complete native acceptance on disposable Windows installations and a production-signed Android test installation; then consider enabling the flow for real installations.
+
+Offline helper design and fixture work can begin. Production activation is **not ready** until the Windows trust-bootstrap/key-custody choice is settled, the new package layout and portable-root handoff are implemented, the exact published Android signer is independently confirmed, Android developer/app registration is planned, and both platform recovery flows pass native acceptance. Android schema-changing releases remain ineligible until forward-recovery and backup safeguards are implemented and accepted.
+
+## Acceptance matrix
+
+Each case must run with disposable installations and synthetic package data before real-library testing. Success means the stated outcome plus unchanged hashes for every protected file and unchanged user data.
+
+| Scenario | Required result |
+| --- | --- |
+| Valid Windows one-file update | Full signed payload stages in its own immutable version directory; pointer switches; launcher health check passes; prior version remains. |
+| Valid Windows fallback update | Complete executable and `_internal` directory activate together; no mixed runtime can launch. |
+| Existing executable or DLL locked | Abort before pointer switch; active version and data remain usable. |
+| A second BookLedger launch races with activation | Launcher mutex or library lock rejects it; no second process opens the same library. |
+| Updater process exits unexpectedly | The next launcher run inspects the flushed journal and selects only a complete, verified version. |
+| Power is interrupted at every journal/pointer transition | Recovery is idempotent; old or new complete version starts, never a partial tree. |
+| Insufficient space or read-only volume | Abort before shutdown or activation; current app/data remain intact and explain manual relocation. |
+| Install root moved or reparse-point substituted | Reject the changed volume/path identity before file operations. |
+| Corrupted, substituted, unsigned, or wrong-key package | Signature/hash check fails before extraction or execution. |
+| Wrong flavor or architecture | Mark unsupported; preserve the installed version and data. |
+| Inventory collides with an unknown file | Reject the candidate; preserve the conflicting file and all other user files. |
+| Manifest missing, malformed, or uses an unknown protocol/helper version | Keep current app and release-page access; offer no install candidate. |
+| User content, custom assets, licenses, docs, bundled APK, or unknown files in root | Add only declared files inside a new version directory; preserve all root/user files. |
+| New app fails signature or startup health check | Restore old pointer only if data schema/config is unchanged and supported; otherwise stop and offer forward recovery. |
+| Database migration or config rewrite is required | Require a verified backup and explicit approval; never auto-restore or start an incompatible old binary. |
+| Valid Android production-signed upgrade | Verify package, higher code, SDK/ABI and signer lineage; require installer approval; verify version and pairing/preferences after return. |
+| Android wrong signer or package ID | Reject before installer; installed app and data remain unchanged. |
+| Android same/lower versionCode or unsupported SDK/ABI | Reject before installer; report why; do not uninstall or clear app storage. |
+| Android permission denied, installer canceled, or installation blocked | Show a recoverable result; keep current install; do not uninstall, clear data, or retry automatically. |
+| Android pending captures at install time | Warn and offer transfer; require a separate deliberate proceed choice if captures remain; never clear them or claim durability. |
+
+Required automated coverage includes manifest parser/signature/key-rotation tests; Windows package inventory/path/CRC tests, update mutex and journal fault injection at every transition, interrupted restart recovery, and protected-path hash comparisons; Android APK metadata/signature/version/SDK rejection tests, PackageInstaller status/cancel/permission paths, and preservation checks for secure pairing, preferences, and capture storage. Native acceptance must separately test a production-signed upgrade and post-install relaunch. The current verified-download tests do not exercise these installer, replacement, rollback, signing-trust, or native scenarios.
