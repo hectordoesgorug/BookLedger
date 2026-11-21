@@ -218,7 +218,24 @@ def test_form_minimum_size_keeps_scrollable_content_reachable(form):
     default_preview_height = widget.photo_panel.winfo_height()
     assert widget.metadata_status_panel.winfo_y() + widget.metadata_status_panel.winfo_height() <= widget.right_panel.winfo_height()
 
+    parent_configured = tk.BooleanVar(root)
+    parent_wait = tk.BooleanVar(root)
+
+    def on_parent_configure(event):
+        if event.widget is root and (event.width, event.height) == (400, 300):
+            parent_configured.set(True)
+            parent_wait.set(True)
+
+    parent_binding = root.bind("<Configure>", on_parent_configure, add="+")
+    parent_timeout = root.after(2000, lambda: parent_wait.set(True))
     root.geometry("400x300+0+0")
+    try:
+        if (root.winfo_width(), root.winfo_height()) != (400, 300) or not parent_configured.get():
+            root.wait_variable(parent_wait)
+    finally:
+        root.after_cancel(parent_timeout)
+        root.unbind("<Configure>", parent_binding)
+    assert parent_configured.get()
     resize(960, 700)
     canvas = widget.body.master
     canvas.update_idletasks()
