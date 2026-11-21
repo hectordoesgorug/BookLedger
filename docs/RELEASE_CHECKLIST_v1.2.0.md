@@ -39,10 +39,14 @@
 ## Candidate staging and native acceptance
 
 - [x] Standalone APK, both Windows ZIPs, and `SHA256SUMS-rc1.txt` staged under `dist/v1.2.0-rc1/` and verified from final bytes.
-- [ ] Physical acceptance of the exact candidate recorded separately.
-- [ ] v1.1.0 production upgrade, data/pairing preservation, capture, transfer, and installer behaviors remain pending until tested on isolated data.
-- [x] Wireless ADB inspection found one authorized Android 16/API 36 device with production `com.bookledger.mobile` version `1.1.0+2`; no install, uninstall, data clear, or app modification was performed.
-- [ ] No newer stable release exists to test a v1.2.0-to-later update.
+- [ ] Full physical acceptance of the exact Windows candidate is complete. Partial PASS/PARTIAL/SKIPPED results are recorded in `docs/RELEASE_CANDIDATE_v1.2.0-rc1.md`; sales workflows, offline behavior, minimum-window review, and some content/restore checks remain untested.
+- [x] Isolated v1.1.0-to-v1.2.0 manual replacement checks passed for Portable executable-only replacement and Fallback executable plus complete `_internal/` replacement. Test books, cover photos, and pre-upgrade backups remained visible/present.
+- [ ] Customized settings preservation and restoring the pre-upgrade backup after package replacement remain unverified for both Windows package types.
+- [x] Read-only wireless ADB preflight confirmed one authorized POCO X6 5G, Android 16/API 36, production `com.bookledger.mobile` v1.1.0+2, and 226 GB free on `/data`.
+- [x] After owner approval, `adb install -r` updated the production package in place to v1.2.0+3; Package Manager retained the original first-install time, and the installed APK bytes and signing certificate match the staged candidate.
+- [ ] Existing pairing state, settings and captures were not inventoried before the upgrade. The post-upgrade home page showed `Not paired`; prior pairing preservation cannot be determined. No captures were created or modified.
+- [ ] Mobile Settings update control, live release check, network-failure handling, repeated checks, light/dark presentation, capture transfer and in-app installer handoff remain unverified.
+- [x] The Portable candidate's live stable-release check reported v1.1.0 as current and no newer stable release to test an update to.
 
 ## Distribution safeguards
 

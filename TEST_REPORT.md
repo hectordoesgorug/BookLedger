@@ -605,3 +605,41 @@ The regression test now drains pending idle and window events after confirming t
 - `.venv\Scripts\python.exe -m pytest -q -rs` — **675 passed, 19 skipped, 0 failed**. Skips are Tk/display-dependent checks blocked by missing Tcl/Tk files, including `entry.tcl`, `icons.tcl`, and `ttk/sizegrip.tcl`.
 
 These are automated results from the current Windows test environment. They do not establish behavior on other Windows display configurations or replace manual visual acceptance. No Android checks were repeated because no Android code changed.
+
+## v1.2.0-rc1 physical acceptance (November 21, 2026)
+
+All three staged rc1 artifact SHA-256 values were recomputed and matched `dist/v1.2.0-rc1/SHA256SUMS-rc1.txt`. The candidate ZIPs and APK were not modified. Windows tests used freshly extracted Portable and Fallback packages, isolated profiles and disposable libraries; covers were synthetic.
+
+### Fresh Windows candidate checks
+
+| Check | Portable | Fallback |
+| --- | --- | --- |
+| Fresh extraction, launch, version 1.2.0 display, normal exit | **PASS** | **PASS** |
+| Intake, edit, search, and cover photo | **PASS** | **PASS** |
+| Catalog | **PASS** | **PASS** |
+| Inventory, Acquisitions, Sale History, Reports navigation | **PASS** | **SKIPPED** |
+| Sales transaction and report-content accuracy | **SKIPPED** | **SKIPPED** |
+| Description shortening | **PASS**; reviewed and selected in an unsaved form | **SKIPPED** |
+| ISBN metadata | **PARTIAL**; Open Library and Archive.org returned fields, while Google Books and Booktopia reported provider/HTTP errors | **SKIPPED** |
+| Currency change and conversion | **PASS**; isolated PHP-to-USD conversion updated the displayed amount | **SKIPPED** |
+| Backup creation | **PASS** | **PASS** |
+| Backup restore and restart persistence | **PASS**; restored disposable data/configuration and relaunched | **SKIPPED** |
+| Single-instance enforcement | **PASS** | **SKIPPED** |
+| Update page, release information and latest stable check | **PASS**; live check reported installed 1.2.0 and latest stable 1.1.0 | **SKIPPED** |
+| Offline/network failure and minimum-window reachability | **SKIPPED** | **SKIPPED** |
+
+The metadata and shortening dialogs were canceled after inspection, so neither changed the test library. The Fallback package's initial launch displayed a Windows Firewall prompt; it was canceled without changing firewall settings.
+
+### Manual Windows package replacement
+
+The v1.1.0 Portable and Fallback packages were extracted separately and given disposable books, synthetic cover photos and pre-upgrade backups. For Portable, only `BookLedger.exe` was replaced. For Fallback, `BookLedger.exe` and the complete `_internal/` directory were replaced together; the old runtime directory was preserved separately in the isolated test folder. In each case the rc1 app relaunched as v1.2.0, showed the existing book and cover, and retained the backup file. Both replacement paths **PASS** for the exercised data-retention checks.
+
+Customized v1.1.0 settings were not changed before either replacement, and the pre-upgrade backups were not restored after replacement. Those checks are **SKIPPED**; the package tests establish book/photo/backup-file retention, not custom-setting migration or cross-version restore compatibility.
+
+### Android in-place update
+
+Wireless ADB identified an authorized POCO X6 5G (`23122PCD1G`) on Android 16/API 36. Before installation, production `com.bookledger.mobile` was v1.1.0+2, version code 2, and not debuggable. The candidate was v1.2.0+3, version code 3, min SDK 24 and target SDK 36. The pre-update installed APK and candidate signing certificate SHA-256 matched `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`. `/data` reported 226 GB available of 462 GB.
+
+After explicit owner approval, `adb install -r` completed with `Success`. Package Manager reported `versionName=1.2.0`, `versionCode=3`, and the original `firstInstallTime`. A read-only pull of the installed base APK had SHA-256 `73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752`, identical to the staged APK; `apksigner` reported the same certificate SHA-256 as the candidate. The app launched and displayed `BookLedger Mobile · v1.2.0`, and the About page displayed the same version. No uninstall or data clear was performed and no captures were created or modified.
+
+The post-upgrade home page displayed `Not paired`. Because pairing status was not recorded before installation, this does not establish whether a previous pairing was preserved or lost. Existing settings and captures were not inventoried before or after the update. Settings update control, live release check, network-failure handling, repeated checks, light/dark presentation, capture transfer and in-app installer handoff remain **unverified**. The successful ADB replacement does not test the in-app installation flow. The candidate remains **Ready for Physical Acceptance**, not approved for release. Skipped Windows flows and these Android checks remain acceptance work; no automated suites were rerun for this documentation update.

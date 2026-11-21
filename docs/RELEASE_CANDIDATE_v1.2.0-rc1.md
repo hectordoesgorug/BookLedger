@@ -77,12 +77,52 @@ The Portable executable is 25,480,919 bytes. In diagnostic runs, the one-file bo
 
 **Classification: Environmental limitation (process-selection error in the measurement harness).** Watching only the process returned by `Start-Process` did not find a window even though the PyInstaller child already displayed the dashboard; that probe could wait past 120 seconds while monitoring the windowless parent. This explains the long wait in the initial investigation probe. The earlier reported >120-second observation is consistent with the same error, but its original instrument was unavailable, so its exact provenance cannot be confirmed. No application or packaging change is indicated by these runs. No Defender event or performance trace was collected, so small run-to-run variation is not attributed to antivirus scanning or a specific disk bottleneck.
 
-## Device checks and remaining limits
+## Windows physical acceptance — November 21, 2026
 
-Read-only ADB diagnostics found one authorized POCO X6 5G running Android 16/API 36 with production `com.bookledger.mobile` version `1.1.0+2`, not debuggable. No package was installed, removed, replaced, or cleared, and no pairing state or captures were modified.
+The exact staged Portable and Fallback ZIPs were extracted into isolated test directories and run with disposable library/profile data. All three staged artifact SHA-256 values were recomputed and matched `SHA256SUMS-rc1.txt`; none of the candidate artifacts was changed.
 
-Production-signed in-place upgrade, settings/pairing preservation, camera/scanning, capture transfer, Android installer prompts, and update installation remain unverified on a device. No newer stable release exists to test a v1.2.0-to-later update. Desktop physical acceptance beyond the fresh-extraction startup check also remains pending. The 18 Tcl/Tk skips and 21 Flutter analysis infos remain as reported above.
+| Check | Portable | Fallback |
+| --- | --- | --- |
+| Fresh extraction, launch, v1.2.0 display, normal exit | **PASS** | **PASS** |
+| Book intake, edit, search, and photo preview/catalog handling | **PASS** | **PASS** |
+| Catalog navigation | **PASS** | **PASS** |
+| Inventory, Acquisitions, Sale History, Reports navigation | **PASS** | **SKIPPED** |
+| Sales transaction workflow and report-content accuracy | **SKIPPED** | **SKIPPED** |
+| Description shortening | **PASS** (comparison reviewed; shortened text selected in an unsaved form) | **SKIPPED** |
+| ISBN metadata lookup | **PARTIAL** (title, author, genre, edition, publisher and page count returned; Open Library and Archive.org succeeded, while Google Books and Booktopia reported provider/HTTP errors) | **SKIPPED** |
+| Currency selection and conversion | **PASS** (isolated PHP-to-USD conversion; displayed value updated) | **SKIPPED** |
+| Backup creation | **PASS** | **PASS** |
+| Backup restoration and restart persistence | **PASS** (restored the isolated library/configuration and relaunched; book and USD display remained) | **SKIPPED** |
+| Single-instance enforcement | **PASS** | **SKIPPED** |
+| Update page, current version, stable-release result and release notes | **PASS** (live check reported installed 1.2.0, latest stable 1.1.0 and no newer release) | **SKIPPED** |
+| Offline/network-failure message | **SKIPPED** | **SKIPPED** |
+| Minimum-window-size reachability review | **SKIPPED** | **SKIPPED** |
+
+The metadata and shortening forms were canceled after review, so those results did not alter the disposable catalog. The provider errors did not prevent the successful providers from filling metadata. The live update request was made from the isolated Portable test app. The test app's first Fallback launch displayed a Windows Firewall prompt; it was canceled without changing firewall settings.
+
+### Manual v1.1.0-to-v1.2.0 upgrade
+
+Both upgrade checks used separately extracted v1.1.0 packages and disposable libraries. Each v1.1.0 library contained a book, synthetic cover photo, and a backup created before replacement. The exact candidate package contents were then applied following the documented manual replacement steps.
+
+| Check | Portable | Fallback |
+| --- | --- | --- |
+| Replace only `BookLedger.exe` / replace `BookLedger.exe` and complete `_internal/` | **PASS** | **PASS** |
+| Relaunch at version 1.2.0 | **PASS** | **PASS** |
+| Existing book and photo remain visible | **PASS** | **PASS** |
+| Pre-upgrade backup remains present | **PASS** | **PASS** |
+| Customized v1.1.0 settings survive replacement | **SKIPPED** (no custom setting was changed in the source library) | **SKIPPED** (no custom setting was changed in the source library) |
+| Restore the pre-upgrade backup after replacement | **SKIPPED** | **SKIPPED** |
+
+These results verify library and photo retention for both documented replacement methods and preservation of the pre-upgrade backup files. They do not establish preservation of customized settings or restore compatibility across these particular package replacements.
+
+## Android in-place update — November 21, 2026
+
+Read-only preflight identified an authorized POCO X6 5G (`23122PCD1G`, Android 16/API 36) connected over wireless ADB. Before installation, production `com.bookledger.mobile` was version `1.1.0+2`, version code 2, and not debuggable. The candidate APK is version `1.2.0+3`, version code 3, min SDK 24, target SDK 36, and not debuggable. The installed pre-update APK and candidate had matching signing certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`.
+
+`/data` reported 226 GB available of 462 GB. After owner approval, `adb install -r` installed the exact candidate APK successfully as an in-place update. Package Manager reported version name `1.2.0`, version code 3, and an unchanged `firstInstallTime`. The installed APK was pulled read-only; its SHA-256 exactly matched the staged APK (`73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752`) and its signer certificate matched the candidate. The app launched and displayed `BookLedger Mobile · v1.2.0`; the About page also displayed v1.2.0. No uninstall or data clear was performed, and no captures were created or modified.
+
+The home page displayed `Not paired` after the update, but the pairing state was not recorded before installation, so preservation or loss of a prior pairing cannot be determined. Existing captures and user settings were not inventoried before or after the update. The mobile Settings update control, release check, network-failure message, repeated checks, and light/dark presentation remain unverified. The `adb install -r` command confirms package replacement, not the in-app update installer flow. No newer stable release exists to test a v1.2.0-to-later update. The 18 Tcl/Tk skips and 21 Flutter analysis infos remain as reported in Automated verification above.
 
 ## Candidate assessment
 
-**Ready for Physical Acceptance.** All three versioned candidate assets and a checksum manifest are staged in `dist/v1.2.0-rc1/`; the Portable startup delay was not reproduced with process-tree-aware measurement and does not currently block physical acceptance. This classification is not release approval. Android upgrade and feature acceptance remain pending. No release tag, issue change, or GitHub Release has been made.
+**Ready for Physical Acceptance.** All three versioned candidate assets and a checksum manifest are staged in `dist/v1.2.0-rc1/`, and the staged hashes were rechecked during Windows acceptance. The Portable startup delay was not reproduced with process-tree-aware measurement. Windows fresh-package checks and both isolated manual replacement checks passed for the exercised book/photo/backup paths. Full Windows acceptance remains incomplete because sales workflows, offline behavior and minimum-size reachability were skipped; customized-setting preservation and post-upgrade backup restoration were not checked. The Android production APK updated in place and the installed bytes match the candidate, but pairing, settings, captures and update-interface behavior remain unverified. This classification is not release approval. No release tag, issue change, or GitHub Release has been made.
