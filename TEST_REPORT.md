@@ -650,13 +650,13 @@ The owner reports no issues during additional manual testing. The scenarios were
 
 No release-blocking defect was identified in the available automated results or the behaviors directly exercised on Windows and Android. Remaining nonblocking exceptions are incomplete Windows scenario coverage (including sales transactions, report accuracy, offline handling and minimum-window reachability), settings migration and cross-version backup restoration, and unverified Android pairing/settings/capture baselines and feature flows. The Android home page showed `Not paired`, but the pre-upgrade state is unknown. The desktop full suite recorded 18 Tcl/Tk skips. Flutter analysis exited 1 with 21 informational deprecations, no warnings and no errors. These limitations are suitable for an explicit release decision, but the owner must review the unchecked source/artifact checklist item and decide whether to accept them.
 
-**Disposition: Ready for Release Approval.** This is a recommendation only; release approval and publication remain pending. No automated suites or physical checks were repeated during this documentation reconciliation.
+At this prepublication reconciliation, the disposition was **Ready for Release Approval**; approval and publication were still pending. No automated suites or physical checks were repeated during that documentation reconciliation.
 
 ## v1.2.0 final publication review — November 21, 2026
 
 The accepted files under `dist/v1.2.0-rc1/` were rehashed and matched `SHA256SUMS-rc1.txt`. After owner approval of the corrected Portable and Fallback ZIPs, unchanged production APK, and new SHA-256 manifest for final artifact preparation, the final-named files were copied to `dist/v1.2.0/`. The accepted rc1 directory remains unchanged. Each final ZIP has the same member list and order as its accepted counterpart, passes CRC validation, and differs only in root `README.md` and `mobile/README.md`. The final APK is byte-identical to the accepted APK. The README discrepancy and correction are detailed in the candidate report.
 
-Proposed asset verification:
+Approved final asset identity at pre-publication review:
 
 | Asset | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -667,4 +667,21 @@ Proposed asset verification:
 
 Fresh extraction and process-start attempts were made for both corrected Windows ZIPs. The executables remained running, but the available probe did not capture a visible window title; GUI launch confirmation remains **SKIPPED**, not passed, and the owner asked that this limitation remain documented. A further PowerShell window-enumeration command was rejected by execution policy before it ran. Previously recorded candidate launch and physical acceptance results remain evidence for the unchanged executable payloads, but do not substitute for visible confirmation of the corrected ZIPs. Both executables were byte-compared with accepted ZIP members and report FileVersion/ProductVersion `1.2.0`; the Fallback archive contains 1,038 files under `_internal/`. The APK reports package `com.bookledger.mobile`, version `1.2.0`, code `3`; `apksigner` verifies it and reports certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`. No desktop or Flutter test suite was rerun because no application source changed. The final checksum manifest was independently recalculated from `dist/v1.2.0/` and matches the listed values.
 
-The candidate acceptance findings and physical-testing limitations remain unchanged. Artifact preparation did not perform any commit, push, tag creation, issue update, asset upload, or GitHub Release. Current `main` is at `7b64159e20d23abb90326a2911ed1b5f44802ea9`, one local commit ahead of `origin/main`; no new Git commit was made during this preparation. The staged final assets are ready for a separate publication decision, with visible-window confirmation still skipped.
+At the end of final-artifact preparation, before publication, the candidate acceptance findings and physical-testing limitations remained unchanged. That preparation did not perform any commit, push, tag creation, issue update, asset upload, or GitHub Release. At that time, local `main` was at `7b64159e20d23abb90326a2911ed1b5f44802ea9`, one local commit ahead of `origin/main`; no new Git commit was made during preparation. The assets were then staged for a separate publication decision, with visible-window confirmation still skipped.
+
+## v1.2.0 stable publication and independent verification — 2026-11-21
+
+The stable [BookLedger v1.2.0 GitHub Release](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0) was published on November 21, 2026. The annotated tag object `8e4ae20ff0ddb83195bf239e60a66fce38ba004c` resolves to approved commit `3561873822e41c30aaa5445aa37fdaac7a4382c6`. During verification, local `main` and `origin/main` both matched that commit. The release is neither a draft nor a prerelease and GitHub reports it as the latest stable release.
+
+All four public assets were independently downloaded to the ignored `build/v1.2.0-public-verification/` directory. Their sizes and SHA-256 values match the approved values and GitHub's reported asset digests; the public manifest entries match the three binary assets.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `BookLedger-v1.2.0-Windows-x64-Portable.zip` | 60,220,092 | `154584d4a2485a74b96a9250d5481989cd49f4ca37e02a3e1e72abbfae148b5a` |
+| `BookLedger-v1.2.0-Windows-x64-Fallback.zip` | 61,053,994 | `46839ebb5ebe26a4c330f27c69521b752e7d0d224f6b69f3308ed7af97a24da0` |
+| `BookLedger-v1.2.0-Android.apk` | 70,915,414 | `73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752` |
+| `SHA256SUMS.txt` | 317 | `021c02de6d10d065e83d6a4920f1e971fdf5a38601121b7c9b6808e214739ed2` |
+
+Both downloaded ZIPs pass CRC checks. The Portable archive has 75 entries under `BookLedger/`; the Fallback archive has 1,116 entries under `Fallback/`. The APK reports `com.bookledger.mobile`, version `1.2.0`, version code `3`; `apksigner verify` passed and reported production certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`.
+
+All 16 v1.2.0-tagged file, release-page, and asset URLs referenced by the root and Android READMEs returned HTTP 200. The release candidate report and checklist links also returned HTTP 200. The visible-window check of the corrected Windows ZIPs remains **SKIPPED**; previously recorded physical acceptance **PARTIAL**, **SKIPPED**, and unverified results remain unchanged. No application test suites were rerun for this documentation and publication verification work.

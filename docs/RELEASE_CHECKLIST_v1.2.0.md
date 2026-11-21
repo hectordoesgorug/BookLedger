@@ -1,6 +1,8 @@
 # BookLedger v1.2.0 release checklist
 
-**Status:** Ready for Publication Authorization; publication remains separately unauthorized.
+**Status:** Published as the stable v1.2.0 release on 2026-11-21; independent post-publication verification is recorded below.
+
+The candidate-preparation sections retain their original time-specific evidence and unchecked acceptance items. The publication record below supersedes only their prepublication status; it does not change historical **PARTIAL**, **SKIPPED**, or unverified results.
 
 ## Source and version identity
 
@@ -61,11 +63,29 @@
 - [x] No application defect was identified in the recorded automated checks or directly exercised Windows and Android behaviors.
 - [ ] Full physical scenario coverage is not claimed. Windows sales transactions, report accuracy, offline behavior, minimum-window reachability, selected Fallback features, changed-settings migration and post-upgrade backup restoration remain **SKIPPED** or unverified.
 - [ ] Android pairing, settings and capture baselines were not recorded before update; the post-update app showed `Not paired`. Preservation of those previous states cannot be determined. Mobile update UI, network failure, repeated checks, theme presentation, transfer and in-app installer remain unverified.
-- [x] Existing physical-test exceptions remain documented and are assessed as nonblocking for seeking publication authorization. The stale bundled README issue is corrected in the owner-approved final ZIPs; the original rc1 ZIPs remain unchanged and are not staged as final assets.
-- [ ] Release approval and publication have not been granted or performed.
+- [x] Existing physical-test exceptions remain documented and were assessed as nonblocking for publication; prior **PARTIAL**, **SKIPPED**, and unverified results remain unchanged. The stale bundled README issue is corrected in the owner-approved final ZIPs; the original rc1 ZIPs remain unchanged and are not staged as final assets.
+- [x] Publication and post-publication verification are recorded below.
 
 ## Distribution safeguards
 
-- [x] README download links use final v1.2.0 filenames. Local target paths match the staged assets and GitHub versioned-document links map to repository files; external release/tag links are expected to resolve after publication. The v1.1.0 release assets remain available historically.
+- [x] README download links use final v1.2.0 filenames. The versioned README links and public release URLs were checked after publication; all returned HTTP 200. The v1.1.0 release assets remain available historically.
 - [x] Historical v1.0.0 and v1.1.0 release records and artifacts are preserved.
-- [x] No commit, push, tag, GitHub Release, or issue update was performed for this final-artifact preparation. The current local branch is one commit ahead of `origin/main` from the existing documentation review commit.
+- [x] The publication added only the authorized annotated tag and GitHub Release; no source commit or issue was changed. The v1.2.0 release tag targets the approved source commit.
+
+## Stable release publication and independent verification — 2026-11-21
+
+- [x] Stable GitHub Release [BookLedger v1.2.0](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0) was published on 2026-11-21, is not a draft or prerelease, and is the latest stable release.
+- [x] Annotated tag `v1.2.0` (tag object `8e4ae20ff0ddb83195bf239e60a66fce38ba004c`) resolves to approved commit `3561873822e41c30aaa5445aa37fdaac7a4382c6`. At publication verification, `main` and `origin/main` both matched that commit.
+- [x] All four public assets were downloaded into `build/v1.2.0-public-verification/`; downloaded sizes and SHA-256 values match both the approved values and GitHub's asset digests.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `BookLedger-v1.2.0-Windows-x64-Portable.zip` | 60,220,092 | `154584d4a2485a74b96a9250d5481989cd49f4ca37e02a3e1e72abbfae148b5a` |
+| `BookLedger-v1.2.0-Windows-x64-Fallback.zip` | 61,053,994 | `46839ebb5ebe26a4c330f27c69521b752e7d0d224f6b69f3308ed7af97a24da0` |
+| `BookLedger-v1.2.0-Android.apk` | 70,915,414 | `73cc232c1bed24cdf40f96b6d8e3b3c62b9ec774d02b9082d1e328db117a0752` |
+| `SHA256SUMS.txt` | 317 | `021c02de6d10d065e83d6a4920f1e971fdf5a38601121b7c9b6808e214739ed2` |
+
+- [x] The public checksum manifest contains matching entries for the Portable ZIP, Fallback ZIP, and APK. Both ZIPs pass CRC validation and have the expected single-root layouts (`BookLedger/`, 75 entries; `Fallback/`, 1,116 entries).
+- [x] The APK reports package `com.bookledger.mobile`, version `1.2.0`, version code `3`; `apksigner` verifies it and reports the production certificate SHA-256 `539e4a74e133604ec420c1d3a19584200e2a926f19f0ba7b4652de0bb7a85f3d`.
+- [x] All 16 v1.2.0-tagged file, release-page, and asset URLs referenced by the root and Android READMEs returned HTTP 200. The release candidate report and checklist links also returned HTTP 200.
+- [ ] Visible-window verification of the corrected Windows ZIPs remains **SKIPPED** as documented above; no publication step changes that result.

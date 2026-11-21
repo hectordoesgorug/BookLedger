@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.2.0 — Release preparation
+## 1.2.0 — 2026-11-21
 
-**Status:** Unpublished. Candidate acceptance is recorded; publication is pending.
+Published as the latest stable release on 2026-11-21. The annotated tag `v1.2.0` targets `3561873822e41c30aaa5445aa37fdaac7a4382c6`; see the [GitHub Release](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0). Independently verified asset identities are recorded in the [release checklist](docs/RELEASE_CHECKLIST_v1.2.0.md).
 
 ### Desktop
 

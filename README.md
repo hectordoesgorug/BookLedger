@@ -6,7 +6,7 @@ BookLedger is an offline-first book inventory manager for Windows 11 x64, with a
 
 ## Download
 
-The links below use the final v1.2.0 release filenames. They resolve after the GitHub Release is published; the [Releases page](https://github.com/hectordoesgorug/BookLedger/releases) lists currently available assets.
+BookLedger v1.2.0 is the latest published stable release. The [Releases page](https://github.com/hectordoesgorug/BookLedger/releases) lists its assets and earlier releases.
 
 | Package | Download |
 | --- | --- |

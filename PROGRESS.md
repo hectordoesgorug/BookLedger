@@ -1,8 +1,8 @@
 # Development and release status
 
-## v1.2.0 release candidate preparation — November 21, 2026
+## v1.2.0 stable release — November 21, 2026
 
-The v1.2.0 candidate is ready for a separate publication decision; no release has been published. Current local `main` is `7b64159e20d23abb90326a2911ed1b5f44802ea9`, one commit ahead of `origin/main`. The accepted candidate artifacts remain unchanged at `dist/v1.2.0-rc1/`. The owner approved corrected Windows ZIPs, the unchanged Android APK and the new manifest for final artifact preparation; the finalized set is staged at `dist/v1.2.0/`. Visible-window verification for the repackaged ZIPs remains skipped and is recorded in the candidate report and test report. See the [candidate checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md).
+BookLedger v1.2.0 was published as the latest stable release on November 21, 2026. Annotated tag `v1.2.0` targets `3561873822e41c30aaa5445aa37fdaac7a4382c6`; `main` and `origin/main` were at that commit during publication verification. The [GitHub Release](https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0) contains the four approved assets, independently downloaded and verified against their SHA-256 values. The accepted rc1 artifacts remain unchanged at `dist/v1.2.0-rc1/`. Visible-window verification of the corrected Windows ZIPs remains **SKIPPED**; physical acceptance limits remain in the [release checklist](docs/RELEASE_CHECKLIST_v1.2.0.md), [release notes](docs/RELEASE_NOTES_v1.2.0.md), and [candidate report](docs/RELEASE_CANDIDATE_v1.2.0-rc1.md). Exact asset identities and verification are recorded in [TEST_REPORT.md](TEST_REPORT.md).
 
 ## Update installation — November 21, 2026
 
@@ -10,7 +10,7 @@ Windows keeps verified downloads manual and now shows package-specific instructi
 
 Verification: Android full Flutter suite **169 passed**; focused update suites **43 passed**; debug APK build passed; Dart formatting checked 40 files with no changes. Flutter analysis exited 1 for **21 informational Material import deprecations**, with no warnings or errors. Focused desktop update tests: **37 passed, 1 Tcl/Tk skip**. Python compilation and `git diff --check` passed. The full desktop suite had **676 passed, 17 skipped, 1 failed** in the known minimum-size intake geometry assertion. No Android device tooling (`adb`) was available. Exact evidence and limitations are in [TEST_REPORT.md](TEST_REPORT.md).
 
-At the time of this historical update-system record, the update installation changes were local. They were subsequently committed and pushed before the v1.2.0 readiness audit. The current candidate-preparation changes are local; no issue, release, or remote ref has been changed for this work.
+At the time of this historical update-system record, the update installation changes were local. They were subsequently committed and pushed before the v1.2.0 readiness audit. Candidate preparation and publication are recorded separately above; this historical entry describes the state at the time and is not a current Git-status report.
 
 ## Update discovery and native UI — November 20–21, 2026 (historical record)
 
