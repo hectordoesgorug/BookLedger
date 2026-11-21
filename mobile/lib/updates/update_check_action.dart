@@ -2,12 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../settings/mobile_app_settings.dart';
+import 'update_installer.dart';
 import 'update_service.dart';
 
 class UpdateCheckAction extends StatefulWidget {
-  const UpdateCheckAction({required this.settings, this.service, super.key});
+  const UpdateCheckAction({
+    required this.settings,
+    this.service,
+    this.installer,
+    super.key,
+  });
   final MobileAppSettings settings;
   final UpdateService? service;
+  final UpdateInstaller? installer;
 
   @override
   State<UpdateCheckAction> createState() => _UpdateCheckActionState();
@@ -33,6 +40,7 @@ class _UpdateCheckActionState extends State<UpdateCheckAction> {
         result: result,
         settings: widget.settings,
         service: service,
+        installer: widget.installer ?? const PlatformUpdateInstaller(),
       ),
     );
   }
@@ -57,10 +65,12 @@ class _UpdateResultDialog extends StatefulWidget {
     required this.result,
     required this.settings,
     required this.service,
+    required this.installer,
   });
   final UpdateResult result;
   final MobileAppSettings settings;
   final UpdateService service;
+  final UpdateInstaller installer;
 
   @override
   State<_UpdateResultDialog> createState() => _UpdateResultDialogState();
@@ -70,7 +80,10 @@ class _UpdateResultDialogState extends State<_UpdateResultDialog>
     with WidgetsBindingObserver {
   UpdateDownloadCancellation? _cancellation;
   VerifiedUpdateDownload? _verified;
+  UpdateApkEligibility? _eligibility;
   String? _failure;
+  String? _installMessage;
+  bool _installing = false;
   String _state = 'Idle';
   int _downloaded = 0;
   int? _total;
@@ -114,7 +127,33 @@ class _UpdateResultDialogState extends State<_UpdateResultDialog>
           }
         },
       );
-      if (mounted) setState(() => _verified = verified);
+      if (!mounted) return;
+      setState(() {
+        _verified = verified;
+        _state = 'Checking APK';
+      });
+      final installedCode = widget.settings.versionCode;
+      if (installedCode == null) {
+        throw const FormatException(
+          'The installed Android version code is unavailable.',
+        );
+      }
+      final eligibility = await widget.installer.inspect(
+        verified,
+        installedCode,
+      );
+      if (eligibility.packageName != 'com.bookledger.mobile' ||
+          eligibility.versionCode <= installedCode) {
+        throw const FormatException(
+          'This APK is not a newer BookLedger Mobile update.',
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _eligibility = eligibility;
+          _state = 'Verified Download';
+        });
+      }
     } on UpdateDownloadCanceled {
       if (mounted) setState(() => _state = 'Canceled');
     } on Object catch (error) {
@@ -126,6 +165,63 @@ class _UpdateResultDialogState extends State<_UpdateResultDialog>
       }
     } finally {
       if (mounted) setState(() => _cancellation = null);
+    }
+  }
+
+  Future<void> _install() async {
+    final verified = _verified;
+    final eligibility = _eligibility;
+    if (verified == null || eligibility == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Install BookLedger update?'),
+        content: const Text(
+          'Any unsent captures may be lost if the update closes BookLedger. '
+          'Send pending entries to the desktop before proceeding.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('confirm-install-update'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _installing = true;
+      _installMessage = 'Opening Android installer…';
+    });
+    try {
+      final status = await widget.installer.install(
+        verified,
+        eligibility.versionCode,
+      );
+      if (!mounted) return;
+      setState(() {
+        _installing = false;
+        _installMessage = switch (status) {
+          'installed' =>
+            'Android confirmed BookLedger ${widget.result.available} is installed.',
+          'permissionRequired' => 'Allow BookLedger to install updates in Android settings, then tap Install Update again.',
+          'canceled' => 'Installation was canceled. The existing app and its data were not cleared.',
+          'unavailable' => 'Android could not open the package installer. The existing app remains available.',
+          _ => 'Android did not confirm the update. Reopen BookLedger and check its installed version.',
+        };
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _installing = false;
+          _installMessage = 'Could not start installation: $error';
+        });
+      }
     }
   }
 
@@ -162,7 +258,8 @@ class _UpdateResultDialogState extends State<_UpdateResultDialog>
             Text(
               _verified == null
                   ? widget.result.message
-                  : 'Verified ${_verified!.file.uri.pathSegments.last}. The checksum matches the official release manifest. Installation is not available yet.',
+                  : 'Verified ${_verified!.file.uri.pathSegments.last}. The checksum matches the official release manifest.'
+                        '${_eligibility == null ? (_failure == null ? ' Checking package details…' : ' Android rejected the APK for installation.') : ' Package and version code are eligible for installation.'}',
             ),
             if (_cancellation != null) ...[
               const SizedBox(height: 12),
@@ -184,7 +281,11 @@ class _UpdateResultDialogState extends State<_UpdateResultDialog>
             ],
             if (_failure != null) ...[
               const SizedBox(height: 8),
-              Text('The download could not be verified: $_failure'),
+              Text('The APK could not be checked for installation: $_failure'),
+            ],
+            if (_installMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(_installMessage!),
             ],
             if (widget.result.notes.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -235,6 +336,12 @@ class _UpdateResultDialogState extends State<_UpdateResultDialog>
             setState(() => _state = 'Canceling');
           },
           child: const Text('Cancel Download'),
+        ),
+      if (_eligibility != null && _verified != null)
+        FilledButton(
+          key: const ValueKey('install-update'),
+          onPressed: _installing ? null : _install,
+          child: Text(_installing ? 'Opening Installer…' : 'Install Update'),
         ),
       TextButton(
         onPressed: () => Navigator.of(context).pop(),

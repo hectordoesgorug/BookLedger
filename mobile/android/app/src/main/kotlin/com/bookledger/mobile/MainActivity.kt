@@ -2,14 +2,22 @@ package com.bookledger.mobile
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.WindowManager
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
 import java.net.Inet4Address
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -20,6 +28,8 @@ class MainActivity : FlutterActivity() {
     private var nsdManager: NsdManager? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     private var discoveryResult: MethodChannel.Result? = null
+    private var installResult: MethodChannel.Result? = null
+    private var expectedInstallVersionCode: Long? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val discoveryTimeout = Runnable { finishDiscovery(null) }
 
@@ -75,6 +85,51 @@ class MainActivity : FlutterActivity() {
                 } catch (_: SecurityException) {
                     result.success(false)
                 }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATE_INSTALL_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                val values = call.arguments as? Map<*, *>
+                val path = values?.get("path") as? String
+                val sha256 = values?.get("sha256") as? String
+                if (BuildConfig.DEBUG || path == null || sha256 == null) {
+                    result.error("INVALID_UPDATE", "This update cannot be installed.", null)
+                    return@setMethodCallHandler
+                }
+                Thread({
+                    try {
+                        val (apk, info) = verifiedUpdateApk(path, sha256)
+                        when (call.method) {
+                            "inspectVerifiedApk" -> {
+                                val installedCode = (values["installedVersionCode"] as? Number)?.toLong()
+                                if (installedCode == null || installedCode != BuildConfig.VERSION_CODE.toLong()) {
+                                    throw IllegalArgumentException("Installed version information changed.")
+                                }
+                                if (info.packageName != packageName || apkVersionCode(info) <= installedCode) {
+                                    throw IllegalArgumentException("APK package or version is not eligible.")
+                                }
+                                mainHandler.post {
+                                    result.success(mapOf("packageName" to info.packageName, "versionCode" to apkVersionCode(info)))
+                                }
+                            }
+                            "installVerifiedApk" -> {
+                                val versionCode = (values["versionCode"] as? Number)?.toLong()
+                                if (
+                                    info.packageName != packageName || versionCode == null ||
+                                    apkVersionCode(info) != versionCode || versionCode <= BuildConfig.VERSION_CODE
+                                ) {
+                                    throw IllegalArgumentException("APK package or version is not eligible.")
+                                }
+                                mainHandler.post { beginUpdateInstall(apk, versionCode, result) }
+                            }
+                            else -> mainHandler.post { result.notImplemented() }
+                        }
+                    } catch (error: Exception) {
+                        mainHandler.post {
+                            result.error("INVALID_UPDATE", error.message ?: "The APK could not be verified.", null)
+                        }
+                    }
+                }, "update-apk-verification").start()
             }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_SETTINGS_CHANNEL)
@@ -224,9 +279,98 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 
+    @Deprecated("Deprecated in Android, retained for the package-installer result contract")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != UPDATE_INSTALL_REQUEST) return
+        val expected = expectedInstallVersionCode
+        expectedInstallVersionCode = null
+        val result = installResult
+        installResult = null
+        val installed = runCatching {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
+        }.getOrNull()
+        when {
+            expected != null && installed != null && installed >= expected -> result?.success("installed")
+            resultCode == RESULT_CANCELED -> result?.success("canceled")
+            else -> result?.success("notConfirmed")
+        }
+    }
+
+    private fun verifiedUpdateApk(path: String, expectedSha256: String): Pair<File, PackageInfo> {
+        require(Regex("[0-9a-f]{64}").matches(expectedSha256)) { "APK checksum is invalid." }
+        val updateRoot = File(filesDir, "updates").canonicalFile
+        val apk = File(path).canonicalFile
+        require(apk.isFile && apk.name.matches(Regex("BookLedger-v?[0-9]+\\.[0-9]+\\.[0-9]+-Android\\.apk"))) {
+            "The verified APK is missing or has an unexpected name."
+        }
+        require(apk.toPath().startsWith(updateRoot.toPath()) && apk.parentFile?.parentFile == updateRoot) {
+            "Only an APK in BookLedger's private update storage can be installed."
+        }
+        require(apk.length() in 1..(256L * 1024 * 1024)) { "APK size is invalid." }
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(apk).use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        require(digest.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') } == expectedSha256) {
+            "The APK changed after download verification. Download it again."
+        }
+        val info = packageManager.getPackageArchiveInfo(apk.path, 0)
+            ?: throw IllegalArgumentException("Android could not read this APK.")
+        return apk to info
+    }
+
+    private fun apkVersionCode(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
+
+    private fun beginUpdateInstall(apk: File, versionCode: Long, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                result.success("permissionRequired")
+            } catch (_: ActivityNotFoundException) {
+                result.success("unavailable")
+            } catch (_: SecurityException) {
+                result.success("unavailable")
+            }
+            return
+        }
+        try {
+            val contentUri = FileProvider.getUriForFile(this, "$packageName.update-files", apk)
+            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = contentUri
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                putExtra(Intent.EXTRA_RETURN_RESULT, true)
+            }
+            expectedInstallVersionCode = versionCode
+            installResult = result
+            startActivityForResult(intent, UPDATE_INSTALL_REQUEST)
+        } catch (_: ActivityNotFoundException) {
+            expectedInstallVersionCode = null
+            installResult = null
+            result.success("unavailable")
+        } catch (_: IllegalArgumentException) {
+            expectedInstallVersionCode = null
+            installResult = null
+            result.success("unavailable")
+        } catch (_: SecurityException) {
+            expectedInstallVersionCode = null
+            installResult = null
+            result.success("unavailable")
+        }
+    }
+
     private companion object {
         const val CHANNEL_NAME = "com.bookledger.mobile/scan_feedback"
         const val EXTERNAL_URL_CHANNEL = "com.bookledger.mobile/external_url"
+        const val UPDATE_INSTALL_CHANNEL = "com.bookledger.mobile/update_installer"
+        const val UPDATE_INSTALL_REQUEST = 7014
         const val GITHUB_URL = "https://github.com/hectordoesgorug/BookLedger"
         const val APP_SETTINGS_CHANNEL = "com.bookledger.mobile/app_settings"
         const val APP_SETTINGS_PREFERENCES = "bookledger_mobile_preferences"

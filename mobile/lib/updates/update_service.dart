@@ -242,9 +242,8 @@ UpdateResult releaseResult(
   }
   return result(
     'Update Available',
-    'Download and verify the official APK for later use. Installation is not available yet. '
-        'A future installation workflow must verify package, signing certificate and higher version code. Do not uninstall or clear data. '
-        'Pending captures are session-only and can be lost if installation closes the app; transfer them before any later upgrade.',
+    'Download and verify the official APK. Android will ask you to approve installation. '
+        'Send pending captures before proceeding because they are session-only.',
     asset: apk.$1,
     checksum: checksum.$1,
     assetName: 'BookLedger-$tag-Android.apk',

@@ -8,7 +8,7 @@ import pytest
 
 from bookledger.services import updates
 from bookledger.services.update_download import DownloadCancelled
-from bookledger.ui.updates import UpdatePage
+from bookledger.ui.updates import UpdatePage, manual_update_instructions
 
 
 def release(tag="v1.2.0"):
@@ -87,6 +87,18 @@ def test_development_build_can_read_notes_but_cannot_update(monkeypatch):
     same = updates.release_result(release("v1.1.0"), "1.1.0", None)
     assert same.state == "Unsupported Update" and same.asset_url is None
     assert "No newer stable version is available." in same.message
+
+
+def test_manual_upgrade_instructions_preserve_user_files_and_keep_fallback_runtime_together():
+    portable = manual_update_instructions("Portable")
+    fallback = manual_update_instructions("Fallback")
+    for instructions in (portable, fallback):
+        assert "Extract this ZIP into a new, empty folder." in instructions
+        assert "Do not extract the whole ZIP over a populated app folder." in instructions
+        assert "data/" in instructions and "backups/" in instructions
+        assert "config.json" in instructions and "photos" in instructions
+    assert "BookLedger.exe from BookLedger/" in portable
+    assert "BookLedger.exe and the complete _internal folder together from Fallback/" in fallback
 
 
 def test_frozen_package_detection_distinguishes_layouts(monkeypatch, tmp_path):
@@ -180,8 +192,9 @@ def test_update_page_displays_result_retries_and_opens_release(root, monkeypatch
     page.destroy()
 
 
-def test_update_page_reports_verified_download_and_storage_location(root, tmp_path):
-    name = "BookLedger-v1.2.0-Windows-x64-Portable.zip"
+@pytest.mark.parametrize("package", ["Portable", "Fallback"])
+def test_update_page_reports_verified_download_and_storage_location(root, tmp_path, package):
+    name = f"BookLedger-v1.2.0-Windows-x64-{package}.zip"
     result = updates.UpdateResult(
         "Update Available", "1.1.0", "1.2.0", message="New release",
         release_url="https://github.com/hectordoesgorug/BookLedger/releases/tag/v1.2.0",
@@ -193,13 +206,13 @@ def test_update_page_reports_verified_download_and_storage_location(root, tmp_pa
     def downloader(_result, _cancel, *, staging, progress):
         progress("Downloading", 100, 100)
         progress("Verifying", 100, 100)
-        folder = tmp_path / "v1.2.0-Portable-operation"
+        folder = tmp_path / f"v1.2.0-{package}-operation"
         folder.mkdir()
         path = folder / name
         path.write_bytes(b"verified fixture")
         return path
 
-    page = UpdatePage(root, checker=lambda *_args: result, package="Portable", downloader=downloader)
+    page = UpdatePage(root, checker=lambda *_args: result, package=package, downloader=downloader)
     page.pack(fill="both", expand=True)
     _wait_for_page_result(root, page)
     assert str(page.download.cget("state")) == "normal"
@@ -212,7 +225,15 @@ def test_update_page_reports_verified_download_and_storage_location(root, tmp_pa
     assert page.state_text.get() == "Verified Download"
     assert name in page.download_status.get()
     assert str(tmp_path) in page.download_status.get()
-    assert "Installation is not available yet." in page.download_status.get()
+    instructions = page.download_status.get()
+    assert "Manual Windows update" in instructions
+    assert "Extract this ZIP into a new, empty folder." in instructions
+    assert "Do not extract the whole ZIP over a populated app folder." in instructions
+    assert "data/" in instructions and "backups/" in instructions
+    if package == "Fallback":
+        assert "BookLedger.exe and the complete _internal folder together" in instructions
+    else:
+        assert "Copy BookLedger.exe from BookLedger/" in instructions
     assert str(page.open_download_folder.cget("state")) == "normal"
     page.destroy()
 

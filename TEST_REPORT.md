@@ -528,3 +528,23 @@ The public latest stable release was v1.1.0, equal to the current installed/sour
 - `flutter build apk --debug` — passed; the debug APK was not installed. The build reports future Gradle/AGP/Kotlin minimum-version warnings from the configured toolchain; see the Android development notes above.
 
 Download tests use synthetic releases and transport fixtures. They cover stream integrity, exact release identity and asset name, case-insensitive manifest duplicates, HTTPS redirect policy, cancellation, bounded sizes, low storage, partial-file cleanup, and preservation of unrelated library files. They do not prove a live release transfer or installer behavior. The desktop source session reports the current v1.1.0 release as up to date, so its real download control is ineligible.
+
+## Simplified update installation workflow (November 21, 2026)
+
+The Windows Update page now displays manual upgrade steps after ZIP verification. Portable instructions replace only `BookLedger.exe`; Fallback instructions replace `BookLedger.exe` and its complete `_internal/` directory together. Both require extracting to a new folder, backing up first, preserving `data/`, `backups/`, configuration and custom files, and avoiding whole-ZIP extraction over a populated app folder. The updater still performs no Windows replacement or rollback.
+
+Android now offers **Install Update** after download verification and native APK inspection confirm the private staged file's SHA-256, package `com.bookledger.mobile`, and a version code higher than the installed build. An explicit confirmation warns that unsent captures may be lost. Native handoff uses Android's package installer and a read-only `FileProvider` URI; the manifest declares `REQUEST_INSTALL_PACKAGES`, and missing per-source permission opens Android settings. The installer retains normal user approval. The app reports success only if the result returns and PackageManager confirms the requested version. Cancellation, permission denial, unavailable installer, and invalid APK paths leave app data untouched. No pending captures are automatically deleted.
+
+Checks run:
+
+- `.venv\Scripts\python.exe -m pytest tests/test_updates.py -q -rs` — **37 passed, 1 skipped**. The skipped Tk test could not initialize the installed Tcl/Tk runtime (`tcl_findLibrary` unavailable).
+- `.venv\Scripts\python.exe -m pytest -q -rs` — **676 passed, 17 skipped, 1 failed**. The failure was `tests/test_intake_ui.py::test_form_minimum_size_keeps_scrollable_content_reachable`: after the requested `960×700` resize, the window remained `1120×826`. This is the previously observed display/window-manager geometry assertion, not an update test. Seventeen provider-diagnostic Tk tests were skipped because `ttk/sizegrip.tcl` is missing.
+- `.venv\Scripts\python.exe -m compileall -q src tests` — passed.
+- `flutter test test/update_service_test.dart test/update_check_action_test.dart --reporter expanded` — **43 passed**. Installer UI coverage includes wrong package, same version code, rejected APK inspection, explicit capture warning, cancellation, permission guidance, unavailable installer, and widget disposal during handoff.
+- `flutter test --reporter expanded` — **169 passed, 0 failed, 0 skipped**.
+- `flutter analyze` — **exit 1** with **21 informational `package:flutter/material.dart` deprecations**, and no warnings or errors. These are SDK import notices; analysis was not clean.
+- `dart format --output=none --set-exit-if-changed lib test` — **40 files checked, 0 changed**.
+- `flutter build apk --debug` — passed. Flutter warned that configured Gradle 9.3.1, AGP 9.1.1, and Kotlin 2.4.10 will soon fall below its supported minimum versions; no dependency changes were made.
+- `git diff --check` — passed with configured LF-to-CRLF notices.
+
+No Android device test was run: `adb` is not installed, and the current stable v1.1.0 release is not newer than the installed version. Tests mock the installer interface; the native package installer, production signature continuity, device permission screen, update result callback, pairing/settings persistence after a real upgrade, and pending-capture behavior during process replacement remain unverified. The debug APK was built but not installed. The new `REQUEST_INSTALL_PACKAGES` permission was not exercised on a device. Existing data and release assets were not changed; Issue #22, commits, and remote refs were not touched.

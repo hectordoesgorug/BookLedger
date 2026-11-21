@@ -12,6 +12,21 @@ from bookledger.services.update_download import DownloadCancelled, download_upda
 from bookledger.services.updates import UpdateResult, check_for_updates, desktop_package
 
 
+def manual_update_instructions(package: str) -> str:
+    package_files = (
+        "3. Copy BookLedger.exe and the complete _internal folder together from Fallback/ into the existing app folder.\n"
+        if package == "Fallback"
+        else "3. Copy BookLedger.exe from BookLedger/ into the existing app folder.\n"
+    )
+    return (
+        "1. Back up the library, then close BookLedger.\n"
+        "2. Extract this ZIP into a new, empty folder.\n"
+        f"{package_files}"
+        "4. Keep data/, backups/, config.json, photos, posters and custom files in place, then relaunch.\n"
+        "Do not extract the whole ZIP over a populated app folder. BookLedger cannot recover a failed manual replacement."
+    )
+
+
 class UpdatePage(ttk.Frame):
     def __init__(self, parent, *, checker=check_for_updates, package=None, downloader=download_update, staging=None):
         super().__init__(parent, padding=14)
@@ -173,7 +188,9 @@ class UpdatePage(ttk.Frame):
         if kind == "verified":
             self._verified_path = Path(data[0])
             self.state_text.set("Verified Download")
-            self.download_status.set(f"Verified {self._verified_path.name}\nSaved to {self._verified_path}\nInstallation is not available yet.")
+            package = "Fallback" if self._current_result and self._current_result.asset_name and "-Fallback.zip" in self._current_result.asset_name else "Portable"
+            instructions = manual_update_instructions(package)
+            self.download_status.set(f"Verified {self._verified_path.name}\nSaved to {self._verified_path}\n\nManual Windows update:\n{instructions}")
             self.open_download_folder.configure(state="normal")
         elif kind == "canceled":
             self.state_text.set("Canceled")

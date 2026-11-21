@@ -1,6 +1,14 @@
 # Development and release status
 
-## Update discovery — November 20, 2026 (installation pending)
+## Update installation — November 21, 2026
+
+Windows keeps verified downloads manual and now shows package-specific instructions that extract to a separate folder, replace only the Portable executable or the Fallback executable/runtime pair, and preserve library files. Android exposes **Install Update** only after the verified private APK is rechecked for its SHA-256, package ID, and higher version code. It uses Android's package installer with a temporary read-only FileProvider URI grant, per-source install permission guidance, explicit capture-loss confirmation, and post-return version confirmation. No automatic Windows installer, custom manifest-signing framework, silent Android install, or data cleanup was added. The published v1.1.0 release does not contain this updater; a newer production-signed native installation remains unverified.
+
+Verification: Android full Flutter suite **169 passed**; focused update suites **43 passed**; debug APK build passed; Dart formatting checked 40 files with no changes. Flutter analysis exited 1 for **21 informational Material import deprecations**, with no warnings or errors. Focused desktop update tests: **37 passed, 1 Tcl/Tk skip**. Python compilation and `git diff --check` passed. The full desktop suite had **676 passed, 17 skipped, 1 failed** in the known minimum-size intake geometry assertion. No Android device tooling (`adb`) was available. Exact evidence and limitations are in [TEST_REPORT.md](TEST_REPORT.md).
+
+The work is local on `main` and uncommitted. Issue #22, releases, and remote refs were not changed.
+
+## Update discovery and native UI — November 20–21, 2026 (historical record)
 
 Native source-Windows and isolated debug-Android acceptance now covers light/dark links and dialogs, current v1.1.0 release information, network failures, retry/Back behavior and normal navigation. Native inspection found the Dashboard could hide the status row; the row now reserves its space before the workspace. Desktop **Visit GitHub** was added directly below About, with shared hyperlink styling and keyboard support. Final regressions: **652 desktop passed / 19 Tcl/Tk skipped / 0 failed**, **156 Flutter passed**, and a successful normal Android debug build. Analysis still exits 1 for **21 informational SDK deprecations**. The temporary Android acceptance package was removed after testing; the installed production app was preserved. Details and data-preservation limits are recorded in [TEST_REPORT.md](TEST_REPORT.md).
 
@@ -8,7 +16,7 @@ Earlier verification stabilization recorded **650 desktop tests passed / 18 Tcl/
 
 Local source changes implement explicit stable GitHub release checks for desktop and Android for [Issue #22](https://github.com/hectordoesgorug/BookLedger/issues/22). The desktop link sits beside the workspace status; Android's action follows Clear Data. Both show versions, release notes, errors and unsupported builds without automatic checking or data/settings changes. These changes are not in the published v1.1.0 binaries.
 
-The [update system design](docs/UPDATE_SYSTEM.md) specifies Windows staging, ownership, helper/lock handoff, journaled activation, rollback and migration gates, plus Android checksum/package/signer/version validation and normal installation approval. A read-only ZIP prototype exercises checksum/path/layout rules on fixtures. No update-file replacement, APK download/installation workflow or production upgrade is implemented or validated. Issue #22 remains incomplete until installation work and packaged-upgrade acceptance are performed; current checks and limitations are recorded in [TEST_REPORT.md](TEST_REPORT.md).
+The previous design proposal for staged Windows activation and custom signed manifests has been superseded by the simpler manual Windows and Android system-installer workflow in [docs/UPDATE_SYSTEM.md](docs/UPDATE_SYSTEM.md). Historical download verification and UI outcomes remain in [TEST_REPORT.md](TEST_REPORT.md).
 
 ## v1.1.0 finalization — November 18, 2026
 
